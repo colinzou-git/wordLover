@@ -52,12 +52,13 @@ Fix:
 
 ## Feasibility Conclusion For Windows
 
-The Windows browser POC is promising:
+The Windows browser POC is promising as an automation and stress-test fallback for the iPhone-first product path:
 
 - The full current SQLite dictionary can be loaded in the browser.
 - Once loaded, exact local lookups are far below the 1-second requirement.
 - IndexedDB persistence for small user state works.
 - PWA shell registration works.
+- The updated offline dictionary fallback can load the dictionary from IndexedDB when the local server is stopped.
 
 Follow-up iPhone validation:
 
@@ -68,8 +69,8 @@ Follow-up iPhone validation:
 The main remaining feasibility risks are now persistence and production hardening:
 
 - `sql.js` loads the full database into memory; this worked in the POCs, but older phones still need timed validation.
-- Production must persist the dictionary package in IndexedDB or OPFS, not rely on HTTP cache.
-- The production architecture should still evaluate `wa-sqlite` with OPFS VFS for durable browser persistence.
+- Production must persist the dictionary package in IndexedDB or OPFS, not rely on HTTP cache. The POC now validates IndexedDB fallback on Windows and needs the same iPhone retest.
+- The production architecture should still evaluate `wa-sqlite` with OPFS VFS only after the iPhone IndexedDB path is measured, because iPhone is the primary target.
 - Keep the sharded fallback described in `docs/architecture-design.md`, but do not activate it unless persistence, memory, or older-device performance fails.
 
 ## How To Run

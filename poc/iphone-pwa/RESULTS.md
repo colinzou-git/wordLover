@@ -25,6 +25,10 @@ The real-device POC works well. The web app starts fast and loads the dictionary
 
 This validates the largest Phase 0 concern enough to continue with a PWA-first + SQLite WASM-first implementation path.
 
+Additional iPhone offline finding: when Wi-Fi is disconnected, the installed app shell can start, but the original POC cannot load the dictionary or search words. This means app-shell offline caching works, but dictionary offline persistence was missing from the original POC.
+
+Follow-up implementation: the POC has been updated so a successful online dictionary load saves `dictionary.sqlite` into IndexedDB. If network fetch fails later, the POC falls back to the saved IndexedDB dictionary. This fallback passed on Windows automation with the local server stopped and must now be retested on iPhone.
+
 ## Result Summary
 
 | Check | Result |
@@ -33,6 +37,9 @@ This validates the largest Phase 0 concern enough to continue with a PWA-first +
 | iPhone opens PWA over trusted HTTPS | Pass |
 | App shell startup | Pass, user reported fast |
 | Full dictionary load | Pass, user reported fast |
+| App shell starts without Wi-Fi | Pass, user reported shell starts |
+| Offline dictionary load/search in original POC | Fail, dictionary was not persisted locally |
+| Offline dictionary load/search after IndexedDB fallback update | Pending iPhone retest; passed on Windows fallback automation |
 | SQLite WASM memory behavior | Pass for this device and current POC scope |
 | No-fee iPhone personal-use path | Pass for PWA install approach |
 
@@ -49,7 +56,8 @@ The user-reported result is enough for feasibility direction, but a later timed 
 - Exact SQLite open time.
 - Exact lookup times for `abandon`, `take off`, and `in terms of`.
 - Whether search history survives app close/reopen.
-- Whether the installed Home Screen shell opens offline.
+- Whether the updated IndexedDB offline dictionary fallback works after Wi-Fi is disconnected.
+- Whether the installed Home Screen shell and dictionary lookup work offline after app close/reopen.
 
 ## Feasibility Conclusion For iPhone
 
@@ -59,7 +67,7 @@ Do not activate the sharded dictionary fallback now. Keep it as a contingency on
 
 ## Remaining iPhone-Specific Risks
 
-- Durable dictionary persistence still needs validation. This POC fetched and opened the SQLite file, but production must store the dictionary package in IndexedDB or OPFS and survive app restarts.
+- Durable dictionary persistence on iPhone still needs validation. The POC now supports IndexedDB fallback, but it must be verified on the real iPhone after Wi-Fi is disconnected and after app close/reopen.
 - iOS storage eviction cannot be fully prevented. The product still needs sync, export/import, and recovery guidance.
 - Older iPhones may have tighter memory or storage behavior than the iPhone 17 Pro.
-- Offline launch should be tested after Home Screen installation with the local server disconnected.
+- Offline dictionary load and search should be tested after Home Screen installation with Wi-Fi disconnected.

@@ -1,6 +1,8 @@
 # WordLover Windows PWA POC
 
-This POC checks whether a browser-installed Windows PWA can load the current local SQLite dictionary, run local lookups, persist small user state in IndexedDB, register an offline shell service worker, and export user data.
+This POC is the automation and stress-test fallback for the iPhone-first product path. It checks whether a browser-installed Windows PWA can load the current local SQLite dictionary, run local lookups, persist dictionary/user state in IndexedDB, register an offline shell service worker, and export user data.
+
+Windows is not the primary user target. Use it to automate repeatable tests and stress tests that are difficult to run fully automatically on iPhone.
 
 ## Prepare
 
@@ -33,6 +35,16 @@ http://127.0.0.1:4173/poc-suite.html
 ```
 
 Click **Run all automated POCs**. The suite covers dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
+
+## Offline Dictionary Fallback Test
+
+The main POC now saves the dictionary into IndexedDB after a successful online load. If `/dictionary.sqlite` cannot be fetched later, **Load local SQLite dictionary** falls back to the saved copy and shows:
+
+```text
+source indexedDB offline copy
+```
+
+Windows fallback automation verified this by stopping the local server, reloading the app from the service worker cache, loading the dictionary from IndexedDB, and searching `take off` successfully.
 
 ## Pass Criteria
 

@@ -4,6 +4,8 @@ Current result: pass. On 2026-05-24, the real iPhone 17 Pro POC was reported to 
 
 For exact timed results on iPhone, open `/poc-suite.html` from Safari or the Home Screen PWA and tap **Run all automated POCs**. The same suite used on Windows will record dictionary persistence, lookup timing, service worker cache readiness, export/import, and device diagnostics on the phone.
 
+Offline update: the first iPhone offline test showed that the app shell starts without Wi-Fi, but dictionary load/search did not work because the original POC fetched the dictionary from the Windows server each time. The POC now saves the dictionary to IndexedDB after an online load and falls back to that offline copy when network fetch fails.
+
 This POC tests the real iPhone Safari/Home Screen PWA risks:
 
 - HTTPS install path from a Windows PC.
@@ -212,10 +214,44 @@ After the page has loaded at least once:
 Expected:
 
 - App shell opens.
-- Search may require dictionary to already be loaded in memory for this POC.
-- This POC mainly verifies shell offline behavior; production still needs persistent dictionary package work.
+- This only proves the shell is cached.
+- In the original POC, dictionary load/search failed offline. That is a known finding.
 
-## 12. Record Results
+## 12. Test Offline Dictionary Load And Search
+
+Use this test after updating to the latest POC files.
+
+1. Turn Wi-Fi and Cellular back on.
+2. Open the POC from the Home Screen while the Windows HTTPS server is running.
+3. Reload the page once while online so Safari picks up the latest service worker and JavaScript.
+4. Tap **Load local SQLite dictionary**.
+5. Confirm the Dictionary metric shows `source network`.
+6. Search `abandon`.
+7. Confirm a result appears.
+8. Turn off Wi-Fi and Cellular on the iPhone.
+9. Close the Home Screen PWA.
+10. Reopen the Home Screen PWA.
+11. Tap **Load local SQLite dictionary** again.
+12. Confirm the Dictionary metric shows `source indexedDB offline copy`.
+13. Search `take off`.
+14. Confirm a phrase result appears.
+
+Pass criteria:
+
+- The app shell opens without Wi-Fi.
+- Dictionary load completes without Wi-Fi.
+- The metric shows `source indexedDB offline copy`.
+- Searching `take off` returns a phrase result without Wi-Fi.
+
+If dictionary load/search still fails offline:
+
+- Reconnect Wi-Fi.
+- Open the POC.
+- Reload the page twice while online.
+- Tap **Load local SQLite dictionary** again and wait for completion.
+- Disconnect Wi-Fi and repeat the offline test.
+
+## 13. Record Results
 
 Create notes with:
 
@@ -236,6 +272,8 @@ take off lookup time:
 in terms of lookup time:
 History persisted after reload yes/no:
 Offline shell opened yes/no:
+Offline dictionary source:
+Offline search worked yes/no:
 Any crash/reload/OOM:
 ```
 

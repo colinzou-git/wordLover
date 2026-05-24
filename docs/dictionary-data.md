@@ -127,4 +127,6 @@ Returned fields:
 
 ## iPhone Path
 
-For the iPhone app, bundle `dictionary.sqlite` as a read-only resource and query it with SQLite. Keep user vocabulary and quiz progress in a separate user database or synced document so dictionary updates do not risk overwriting user data.
+For the iPhone-first PWA path, install `dictionary.sqlite` into durable browser storage such as IndexedDB or OPFS and query it with SQLite WASM. The app shell alone is not enough for offline use; after first setup, dictionary lookup must work when Wi-Fi and Cellular are off. Keep user vocabulary and quiz progress in a separate encrypted user database or synced document so dictionary updates do not risk overwriting user data.
+
+Windows remains the automation and stress-test fallback for the dictionary pipeline. Android dictionary packaging is deferred until the iPhone and Windows paths are stable.

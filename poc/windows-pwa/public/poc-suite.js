@@ -507,11 +507,11 @@ async function runAllPocs() {
   addProgress("Running mock Google Drive encrypted snapshot sync POC.");
   const mockSync = await runMockGoogleDriveSyncPoc(exportImport);
 
-  addProgress("Recording Android and iPhone device coverage status.");
+  addProgress("Recording iPhone and Windows device coverage status.");
   const deviceCoverage = {
-    androidPoc: diagnostics.isAndroid ? "executed-on-android-browser" : "not-executed-on-android-from-this-browser",
+    windowsPoc: diagnostics.platform?.startsWith("Win") ? "executed-on-windows-browser" : "not-windows-browser",
     iphonePoc: diagnostics.isIphoneOrIpad ? "executed-on-ios-browser" : "not-executed-on-ios-from-this-browser",
-    note: "Run this same page on Android Chrome and iPhone Safari/Home Screen to collect real mobile rows automatically.",
+    note: "Run this same page on iPhone Safari/Home Screen to collect real mobile rows automatically. Android validation is deferred until the end.",
   };
 
   const completedAt = new Date().toISOString();
@@ -524,7 +524,7 @@ async function runAllPocs() {
       offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
-      androidRealDevice: diagnostics.isAndroid ? "captured" : "requires-android-device",
+      androidDeferred: "deferred-until-end",
       timedBenchmark: benchmark.timing.p95Ms < 1000 ? "pass" : "fail",
     },
     diagnostics,

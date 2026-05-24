@@ -2,7 +2,7 @@
 
 ## Goals
 
-WordLover is a local-first vocabulary and dictionary app for iPhone, iPad, Android phones, Android tablets, and Windows PCs. The architecture must satisfy the PRD while keeping the core experience fast, no-fee for personal use, offline-capable, portable, debuggable, and safe for user data.
+WordLover is a local-first vocabulary and dictionary app with iPhone as the primary real-world target and Windows as the primary automation/stress-test target. Android remains a long-term supported platform, but Android-specific validation and packaging work is deliberately deferred until the end. The architecture must satisfy the PRD while keeping the core experience fast, no-fee for personal use, offline-capable, portable, debuggable, and safe for user data.
 
 Core principles:
 
@@ -15,6 +15,7 @@ Core principles:
 - Every meaning preserves its source: ECDICT, WordNet, user edited, or AI assisted.
 - Cloud sync is optional and stores a full encrypted copy of user data.
 - AI-assisted details are optional online enhancements, never a requirement for core study.
+- Platform priority for implementation and POCs is: iPhone first, Windows automation fallback second, Android last.
 
 ## Platform Strategy
 
@@ -32,23 +33,23 @@ Recommended stack:
 - Search acceleration: prebuilt SQLite indexes plus a compact prefix/FTS search table.
 - Sync: Google Drive REST API through OAuth for the first cloud provider.
 - AI details: provider abstraction with Google Gemini as the default no-additional-fee online provider through the user's Google account, plus optional ChatGPT/OpenAI integration if the user configures it.
-- Packaging: web app install to Home Screen/Desktop; optional Android/Windows/native wrappers later.
+- Packaging: iPhone Safari Home Screen PWA first; Windows browser/PWA for automation and stress testing; Android PWA/native wrapper work deferred until the end.
 
-The PWA must be able to run from the browser and as an installed Home Screen/Desktop app. The same app shell should serve iPhone, iPad, Android, tablet, and Windows users.
+The PWA must be able to run from the browser and as an installed Home Screen/Desktop app. The same app shell should serve iPhone/iPad and Windows first. Android compatibility should not drive early architecture choices unless an iPhone or Windows decision would make future Android support impossible.
 
 ### Why PWA First
 
 Native iOS apps have Apple-controlled signing and distribution constraints. A PWA installed through Safari's Add to Home Screen path avoids paid App Store distribution and paid Apple Developer Program dependency for personal long-term use. This makes PWA the preferred architecture for the stated no-fee requirement.
 
-Native wrappers may be added later for Android or Windows convenience, but they must not become required for the core product.
+Native wrappers may be added later for Android or Windows convenience, but they must not become required for the core product. Android wrappers and Android-specific polish are explicitly last-priority work.
 
 ## Distribution and No-Fee Personal Install
 
 The distribution architecture must satisfy the no-fee long-term personal-use requirement:
 
 - iPhone/iPad: install as a Safari Home Screen web app.
-- Android: install as a PWA from browser; optionally provide a no-fee sideloadable APK/TWA later.
 - Windows: install as a PWA from Edge/Chrome; optionally provide a portable desktop wrapper later.
+- Android: deferred until the end; expected path is browser-installed PWA first, optionally a no-fee sideloadable APK/TWA later.
 
 Distribution requirements:
 
@@ -58,13 +59,13 @@ Distribution requirements:
 - The app must not require a paid app-store purchase or app-specific subscription for core features.
 - Local dictionary and user-data features must work in the PWA install channel.
 - Sync, export/import, checkpoints, and diagnostics must not assume native app-store identity.
-- Install documentation must describe the no-fee path for iPhone/iPad, Android, and Windows.
+- Install documentation must describe the no-fee path for iPhone/iPad and Windows first. Android documentation can remain high level until Android work starts.
 
 PWA install documentation should include:
 
 - iPhone/iPad: open app URL in Safari, Share, Add to Home Screen, enable Open as Web App when available.
-- Android: open app URL in Chrome/Edge, Install app or Add to Home Screen.
 - Windows: open app URL in Edge/Chrome, Install app.
+- Android, later: open app URL in Chrome/Edge, Install app or Add to Home Screen.
 
 ## Browser Capability Requirements
 
@@ -85,10 +86,9 @@ Because the app is PWA-first, implementation must account for browser limitation
 | --- | --- | --- |
 | iPhone Safari / Home Screen PWA | iOS 17.0 | Required baseline for OPFS, Web Crypto, service worker, and modern PWA behavior. |
 | iPad Safari / Home Screen PWA | iPadOS 17.0 | Same browser/storage baseline as iPhone. |
-| Android Chrome | Chrome 109+ | PWA install and OPFS support expected. |
-| Android Edge | Edge 109+ | Same Chromium baseline as Chrome. |
 | Windows Edge | Edge 109+ | PWA install and OPFS support expected. |
 | Windows Chrome | Chrome 109+ | Same Chromium baseline as Edge. |
+| Android Chrome/Edge | Deferred | Lowest-priority validation target. Keep future compatibility in mind, but do not spend early POC or implementation cycles here. |
 
 Browsers below the baseline should show a compatibility warning and degrade gracefully without crashing. If required storage, service worker, Web Crypto, or local dictionary capabilities are unavailable, the app should block setup of offline dictionary features and explain the limitation.
 
@@ -868,8 +868,9 @@ Current validation snapshot:
 | POC | Result | Notes |
 | --- | --- | --- |
 | Windows PWA dictionary POC | Pass | App shell, service worker, SQLite fetch/open, exact word lookup, phrase lookup, invalid input rejection, IndexedDB history persistence, and export-button flow were validated. Exact observed lookup times were far below 1 second. |
-| Real iPhone 17 Pro PWA POC | Pass for current feasibility scope | User reported the web app starts fast and loads the dictionary fast. This validates the PWA-first and SQLite WASM-first direction on the most important target device. Exact p50/p95 timing, durable dictionary persistence, and offline launch measurements still need a timed validation pass. |
-| Phase 0 automated browser POC suite | Pass on Windows browser | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell reload, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android and real Google OAuth remain device/account-gated. |
+| Real iPhone 17 Pro PWA POC | Partial pass, with offline dictionary gap found | User reported the web app starts fast and loads the dictionary fast while online. When Wi-Fi is disconnected, the app shell starts but dictionary load/search do not work in the original POC because the dictionary was not persisted for offline use. |
+| Phase 0 automated browser POC suite | Pass on Windows browser | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell reload, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android is intentionally deferred. Real Google OAuth remains account-gated. |
+| Offline dictionary fallback POC | Pass on Windows fallback automation | Main POC now saves the dictionary to IndexedDB after an online load. With the server stopped, the app shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. This must now be repeated on iPhone Safari/Home Screen. |
 
 Validation report contents:
 
@@ -891,7 +892,7 @@ Validation report contents:
 | Search history and autosave | 32-42 |
 | Home screen and stats | 43-47, 58, 133 |
 | Review and proactive study | 48-59, 113-135, 147-148 |
-| Platform, local-first, offline, and no-fee personal install | 60-64, 67, 135, 157-159 |
+| Platform, local-first, offline, and no-fee personal install | 60-64, 67, 135, 157-159, 171-172 |
 | Sync and cloud storage | 65-69, 98-103, 145-146 |
 | AI-assisted details | 70-79, 134 |
 | Diagnostics | 80-86 |
@@ -907,14 +908,14 @@ Validation report contents:
 ### Phase 0: Technical Validation
 
 - Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro feasibility with `sql.js`.
-- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows; still measure iPhone and Android before final production decision.
-- Measure startup and lookup time on iPhone, Android, and Windows. Status: Windows measured; iPhone qualitatively passed; timed iPhone p50/p95 and Android measurements still needed.
-- Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser; iPhone and Android persistence numbers still needed.
+- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows; measure iPhone next before final production decision.
+- Measure startup and lookup time on iPhone and Windows. Status: Windows measured; iPhone qualitatively passed while online; timed iPhone p50/p95 still needed. Android timing is deferred until the end.
+- Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser; iPhone persistence numbers still needed. Android persistence is deferred.
 - Validate Add to Home Screen install flow. Status: iPhone PWA path validated at feasibility level; document exact iOS version in timed pass.
-- Validate offline launch after install. Status: Windows service-worker shell reload passed with the local server stopped; iPhone and Android offline launch still need device runs.
+- Validate offline launch after install. Status: Windows service-worker shell reload passed with the local server stopped; original iPhone test showed shell launch works but dictionary load/search fail until offline dictionary persistence is installed and retested.
 - Validate export/import tar in browser. Status: encrypted tar-style export/import round trip passed in the automated browser POC; full product UI export/import still needs implementation.
 - Produce the Phase 0 validation report required by PRD Req 167.
-- Confirm or reject SQLite WASM. Current direction: continue with SQLite WASM first; keep sharded package as fallback only if persistence, older-device memory, or timed latency fails.
+- Confirm or reject SQLite WASM. Current direction: continue with SQLite WASM first for iPhone and Windows; keep sharded package as fallback only if iPhone persistence, memory, or timed latency fails. Android must not block this decision.
 
 ### Phase 1: PWA Local Core
 
@@ -926,7 +927,7 @@ Validation report contents:
 - Vocabulary save/edit/archive.
 - Autosave and search history.
 - Home stats.
-- No-fee install documentation for iPhone/iPad, Android, and Windows.
+- No-fee install documentation for iPhone/iPad and Windows. Android documentation is deferred until the end.
 
 ### Phase 2: Learning Engine
 
@@ -962,15 +963,15 @@ Validation report contents:
 - Follow-up quick actions.
 - Save AI content with source attribution.
 
-### Phase 6: Optional Native Wrappers
+### Phase 6: Optional Native Wrappers And Deferred Android
 
-- Android TWA/APK if a browser-installed PWA is not enough.
 - Windows wrapper if a desktop installer is useful.
 - iOS native wrapper only if Apple signing/distribution constraints become acceptable.
+- Android PWA validation, Android-specific UI polish, and Android TWA/APK packaging. This is the lowest-priority platform work and should happen after the iPhone and Windows paths are stable.
 
 ## Open Decisions
 
-- Exact SQLite WASM production persistence mode. The automated Windows POC shows that both IndexedDB and OPFS can persist the dictionary package with `sql.js`; production still needs iPhone and Android numbers before choosing the final storage path.
+- Exact SQLite WASM production persistence mode. The automated Windows POC shows that IndexedDB can persist the dictionary package with `sql.js`, and OPFS is available on Windows. Production still needs iPhone numbers before choosing the final storage path. Android numbers are deferred.
 - Exact dictionary packaging format and compression for first-time setup and updates.
 - Whether user-data export is encrypted by default or offers encrypted and plain tar modes.
 - Whether fuzzy search should support numbers later for terms like `360-degree feedback`.
@@ -1003,7 +1004,7 @@ Context: The existing dictionary pipeline already produces SQLite. Windows and r
 
 Decision: Continue with SQLite WASM as the first implementation path. Evaluate the production persistence layer, preferably `wa-sqlite` with OPFS or IndexedDB VFS compared with the simpler `sql.js` approach. If persistence, older-device memory, or timed latency fails, switch to a sharded dictionary package.
 
-Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish mobile persistence, mobile offline launch, Android, and real Google OAuth validation before the architecture is considered fully proven.
+Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish iPhone persistence, iPhone offline dictionary search, iPhone timed benchmarks, and real Google OAuth validation before the architecture is considered fully proven. Android validation is intentionally deferred and should not block iPhone/Windows progress.
 
 ### ADR-003 - Local Generated Key With Recovery Export
 

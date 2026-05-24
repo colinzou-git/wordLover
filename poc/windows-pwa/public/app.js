@@ -9,6 +9,8 @@ const pwaStatus = document.querySelector("#pwaStatus");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
+const FILE_STORE = "files";
+const DICTIONARY_KEY = "dictionary.sqlite";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 
 let SQL = null;
@@ -47,8 +49,12 @@ function requestToPromise(request) {
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    const request = indexedDB.open(DB_NAME, 2);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE);
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -73,9 +79,29 @@ async function loadValue(key, fallback) {
   return value ?? fallback;
 }
 
+async function saveFile(key, value) {
+  const db = await openUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(FILE_STORE, "readwrite");
+    tx.objectStore(FILE_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function loadFile(key) {
+  const db = await openUserDb();
+  const tx = db.transaction(FILE_STORE, "readonly");
+  const value = await requestToPromise(tx.objectStore(FILE_STORE).get(key));
+  db.close();
+  if (!value) return null;
+  return value instanceof Uint8Array ? value : new Uint8Array(value);
+}
+
 function renderMetrics() {
   const dictionary = lastMetrics
-    ? `${lastMetrics.entries.toLocaleString()} rows, ${(lastMetrics.bytes / 1024 / 1024).toFixed(1)} MB, fetch ${formatMs(lastMetrics.fetchMs)}, SQL init ${formatMs(lastMetrics.initMs)}, open ${formatMs(lastMetrics.openMs)}`
+    ? `${lastMetrics.entries.toLocaleString()} rows, ${(lastMetrics.bytes / 1024 / 1024).toFixed(1)} MB, source ${lastMetrics.source ?? "network"}, load ${formatMs(lastMetrics.fetchMs)}, SQL init ${formatMs(lastMetrics.initMs)}, open ${formatMs(lastMetrics.openMs)}`
     : "Dictionary not loaded";
   const storage = "storage" in navigator ? "Storage API available" : "Storage API unavailable";
   metrics.innerHTML = `
@@ -153,9 +179,22 @@ function renderResult(data) {
 
 async function loadDictionary() {
   const start = performance.now();
-  const response = await fetch("/dictionary.sqlite");
-  if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  let source = "network";
+  let bytes = null;
+  try {
+    const response = await fetch("/dictionary.sqlite", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
+    bytes = new Uint8Array(await response.arrayBuffer());
+    await saveFile(DICTIONARY_KEY, bytes);
+  } catch (error) {
+    bytes = await loadFile(DICTIONARY_KEY);
+    source = "indexedDB offline copy";
+    if (!bytes) {
+      throw new Error(
+        `Dictionary is unavailable online and no offline copy is installed yet. Load it once while online first. ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   const fetched = performance.now();
   SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
   const initialized = performance.now();
@@ -169,6 +208,7 @@ async function loadDictionary() {
     openMs: opened - initialized,
     bytes: bytes.byteLength,
     entries: count,
+    source,
   };
   await saveValue("lastMetrics", lastMetrics);
   await renderDiagnostics();

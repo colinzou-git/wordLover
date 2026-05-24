@@ -1,0 +1,37 @@
+{
+  "completedAt": "2026-05-24",
+  "environment": "Windows browser fallback automation",
+  "purpose": "Verify the updated main POC can load and search the dictionary offline after a prior online load stores dictionary.sqlite in IndexedDB.",
+  "steps": [
+    "Loaded the main POC online from http://127.0.0.1:4173/",
+    "Clicked Load local SQLite dictionary",
+    "Confirmed dictionary loaded from source network",
+    "Searched abandon successfully",
+    "Stopped the local HTTP server",
+    "Reloaded the app from the service worker shell cache",
+    "Clicked Load local SQLite dictionary again",
+    "Confirmed dictionary loaded from source indexedDB offline copy",
+    "Searched take off successfully"
+  ],
+  "result": "pass",
+  "onlineLoad": {
+    "source": "network",
+    "rows": 770611,
+    "bytesLabel": "197.0 MB",
+    "loadMs": 842,
+    "sqlInitMs": 13,
+    "openMs": 87,
+    "sampleSearch": "abandon"
+  },
+  "offlineLoad": {
+    "source": "indexedDB offline copy",
+    "rows": 770611,
+    "bytesLabel": "197.0 MB",
+    "loadMs": 2529,
+    "sqlInitMs": 81,
+    "openMs": 66,
+    "sampleSearch": "take off",
+    "sampleSearchMs": 1
+  },
+  "nextAction": "Repeat this exact flow on the real iPhone 17 Pro Home Screen PWA."
+}
