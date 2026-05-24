@@ -187,6 +187,21 @@ poc\iphone-pwa\received-results\
 
 This folder is ignored by git because it contains generated local test results.
 
+To inspect received results from Windows:
+
+```powershell
+curl.exe -k https://127.0.0.1:8443/__poc_results
+curl.exe -k https://127.0.0.1:8443/__poc_results/latest
+```
+
+For a smaller automated dictionary search smoke test, open:
+
+```text
+https://192.168.1.73:8443/?q=take%20off&report=1
+```
+
+This loads the dictionary, searches `take off`, and sends a JSON result back to Windows.
+
 ## 8. Load The Dictionary
 
 In the POC app:

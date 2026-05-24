@@ -905,6 +905,8 @@ Validation report contents:
 
 ## Implementation Phases
 
+Detailed phase execution lives in `docs/development-plan.md`. The architecture phases below remain the high-level technical map.
+
 ### Phase 0: Technical Validation
 
 - Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro feasibility with `sql.js`.
@@ -923,6 +925,8 @@ Validation report contents:
 - Service worker and manifest.
 - Dictionary package installation and hash validation.
 - Term normalization, exact/prefix search, dictionary details.
+- iPhone-first dictionary UI with search as the primary first-screen action.
+- URL-driven search smoke tests for iPhone automation, such as `/?q=take%20off&report=1`.
 - Encrypted user data repository.
 - Vocabulary save/edit/archive.
 - Autosave and search history.

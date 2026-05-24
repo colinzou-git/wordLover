@@ -5,44 +5,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css?v=20260524-2" />
     <title>WordLover PWA POC</title>
   </head>
   <body>
     <main id="app">
       <section class="hero">
-        <div>
-          <p class="eyebrow">Windows PWA feasibility</p>
-          <h1>WordLover local dictionary POC</h1>
+        <div class="brand-block">
+          <p class="eyebrow">WordLover</p>
+          <h1>Dictionary</h1>
+          <p class="hero-copy">Search English words and short phrases with local offline data.</p>
         </div>
         <div id="pwaStatus" class="status-pill">Checking offline shell...</div>
       </section>
 
-      <section class="panel">
+      <section class="search-surface">
+        <label for="termInput">Search</label>
+        <div class="search-row">
+          <input id="termInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abandon, take off, in terms of" />
+          <button id="clearSearch" class="secondary-button" type="button" aria-label="Clear search">Clear</button>
+        </div>
+        <div id="suggestions" class="suggestions" aria-live="polite"></div>
+        <div id="result" class="result" aria-live="polite"></div>
+      </section>
+
+      <section class="status-grid">
+        <div class="status-card">
+          <span>Dictionary</span>
+          <strong id="dictionaryState">Not loaded</strong>
+        </div>
+        <div class="status-card">
+          <span>Mode</span>
+          <strong id="dictionarySource">Online setup needed</strong>
+        </div>
+      </section>
+
+      <section class="panel compact-panel">
         <div class="toolbar">
-          <button id="loadDictionary" type="button">Load local SQLite dictionary</button>
-          <button id="exportState" type="button">Export user data</button>
-          <a class="button-link" href="/poc-suite.html">Phase 0 POC suite</a>
+          <button id="loadDictionary" type="button">Install/load dictionary</button>
+          <button id="exportState" class="secondary-button" type="button">Export state</button>
+          <a class="button-link secondary-link" href="/poc-suite.html">POC suite</a>
         </div>
         <div id="metrics" class="metrics"></div>
       </section>
 
       <section class="panel">
-        <h2>Device and PWA diagnostics</h2>
+        <h2>Recent searches</h2>
+        <ol id="history" class="history-list"></ol>
+      </section>
+
+      <details class="panel diagnostics-panel">
+        <summary>Device and PWA diagnostics</summary>
         <div id="diagnostics" class="metrics"></div>
-      </section>
-
-      <section class="search-surface">
-        <label for="termInput">Search word or phrase</label>
-        <input id="termInput" autocomplete="off" placeholder="abandon, take off, in terms of" />
-        <div id="result" class="result" aria-live="polite"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Recent valid searches</h2>
-        <ol id="history"></ol>
-      </section>
+      </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260524-2"></script>
   </body>
 </html>

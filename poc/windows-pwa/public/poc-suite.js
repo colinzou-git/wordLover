@@ -10,18 +10,19 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
+const SHELL_CACHE_NAME = "wordlover-poc-shell-v12";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js",
-  "/styles.css",
+  "/app.js?v=20260524-2",
+  "/styles.css?v=20260524-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js",
+  "/poc-suite.js?v=20260524-4",
 ];
 
 let lastResults = null;
@@ -260,14 +261,23 @@ async function registerServiceWorker() {
 async function checkOfflineShellCache() {
   if (!("caches" in window)) return { supported: false, allShellAssetsCached: false, missing: SHELL_ASSETS };
   const keys = await caches.keys();
-  const missing = [];
+  let missing = [];
   for (const asset of SHELL_ASSETS) {
     const match = await caches.match(asset);
     if (!match) missing.push(asset);
   }
+  if (missing.length && navigator.onLine) {
+    const cache = await caches.open(SHELL_CACHE_NAME);
+    await Promise.allSettled(missing.map((asset) => cache.add(asset)));
+    missing = [];
+    for (const asset of SHELL_ASSETS) {
+      const match = await caches.match(asset);
+      if (!match) missing.push(asset);
+    }
+  }
   return {
     supported: true,
-    cacheNames: keys,
+    cacheNames: await caches.keys(),
     allShellAssetsCached: missing.length === 0,
     missing,
     note: "This verifies shell cache readiness. A true network-off launch still requires device/browser offline mode.",

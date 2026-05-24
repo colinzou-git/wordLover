@@ -1,11 +1,15 @@
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
 const termInput = document.querySelector("#termInput");
+const clearSearchButton = document.querySelector("#clearSearch");
 const result = document.querySelector("#result");
 const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
 const historyList = document.querySelector("#history");
 const pwaStatus = document.querySelector("#pwaStatus");
+const dictionaryState = document.querySelector("#dictionaryState");
+const dictionarySource = document.querySelector("#dictionarySource");
+const suggestions = document.querySelector("#suggestions");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
@@ -19,6 +23,7 @@ let loaded = false;
 let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
+let suggestionHandle = 0;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -79,6 +84,10 @@ async function loadValue(key, fallback) {
   return value ?? fallback;
 }
 
+async function hasInstalledDictionary() {
+  return Boolean(await loadValue("dictionaryInstalled", false));
+}
+
 async function saveFile(key, value) {
   const db = await openUserDb();
   await new Promise((resolve, reject) => {
@@ -109,6 +118,8 @@ function renderMetrics() {
     <div><strong>Persistence</strong><span>IndexedDB history enabled; ${storage}</span></div>
     <div><strong>Target</strong><span>Local lookup under 1 second after dictionary load</span></div>
   `;
+  dictionaryState.textContent = loaded ? "Ready" : lastMetrics ? "Installed" : "Not loaded";
+  dictionarySource.textContent = lastMetrics?.source ?? "Online setup needed";
 }
 
 async function renderDiagnostics() {
@@ -141,9 +152,11 @@ async function renderDiagnostics() {
 }
 
 function renderHistory() {
-  historyList.innerHTML = historyItems
-    .map((item) => `<li><button type="button" data-term="${item.term}">${item.term}</button><span>${formatMs(item.queryMs)}</span></li>`)
-    .join("");
+  historyList.innerHTML = historyItems.length
+    ? historyItems
+        .map((item) => `<li><button type="button" data-term="${item.term}">${item.term}</button><span>${formatMs(item.queryMs)}</span></li>`)
+        .join("")
+    : '<li class="muted">No successful searches yet.</li>';
 }
 
 function renderResult(data) {
@@ -177,6 +190,12 @@ function renderResult(data) {
   `;
 }
 
+function renderSuggestions(items) {
+  suggestions.innerHTML = items.length
+    ? items.map((item) => `<button type="button" data-term="${item.word}">${item.word}</button>`).join("")
+    : "";
+}
+
 async function loadDictionary() {
   const start = performance.now();
   let source = "network";
@@ -186,6 +205,7 @@ async function loadDictionary() {
     if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
     bytes = new Uint8Array(await response.arrayBuffer());
     await saveFile(DICTIONARY_KEY, bytes);
+    await saveValue("dictionaryInstalled", true);
   } catch (error) {
     bytes = await loadFile(DICTIONARY_KEY);
     source = "indexedDB offline copy";
@@ -213,6 +233,25 @@ async function loadDictionary() {
   await saveValue("lastMetrics", lastMetrics);
   await renderDiagnostics();
   return lastMetrics;
+}
+
+async function ensureDictionaryLoaded() {
+  if (loaded) return true;
+  loadButton.disabled = true;
+  loadButton.textContent = "Loading dictionary...";
+  result.innerHTML = `<p class="muted">Opening local dictionary.</p>`;
+  try {
+    await loadDictionary();
+    loaded = true;
+    loadButton.textContent = "Dictionary ready";
+    renderMetrics();
+    return true;
+  } catch (error) {
+    loadButton.disabled = false;
+    loadButton.textContent = "Install/load dictionary";
+    result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
+    return false;
+  }
 }
 
 function lookupTerm(input) {
@@ -253,6 +292,33 @@ function lookupTerm(input) {
   }
 }
 
+function suggestTerms(input) {
+  const normalized = normalizeTerm(input);
+  if (!TERM_RE.test(normalized) || normalized.length < 2 || !dictionaryDb) return [];
+  const statement = dictionaryDb.prepare(`
+    SELECT word
+    FROM dictionary_entries
+    WHERE normalized_word >= :prefix
+      AND normalized_word < :upper
+    ORDER BY
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc,
+      word
+    LIMIT 6
+  `);
+  const upper = `${normalized}\uffff`;
+  const items = [];
+  try {
+    statement.bind({ ":prefix": normalized, ":upper": upper });
+    while (statement.step()) items.push(statement.getAsObject());
+    return items;
+  } finally {
+    statement.free();
+  }
+}
+
 async function addHistory(item) {
   historyItems = [item, ...historyItems.filter((entry) => entry.term !== item.term)].slice(0, 10);
   await saveValue("history", historyItems);
@@ -260,10 +326,14 @@ async function addHistory(item) {
 }
 
 async function runLookup() {
-  if (!loaded) return;
   const value = termInput.value;
   if (!value.trim()) {
     result.innerHTML = `<p class="muted">Type a term to test local lookup.</p>`;
+    renderSuggestions([]);
+    return;
+  }
+  if (!loaded) {
+    result.innerHTML = `<p class="muted">Dictionary is not loaded yet. Tap <strong>Install/load dictionary</strong> once, then search offline or online.</p>`;
     return;
   }
   try {
@@ -277,12 +347,70 @@ async function runLookup() {
   }
 }
 
+async function sendSmokeResult(payload) {
+  if (window.location.protocol !== "https:") return null;
+  const response = await fetch("/__poc_results", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Smoke result upload failed: ${response.status}`);
+  return response.json();
+}
+
+async function runAutomatedSearchSmoke(term, shouldReport) {
+  termInput.value = term;
+  const ready = await ensureDictionaryLoaded();
+  if (!ready) return;
+  const data = lookupTerm(term);
+  renderResult(data);
+  if (data.status === "found") {
+    await addHistory({ term: data.term, searchedAt: new Date().toISOString(), queryMs: data.queryMs ?? 0 });
+  }
+  if (shouldReport) {
+    await sendSmokeResult({
+      completedAt: new Date().toISOString(),
+      kind: "dictionary-search-smoke",
+      diagnostics: {
+        userAgent: navigator.userAgent,
+        displayMode: window.matchMedia("(display-mode: standalone)").matches
+          ? "standalone"
+          : window.navigator.standalone
+            ? "ios-standalone"
+            : "browser",
+        secureContext: window.isSecureContext,
+      },
+      dictionary: lastMetrics,
+      search: data,
+    });
+  }
+}
+
+function runSuggestions() {
+  if (!loaded || !termInput.value.trim()) {
+    renderSuggestions([]);
+    return;
+  }
+  try {
+    renderSuggestions(suggestTerms(termInput.value));
+  } catch {
+    renderSuggestions([]);
+  }
+}
+
 async function init() {
   historyItems = await loadValue("history", []);
   lastMetrics = await loadValue("lastMetrics", null);
   renderHistory();
   renderMetrics();
-  result.innerHTML = `<p class="muted">Load the local dictionary to start the benchmark.</p>`;
+  const installed = await hasInstalledDictionary();
+  if (installed && !lastMetrics) {
+    dictionaryState.textContent = "Installed";
+    dictionarySource.textContent = "Tap load";
+  }
+  result.innerHTML = installed
+    ? `<p class="muted">Dictionary is installed. Tap <strong>Install/load dictionary</strong> to start searching.</p>`
+    : `<p class="muted">Install the local dictionary once while online. After that, search can work from the local copy.</p>`;
 
   if ("serviceWorker" in navigator) {
     try {
@@ -299,27 +427,28 @@ async function init() {
     await navigator.storage.persist();
   }
   await renderDiagnostics();
+
+  const params = new URLSearchParams(window.location.search);
+  const smokeTerm = params.get("q");
+  if (installed && !smokeTerm) {
+    void ensureDictionaryLoaded().then(() => {
+      if (termInput.value.trim()) void runLookup();
+    });
+  }
+
+  if (smokeTerm) {
+    void runAutomatedSearchSmoke(smokeTerm, params.get("report") === "1");
+  }
 }
 
 loadButton.addEventListener("click", async () => {
-  loadButton.disabled = true;
-  loadButton.textContent = "Loading dictionary...";
-  result.innerHTML = `<p class="muted">Fetching and opening local SQLite dictionary.</p>`;
-  try {
-    lastMetrics = await loadDictionary();
-    loaded = true;
-    loadButton.textContent = "Dictionary loaded";
-    renderMetrics();
-    await runLookup();
-  } catch (error) {
-    loadButton.disabled = false;
-    loadButton.textContent = "Retry load";
-    result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
-  }
+  if (await ensureDictionaryLoaded()) await runLookup();
 });
 
 termInput.addEventListener("input", () => {
   window.clearTimeout(debounceHandle);
+  window.clearTimeout(suggestionHandle);
+  suggestionHandle = window.setTimeout(runSuggestions, 75);
   debounceHandle = window.setTimeout(() => void runLookup(), 150);
 });
 
@@ -327,6 +456,20 @@ historyList.addEventListener("click", (event) => {
   if (!(event.target instanceof HTMLButtonElement)) return;
   termInput.value = event.target.dataset.term ?? "";
   void runLookup();
+});
+
+suggestions.addEventListener("click", (event) => {
+  if (!(event.target instanceof HTMLButtonElement)) return;
+  termInput.value = event.target.dataset.term ?? "";
+  renderSuggestions([]);
+  void runLookup();
+});
+
+clearSearchButton.addEventListener("click", () => {
+  termInput.value = "";
+  renderSuggestions([]);
+  result.innerHTML = `<p class="muted">Type a term to search.</p>`;
+  termInput.focus();
 });
 
 exportButton.addEventListener("click", () => {
@@ -344,5 +487,17 @@ exportButton.addEventListener("click", () => {
   anchor.click();
   URL.revokeObjectURL(url);
 });
+
+window.WordLoverApp = {
+  ensureDictionaryLoaded,
+  lookupTerm,
+  suggestTerms,
+  runAutomatedSearchSmoke,
+  getState: () => ({
+    loaded,
+    lastMetrics,
+    historyItems,
+  }),
+};
 
 void init();

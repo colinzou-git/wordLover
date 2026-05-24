@@ -20,6 +20,50 @@ class PocHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         super().end_headers()
 
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/__poc_results":
+            self._send_result_index()
+            return
+        if parsed.path == "/__poc_results/latest":
+            self._send_latest_result()
+            return
+        super().do_GET()
+
+    def _results_dir(self):
+        return Path(__file__).resolve().parent / "received-results"
+
+    def _send_json(self, payload, status=200):
+        response = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def _send_result_index(self):
+        results_dir = self._results_dir()
+        results = []
+        if results_dir.exists():
+            for path in sorted(results_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+                results.append({
+                    "name": path.name,
+                    "bytes": path.stat().st_size,
+                    "updatedAt": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+                })
+        self._send_json({"results": results})
+
+    def _send_latest_result(self):
+        results_dir = self._results_dir()
+        if not results_dir.exists():
+            self._send_json({"error": "No received results yet"}, status=404)
+            return
+        files = sorted(results_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+        if not files:
+            self._send_json({"error": "No received results yet"}, status=404)
+            return
+        self._send_json(json.loads(files[0].read_text(encoding="utf-8")))
+
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path != "/__poc_results":
@@ -41,17 +85,12 @@ class PocHandler(http.server.SimpleHTTPRequestHandler):
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         user_agent = str(payload.get("diagnostics", {}).get("userAgent", "unknown"))
         device = "iphone" if "iPhone" in user_agent else "ipad" if "iPad" in user_agent else "browser"
-        results_dir = Path(__file__).resolve().parent / "received-results"
+        results_dir = self._results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         output_path = results_dir / f"{timestamp}-{device}-poc-results.json"
         output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        response = json.dumps({"ok": True, "path": str(output_path)}, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(response)))
-        self.end_headers()
-        self.wfile.write(response)
+        self._send_json({"ok": True, "path": str(output_path)})
 
 
 def main():

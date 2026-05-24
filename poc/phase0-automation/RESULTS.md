@@ -23,6 +23,7 @@ Environment:
 | Android PWA | Deferred | Android work is lowest priority and intentionally deferred until iPhone and Windows are stable. |
 | Timed benchmark | Pass | 100 local lookups across 5 terms had p95 below 1 second. |
 | Offline persisted dictionary fallback | Pass on Windows fallback | After the main POC stored the dictionary in IndexedDB, the server was stopped, the shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. |
+| iPhone-friendly dictionary UI smoke | Pass on Windows fallback | Search-first UI, dictionary status cards, versioned assets, URL search smoke, and local lookup were verified through browser automation. |
 
 ## Key Metrics
 
@@ -56,6 +57,8 @@ All benchmark terms were found in the local dictionary.
 ## Production Implications
 
 The SQLite WASM-first direction is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on this Windows browser. OPFS was faster in this run, but iPhone Safari should still be measured before locking the production persistence layer. Android measurement is deferred until the end.
+
+The first implementation slice should stay focused on the iPhone dictionary path: fast visible search UI, explicit dictionary install/load state, offline dictionary fallback, and reliable service-worker asset updates.
 
 The sharded dictionary fallback should remain a contingency, not the default path.
 

@@ -52,6 +52,14 @@ Worked after app close/reopen:
 Any Safari reload/crash:
 ```
 
+More automated variant while online:
+
+```text
+https://192.168.1.73:8443/?q=take%20off&report=1
+```
+
+This opens the dictionary app, loads the dictionary, searches `take off`, and posts a JSON result back to Windows. It cannot toggle iPhone Wi-Fi, so the true offline part still needs the manual Wi-Fi/Cellular toggle.
+
 ## Priority 2: iPhone Automated Timed Suite
 
 Question: what are the real iPhone p50/p95 numbers for dictionary load, persistence, and lookup?
@@ -74,6 +82,13 @@ poc\iphone-pwa\received-results\
 ```
 
 If the status does not show `Sent`, tap **Send results to Windows**.
+
+On Windows, inspect received results:
+
+```powershell
+curl.exe -k https://127.0.0.1:8443/__poc_results
+curl.exe -k https://127.0.0.1:8443/__poc_results/latest
+```
 
 Record:
 
