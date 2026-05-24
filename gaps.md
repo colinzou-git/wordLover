@@ -1,0 +1,93 @@
+# WordLover Document Gap Review
+
+Reviewed files:
+
+- `prd.md`
+- `docs/architecture-design.md`
+- `docs/wordlover-review.md`
+
+`docs/wordlover-review.md` was treated as read-only and was not modified.
+
+## Summary
+
+The PRD and architecture have been updated to address the review's major findings. The documents are now broadly aligned around a PWA-first, local-first architecture with explicit setup, storage, sync, diagnostics, and FSRS-compatible review behavior.
+
+No blocking document contradiction remains, but several implementation decisions intentionally remain open because they require Phase 0 technical validation on real devices.
+
+## Review Items Addressed
+
+| Review item | Status | Resolution |
+| --- | --- | --- |
+| PRD-1 empty status columns | Resolved | All PRD requirements now use `open` status. |
+| PRD-2 Req 2 vs Req 28 conflict | Resolved | Req 2 now applies to exact-match vocabulary-save input; Req 28 applies to closest-match dictionary search. |
+| PRD-3 autosave trigger | Resolved | Req 33 now defines autosave conditions and 2-3 second dwell behavior. |
+| PRD-4 FSRS vs 1-5 grade conflict | Resolved | PRD now uses FSRS-compatible ratings: Again, Hard, Good, Easy. Mastery is separate from FSRS rating. |
+| PRD-5 proactive frequency source | Resolved | Req 51 names ECDICT frequency rank fields; Req 168 adds bundled high-frequency fallback list. |
+| PRD-6 Git diagnostic upload | Resolved | Req 84 makes platform share/browser download primary; Git upload is advanced optional. |
+| PRD-7 first-time dictionary setup UX | Resolved | Req 160-163 define setup, progress, resume, storage warning, and dictionary update notification. |
+| PRD-8 dictionary update behavior | Resolved | Req 164-165 define side-by-side validated dictionary updates and protection of user data. |
+| ARCH-1 SQLite WASM on iPhone Safari risk | Resolved in design | Architecture now has Phase 0 pass/fail criteria, `wa-sqlite` evaluation, and sharded dictionary fallback. |
+| ARCH-2 encryption key management | Resolved in design | Architecture now chooses local generated DEK plus recovery export, with optional Google Drive key-wrap. |
+| ARCH-3 PWA storage eviction risk | Resolved in design | Architecture now includes persistent storage request, quota checks, backup prompts, local validation, and iOS storage warning. |
+| ARCH-4 full-copy sync scaling | Resolved in design | Architecture now defines Tier 1 full snapshot sync and future Tier 2 event-log sync. |
+| ARCH-5 autosave dwell only in architecture | Resolved | Dwell behavior moved into PRD Req 33; architecture references PRD and uses a named constant. |
+| ARCH-6 FSRS integration detail | Resolved | Architecture now recommends `ts-fsrs`, stores serialized FSRS card fields, and separates mastery from FSRS ratings. |
+| ARCH-7 ChatGPT ambiguity | Resolved with provider abstraction | PRD and architecture now use AI provider abstraction, with Gemini via Google as default no-additional-fee provider and ChatGPT/OpenAI optional. |
+| ARCH-8 Git diagnostic mechanism | Resolved | Architecture now makes Web Share/browser download primary and Git REST API advanced optional. |
+| ARCH-9 meaning ordering | Resolved | Architecture replaces `isUserPreferred` with `displayOrder` and `userRank`. |
+| ARCH-10 study event retention | Resolved | Architecture now defines active event retention and yearly compressed summaries. |
+| CROSS-1 decision log | Resolved | Architecture now includes ADR-001 through ADR-003. |
+| CROSS-2 supported platform baseline | Resolved | Architecture now defines minimum browser/OS baseline and PRD Req 166 adds compatibility warning. |
+| CROSS-3 Phase 0 validation report | Resolved | PRD Req 167 and architecture Phase 0 require a written validation report. |
+
+## Remaining Open Decisions
+
+These are not gaps between the documents; they are technical decisions that need Phase 0 validation or implementation spikes.
+
+| Topic | Current document state | Next action |
+| --- | --- | --- |
+| SQLite WASM implementation | Architecture recommends evaluating `wa-sqlite` with OPFS VFS first. | Run Phase 0 benchmark on iPhone Safari, Android Chrome, and Windows browser. |
+| Dictionary fallback format | Architecture defines sharded dictionary fallback, but exact binary schema is not finalized. | Design only if SQLite WASM fails Phase 0 criteria or is too slow/heavy. |
+| Browser encryption recovery UX | Architecture selects DEK + recovery export + optional Google key-wrap. | Prototype recovery file creation/import and decide passphrase UX. |
+| Export encryption mode | Architecture leaves open whether normal tar exports are always encrypted or can be plain. | Decide before implementing export/import UI. |
+| Advanced Git diagnostic upload | PRD/architecture make it optional. | Defer until Web Share/browser download diagnostics are working. |
+| Native wrappers | Architecture makes wrappers optional. | Revisit only after PWA core works well. |
+
+## Residual Risks
+
+### PWA Storage Durability
+
+The PRD requires local-first offline use, and architecture mitigates browser storage eviction. However, no PWA can fully guarantee that iOS will never evict local storage. The documents now handle this by requiring cloud sync/export warnings and recovery, but the product should be honest in install documentation.
+
+### Large Dictionary Package On iPhone
+
+The local SQLite dictionary is large. Architecture requires Phase 0 validation and fallback to sharded data if SQLite WASM fails. This is still the highest implementation risk.
+
+### AI Provider Requirement Shift
+
+Earlier PRD language was ChatGPT-specific. The review recommended Gemini because the app already uses Google Drive and wants no extra fees. The PRD and architecture now use an AI provider abstraction with Gemini as default and ChatGPT/OpenAI optional. This is aligned internally, but it is a product decision worth confirming before implementation.
+
+### Security Limits Of PWA Key Storage
+
+The architecture explicitly documents that browser storage is not equivalent to native secure enclave/keychain. Encryption is still required, but local key protection is constrained by the web platform. The recovery/export model must be carefully explained to users.
+
+## Consistency Check
+
+| Area | PRD | Architecture | Review alignment |
+| --- | --- | --- | --- |
+| PWA-first no-fee install | Req 157-159 | PWA-first platform and distribution sections | Aligned |
+| First-time setup | Req 160-163 | Browser capability, dictionary package, Phase 0 | Aligned |
+| Dictionary updates | Req 164-165 | Side-by-side dictionary update handling | Aligned |
+| Compatibility warning | Req 166 | Supported platform baseline | Aligned |
+| Phase 0 report | Req 167 | Phase 0 validation criteria and report contents | Aligned |
+| Proactive word frequency | Req 51, 168 | Proactive new-word flow uses ECDICT and fallback list | Aligned |
+| Autosave timing | Req 33 | Search and Autosave Service references Req 33 | Aligned |
+| FSRS ratings | Req 126, 147-148 | `ts-fsrs` mapping and mastery separation | Aligned |
+| Diagnostics | Req 80-86 | Web Share primary, Git optional advanced | Aligned |
+| AI details | Req 70-79 | Provider abstraction, Gemini default, ChatGPT optional | Aligned |
+| Meaning source/order | Req 136-137 | `Meaning.source`, `displayOrder`, `userRank` | Aligned |
+| Study event retention | Req 133 plus sync/backup requirements | Study Event Retention Policy | Aligned |
+
+## Suggested Next Documentation Step
+
+Before implementation planning, create a short Phase 0 test plan from the architecture's validation criteria. That should become the first implementation milestone because it decides whether the app can use SQLite WASM directly or must switch to the sharded dictionary fallback.

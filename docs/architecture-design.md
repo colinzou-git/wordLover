@@ -31,7 +31,7 @@ Recommended stack:
 - User data store: encrypted IndexedDB, with a repository abstraction so a future native wrapper can swap the storage backend.
 - Search acceleration: prebuilt SQLite indexes plus a compact prefix/FTS search table.
 - Sync: Google Drive REST API through OAuth for the first cloud provider.
-- AI details: ChatGPT/OpenAI integration through user-connected online flow, isolated from offline core.
+- AI details: provider abstraction with Google Gemini as the default no-additional-fee online provider through the user's Google account, plus optional ChatGPT/OpenAI integration if the user configures it.
 - Packaging: web app install to Home Screen/Desktop; optional Android/Windows/native wrappers later.
 
 The PWA must be able to run from the browser and as an installed Home Screen/Desktop app. The same app shell should serve iPhone, iPad, Android, tablet, and Windows users.
@@ -78,6 +78,31 @@ Because the app is PWA-first, implementation must account for browser limitation
 - The app must show a clear warning if the browser cannot provide enough durable storage for the dictionary.
 - Export/import must provide a recovery path if browser storage is cleared.
 - Cloud sync remains the main cross-device backup.
+
+### Supported Platform Baseline
+
+| Platform | Minimum version | Notes |
+| --- | --- | --- |
+| iPhone Safari / Home Screen PWA | iOS 17.0 | Required baseline for OPFS, Web Crypto, service worker, and modern PWA behavior. |
+| iPad Safari / Home Screen PWA | iPadOS 17.0 | Same browser/storage baseline as iPhone. |
+| Android Chrome | Chrome 109+ | PWA install and OPFS support expected. |
+| Android Edge | Edge 109+ | Same Chromium baseline as Chrome. |
+| Windows Edge | Edge 109+ | PWA install and OPFS support expected. |
+| Windows Chrome | Chrome 109+ | Same Chromium baseline as Edge. |
+
+Browsers below the baseline should show a compatibility warning and degrade gracefully without crashing. If required storage, service worker, Web Crypto, or local dictionary capabilities are unavailable, the app should block setup of offline dictionary features and explain the limitation.
+
+### Storage Eviction Mitigation
+
+iOS and other browsers may evict PWA storage under storage pressure or after long periods of non-use. The app cannot fully prevent this, so it must reduce the risk and make recovery straightforward:
+
+- Request persistent storage with `navigator.storage.persist()` where supported.
+- Call `navigator.storage.estimate()` on app open and before dictionary setup.
+- Warn when usage approaches quota, for example above 80%.
+- Track `lastOpenedAt`, `lastSuccessfulLocalValidationAt`, and `lastSuccessfulSyncAt`.
+- If the app has not been opened for a long interval, validate local user data and dictionary files on next open.
+- Show a banner encouraging cloud sync or tar export when local-only data has not been backed up recently.
+- Document the iOS storage risk in install/setup documentation.
 
 Recommended storage layers:
 
@@ -211,6 +236,23 @@ Default recommendation:
 
 - Start with SQLite WASM because the current pipeline already creates SQLite and requirements include rich structured lookup.
 - Add a compact prefix index only if SQLite WASM cannot satisfy the 1-second search target on older phones.
+- Prefer evaluating `wa-sqlite` with OPFS VFS during Phase 0 because it is designed for browser persistence and read-heavy SQLite workloads. Compare it against any simpler `sql.js` approach before committing.
+
+Fallback dictionary package:
+
+If SQLite WASM fails Phase 0 pass criteria, switch to a first-class sharded dictionary package:
+
+```text
+dictionary-shards/
+  manifest.json
+  prefix-index.bin
+  shards/
+    a.msgpack.br
+    b.msgpack.br
+    ...
+```
+
+The fallback package must support exact lookup, prefix lookup, source attribution, frequency ordering, and phrase lookup without loading the full dictionary into memory.
 
 ### Dictionary Service
 
@@ -278,12 +320,43 @@ Suggested encryption:
 
 - AES-GCM for record/package encryption.
 - Per-user data encryption key.
-- Key stored in browser-accessible secure storage is limited in PWAs; therefore, the design needs an explicit key strategy:
-  - Option A: user passphrase-derived key.
-  - Option B: cloud-recoverable wrapped key after Google sign-in.
-  - Option C: local generated key plus export recovery key.
+- Default key strategy: local generated data encryption key plus user-exported recovery key.
+- Optional convenience strategy after Google sign-in: wrap the data encryption key and store the wrapped key in the user's Google Drive app folder.
 
-Open decision: choose the final key recovery strategy before implementing sync.
+Key hierarchy:
+
+```text
+DEK: AES-256-GCM key
+  encrypts all local/cloud user data packages
+
+Recovery KEK: passphrase-derived key
+  wraps DEK in user-downloaded recovery file
+  derived with PBKDF2 or Argon2id, depending on browser support and bundle size
+
+Google KEK: account-linked wrapping key
+  wraps DEK in Google Drive key-wrap file after sign-in
+  optional convenience path for cross-device recovery
+```
+
+Storage locations:
+
+```text
+DEK
+  stored in IndexedDB in the browser sandbox
+  known PWA limitation: not equivalent to native secure enclave/keychain
+
+Recovery export
+  user-downloaded encrypted recovery file
+
+Drive key-wrap
+  encrypted key-wrap file in Google Drive app folder
+  optional, created only after sign-in
+```
+
+New-device recovery paths:
+
+- Import recovery file and enter passphrase.
+- Or sign in with Google and retrieve the Drive key-wrap file, if previously configured.
 
 ### Vocabulary Service
 
@@ -320,8 +393,9 @@ Responsibilities:
 Autosave timing:
 
 - Do not save every transient keystroke.
-- Autosave only when a matched result is settled, selected, left visible for a defined dwell period, or the user navigates away while a valid result is active.
-- The dwell period should be configurable in code and tested; a suggested initial value is 2-3 seconds.
+- Autosave timing is defined by PRD Req 33.
+- Autosave only when a matched result is active, not already saved, not dismissed or replaced, and either remains active for the 2-3 second dwell period or the user navigates away while the valid result is displayed.
+- Implement the dwell as a named tested constant, for example `AUTOSAVE_DWELL_MS = 2500`, so it is easy to tune without changing business logic.
 
 ### Learning and Review Engine
 
@@ -337,22 +411,52 @@ Responsibilities:
 - Review Mode using FSRS or equivalent adaptive spaced repetition.
 - Difficult Word Mode for failed/repeatedly forgotten terms.
 - Proactive new-word study from high-frequency dictionary words not already active or archived.
-- Review grade scale from 1 to 5:
-  - 1: very new or needs full cycle
-  - 2: hard
-  - 3: remembered with effort
-  - 4: remembered well
-  - 5: mastered, no normal scheduled review
+- FSRS-compatible review ratings:
+  - Again
+  - Hard
+  - Good
+  - Easy
+- Mastery is an app-level state derived separately from scheduler stability and user performance.
 
 Review scheduling:
 
 - Initial schedule supports 10 minutes, same evening, 1 day, 3 days, 7 days, 14 days, and 30 days.
-- Adaptive scheduling updates from correctness, first-attempt result, grade, response time, quiz mode, and difficult-word signals.
-- Grade 5 marks a term mastered unless later failure or manual grade change lowers it.
+- Adaptive scheduling updates from correctness, first-attempt result, FSRS rating, response time, quiz mode, and difficult-word signals.
+- Mastered terms are excluded from normal due-review lists but remain available for optional review and can re-enter review if the user later fails or manually marks the term as not mastered.
+
+FSRS integration:
+
+- Recommended library: `ts-fsrs`, a TypeScript-native FSRS implementation.
+- Store the serialized FSRS card object in `ReviewState`.
+- Pass only FSRS-compatible ratings to the scheduler: Again, Hard, Good, Easy.
+- Do not pass app mastery directly as a fake FSRS rating.
+- Set `isMastered` using an app-level mastery rule, for example predicted retention at 90 days greater than 0.90 plus recent successful review history.
+
+FSRS state mapping:
+
+```text
+ReviewState
+  vocabularyItemId
+  lastRating: again | hard | good | easy
+  fsrsCard
+    stability
+    difficulty
+    elapsedDays
+    scheduledDays
+    reps
+    lapses
+    state
+    due
+  nextReviewAt
+  lastReviewedAt
+  isMastered
+  difficultMode
+```
 
 Proactive new-word flow:
 
-1. Pick frequent unsaved candidate.
+1. Pick a frequent unsaved candidate from ECDICT frequency rank fields, excluding active and archived vocabulary items.
+   - If ECDICT frequency is missing or unsuitable, fall back to the bundled high-frequency word list required by PRD Req 168.
 2. Show multiple-choice quiz first.
 3. If correct on first attempt, mark as already known and do not add to vocabulary.
 4. If incorrect on first attempt, treat the word like a successful dictionary search and apply save/autosave rules.
@@ -382,7 +486,7 @@ Stats should be derived from immutable study events where possible, not only mut
 Responsibilities:
 
 - Provide a button wherever a term is displayed.
-- Open or use the user's connected ChatGPT-capable account when available.
+- Open or use the user's connected AI provider account when available, with Gemini through Google as the default provider and ChatGPT/OpenAI as an optional provider.
 - Require internet access.
 - Keep local dictionary experience fully usable without AI.
 - Generate/display:
@@ -393,8 +497,10 @@ Responsibilities:
 
 PWA implementation options:
 
-- Open a ChatGPT deep link or web flow with prepared context when the user wants to continue in their ChatGPT account.
-- Or use an OpenAI API-compatible provider if the user configures credentials. This must remain optional.
+- Default provider: Gemini through the user's Google account when available, because Google Drive sync already depends on Google sign-in and this avoids requiring a second account or paid API key for the default AI path.
+- Optional provider: ChatGPT/OpenAI through a user-connected online flow or user-configured credentials.
+- Provider selection must be abstracted so the UI calls `AiDetailProvider` and does not depend on one vendor.
+- AI must remain optional; local dictionary and learning flows continue without any AI provider.
 
 AI data rule:
 
@@ -436,6 +542,13 @@ Sync strategy:
 - Sync uploads a full encrypted snapshot and a manifest after successful local validation.
 - Sync downloads cloud manifest first, compares versions and device clocks, then merges or prompts when needed.
 - After sync merge, validate integrity and create/update checkpoint.
+
+Two-tier sync plan:
+
+- Tier 1, Phase 4 baseline: full encrypted snapshot sync. This is simple and acceptable while the user-data snapshot is small, for example under about 5 MB.
+- Tier 2, future extension: append-only encrypted event-log sync. Download only events since the last `syncVersion`, merge locally, and periodically compact into a full snapshot.
+- The data model must keep immutable study events separate from mutable vocabulary state and include `syncVersion` on every event so Tier 2 can be added without redesigning the store.
+- Treat the full snapshot as a compaction of the event log, not as the only possible sync format.
 
 PWA OAuth notes:
 
@@ -510,7 +623,8 @@ Responsibilities:
 - Redaction mode for logs, diagnostic bundles, and export bundles.
 - User-triggered compressed diagnostic bundle generation.
 - Bundle includes logs, app/browser/device version, schema versions, sync metadata, recent errors, and checkpoint metadata.
-- User-triggered upload to configured Git repository.
+- Primary sharing path uses browser download and the Web Share API where available.
+- Advanced optional sharing path may upload to a configured Git repository through a Git hosting REST API.
 - Offline upload retry.
 
 Logging rule:
@@ -527,6 +641,12 @@ PWA diagnostics should include:
 - Storage estimate/quota when available.
 - Dictionary data version.
 - User-data format version.
+
+Diagnostic sharing:
+
+- Primary: `navigator.share({ files: [...] })` when available, otherwise browser download.
+- Advanced optional: GitHub/GitLab REST API upload using user-provided token and repository/path settings.
+- A PWA cannot run `git push`; any Git integration must use HTTPS APIs and must never log tokens.
 
 ## Data Architecture
 
@@ -602,18 +722,41 @@ Meaning
   text
   source: ECDICT | WordNet | user_edited | AI_assisted
   sourceRef
-  isUserPreferred
+  displayOrder
+  userRank
   createdAt
 
 ReviewState
   vocabularyItemId
-  grade: 1..5
-  schedulerState
+  lastRating: again | hard | good | easy
+  fsrsCard
   nextReviewAt
   lastReviewedAt
   isMastered
   difficultMode
 ```
+
+Meaning ordering:
+
+- `displayOrder` is the default integer order, lower values display first.
+- `userRank` is nullable and is set only when the user explicitly reorders meanings.
+- Display order is `ORDER BY COALESCE(userRank, displayOrder) ASC`.
+- Default source priority:
+  1. user-edited meanings
+  2. ECDICT meanings in source/frequency order
+  3. WordNet meanings
+  4. AI-assisted meanings
+
+### Study Event Retention Policy
+
+Study events are immutable so stats, sync, and rollback can be reproduced. To keep the active store small:
+
+- Keep all study events for the current and previous calendar year as active records.
+- Archive older events into compressed yearly summary blobs, such as `study-events-2026.cbor.br`.
+- Include summary blobs in cloud sync and user-data export.
+- Active records drive current stats, scheduling, and sync.
+- Summary blobs are used for historical stats views.
+- Approximate size budget: 200-400 bytes per active event. A user reviewing 10 terms per day creates about 3,650 events/year, which is manageable if older years are compacted.
 
 ## Security and Privacy
 
@@ -676,8 +819,35 @@ Requires internet:
 - First-time dictionary package download if not already installed/imported.
 - Google sign-in and sync.
 - Cloud deletion.
-- Diagnostic upload to Git repo.
-- AI-assisted ChatGPT details.
+- Advanced diagnostic upload to Git repo, if enabled.
+- AI-assisted online details through Gemini, ChatGPT/OpenAI, or another configured provider.
+
+## Phase 0 Validation Criteria
+
+Phase 0 must produce a written validation report before Phase 1 begins.
+
+| Criterion | Pass threshold | Required device/browser |
+| --- | --- | --- |
+| Cold dictionary search latency | <= 1 second | iPhone 12 or comparable device, iOS 17 Safari |
+| App shell visible on launch | <= 1 second | iPhone 12 or comparable device, iOS 17 Safari |
+| OPFS or IndexedDB persistence | Data survives app close and reopen | iPhone Safari Home Screen PWA |
+| Storage quota available | >= 400 MB grantable or documented alternative package size | iPhone Safari |
+| WASM memory behavior | Dictionary search works without out-of-memory failure | iPhone Safari |
+| Offline launch | Installed app opens while offline after setup | iPhone Safari Home Screen PWA |
+| Export/import tar | User-data tar export and import works | iPhone Safari and Windows browser |
+
+If SQLite WASM fails any critical dictionary latency, persistence, or memory criterion, activate the sharded dictionary fallback before Phase 1 local core work continues.
+
+Validation report contents:
+
+- Device models and OS/browser versions tested.
+- SQLite WASM library version and persistence mode.
+- Startup and search latency, including median and p95 over at least 20 runs.
+- Storage quota available and granted.
+- Offline launch result.
+- Export/import result.
+- Encryption key recovery model decision.
+- Pass/fail verdict and rationale.
 
 ## Requirement Traceability
 
@@ -696,18 +866,21 @@ Requires internet:
 | Security and privacy | 149-154 |
 | Accessibility | 155-156 |
 | Performance | 143-144 |
+| Setup, dictionary update, compatibility, and Phase 0 validation | 160-168 |
 
 ## Implementation Phases
 
 ### Phase 0: Technical Validation
 
 - Validate SQLite WASM on iPhone Safari with the generated dictionary package.
+- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option.
 - Measure startup and lookup time on iPhone, Android, and Windows.
 - Validate storage quota and persistence behavior.
 - Validate Add to Home Screen install flow.
 - Validate offline launch after install.
 - Validate export/import tar in browser.
-- Decide encryption key recovery model.
+- Produce the Phase 0 validation report required by PRD Req 167.
+- Confirm or reject SQLite WASM. If rejected, switch to the sharded dictionary fallback before Phase 1.
 
 ### Phase 1: PWA Local Core
 
@@ -726,7 +899,8 @@ Requires internet:
 - Fast Encoding Mode.
 - Quiz modes.
 - FSRS/adaptive scheduler.
-- Review grade 1-5.
+- FSRS ratings: Again, Hard, Good, Easy.
+- App-level mastery state.
 - Due-review flow.
 - Proactive new-word flow.
 
@@ -749,7 +923,7 @@ Requires internet:
 
 ### Phase 5: AI Assistance
 
-- ChatGPT-connected detail view.
+- AI-provider-connected detail view, with Gemini as the default no-additional-fee provider and ChatGPT/OpenAI as optional.
 - Example sentence generation/display.
 - Follow-up quick actions.
 - Save AI content with source attribution.
@@ -764,9 +938,47 @@ Requires internet:
 
 - Exact SQLite WASM package and persistence mode.
 - Exact dictionary packaging format and compression.
-- Exact browser encryption key recovery strategy across devices.
 - Whether user-data export is encrypted by default or offers encrypted and plain tar modes.
-- Exact FSRS library/implementation choice for TypeScript.
 - Whether fuzzy search should support numbers later for terms like `360-degree feedback`.
-- How diagnostic bundles upload to Git: direct commit, issue attachment workflow, or release/storage-backed reference.
+- Whether advanced Git diagnostic upload is worth implementing after Web Share/browser download.
 - Whether optional native wrappers are worth maintaining after the PWA is stable.
+
+## Architecture Decision Records
+
+### ADR-001 - PWA Over Native iOS App
+
+Date: 2026-05-24
+
+Status: Accepted
+
+Context: Long-term personal iPhone/iPad use must not require paid Apple Developer Program membership, TestFlight, or App Store purchase.
+
+Decision: Use a PWA installed through Safari Add to Home Screen as the primary install target.
+
+Alternatives considered: Flutter native, React Native, Capacitor native wrapper.
+
+Consequences: No Apple signing fee for the primary path, but browser storage and iOS PWA limitations must be managed explicitly.
+
+### ADR-002 - SQLite WASM First With Sharded Dictionary Fallback
+
+Date: 2026-05-24
+
+Status: Proposed pending Phase 0 validation
+
+Context: The existing dictionary pipeline already produces SQLite, but iPhone Safari persistence and memory behavior must be proven.
+
+Decision: Validate SQLite WASM first, preferably `wa-sqlite` with OPFS VFS. If Phase 0 fails, switch to a sharded dictionary package.
+
+Consequences: Phase 0 is mandatory before building the local core.
+
+### ADR-003 - Local Generated Key With Recovery Export
+
+Date: 2026-05-24
+
+Status: Accepted for initial design
+
+Context: The app is PWA-first and cannot rely on native secure enclave/keychain. It must support offline local use and cross-device recovery.
+
+Decision: Generate a local DEK, prompt the user to export a passphrase-protected recovery file, and optionally wrap the DEK to Google Drive after sign-in.
+
+Consequences: Users get a no-Google recovery path and a convenient Google recovery path, but documentation must explain browser key-storage limits.
