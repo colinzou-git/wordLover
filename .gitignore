@@ -13,6 +13,7 @@ poc/windows-pwa/.server.pid
 poc/windows-pwa/.offline-test-stopped.pid
 poc/windows-pwa/server.*.log
 poc/iphone-pwa/certs/
+poc/iphone-pwa/received-results/
 poc/iphone-pwa/.server.pid
 poc/iphone-pwa/server.*.log
 __pycache__/

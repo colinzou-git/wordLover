@@ -36,6 +36,14 @@ http://127.0.0.1:4173/poc-suite.html
 
 Click **Run all automated POCs**. The suite covers dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
 
+For iPhone testing, use the HTTPS server instead:
+
+```powershell
+.\start-iphone-https.ps1
+```
+
+If you are already in this `poc\windows-pwa\public` folder, the local `start-iphone-https.ps1` wrapper works from here too.
+
 ## Offline Dictionary Fallback Test
 
 The main POC now saves the dictionary into IndexedDB after a successful online load. If `/dictionary.sqlite` cannot be fetched later, **Load local SQLite dictionary** falls back to the saved copy and shows:

@@ -5,14 +5,13 @@ This suite automates the Phase 0 feasibility checks that can run from a browser 
 Run from the repo root:
 
 ```powershell
-cd poc\windows-pwa\public
-python -m http.server 4173
+.\start-iphone-https.ps1
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:4173/poc-suite.html
+https://192.168.1.73:8443/poc-suite.html
 ```
 
 Click **Run all automated POCs**.
@@ -36,6 +35,18 @@ Some POCs require user/device authorization and cannot be completed silently:
 - Android validation is intentionally deferred and should not block iPhone/Windows decisions.
 
 The same suite page can be opened on iPhone Safari to collect mobile results automatically after the user opens the page and taps the run button. Windows is the fallback surface for automation and stress tests.
+
+For iPhone autorun and automatic result upload, open:
+
+```text
+https://192.168.1.73:8443/poc-suite.html?autorun=1
+```
+
+Received reports are written to:
+
+```text
+poc\iphone-pwa\received-results\
+```
 
 ## Current Result File
 

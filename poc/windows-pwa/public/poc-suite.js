@@ -1,5 +1,6 @@
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
+const sendButton = document.querySelector("#sendResults");
 const statusPill = document.querySelector("#suiteStatus");
 const progressList = document.querySelector("#progressList");
 const summary = document.querySelector("#summary");
@@ -34,6 +35,15 @@ function addProgress(text) {
 
 function setStatus(text) {
   statusPill.textContent = text;
+}
+
+function isAutorun() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("autorun") === "1";
+}
+
+function canSendResults() {
+  return window.location.protocol === "https:";
 }
 
 function requestToPromise(request) {
@@ -547,7 +557,18 @@ async function runAllPocs() {
     deviceCoverage,
   };
   await saveStoreValue(KV_STORE, "lastResults", results);
+  localStorage.setItem("wordlover-phase0-last-results", JSON.stringify(results));
   return results;
+}
+
+async function sendResultsToServer(results) {
+  const response = await fetch("/__poc_results", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(results),
+  });
+  if (!response.ok) throw new Error(`Result upload failed: ${response.status}`);
+  return response.json();
 }
 
 function renderResults(results) {
@@ -567,17 +588,45 @@ function renderResults(results) {
 runButton.addEventListener("click", async () => {
   runButton.disabled = true;
   downloadButton.disabled = true;
+  sendButton.disabled = true;
   try {
     lastResults = await runAllPocs();
     renderResults(lastResults);
     setStatus("Complete");
     downloadButton.disabled = false;
+    sendButton.disabled = !canSendResults();
+    if (isAutorun() && canSendResults()) {
+      addProgress("Sending iPhone/browser result JSON back to the Windows HTTPS server.");
+      const upload = await sendResultsToServer(lastResults);
+      lastResults.upload = upload;
+      renderResults(lastResults);
+      setStatus("Sent");
+    }
   } catch (error) {
     const message = error instanceof Error ? error.stack ?? error.message : String(error);
     rawResults.textContent = message;
     setStatus("Failed");
   } finally {
     runButton.disabled = false;
+  }
+});
+
+sendButton.addEventListener("click", async () => {
+  if (!lastResults) return;
+  sendButton.disabled = true;
+  const previous = statusPill.textContent;
+  try {
+    setStatus("Sending");
+    const upload = await sendResultsToServer(lastResults);
+    lastResults.upload = upload;
+    renderResults(lastResults);
+    setStatus("Sent");
+  } catch (error) {
+    rawResults.textContent = `${rawResults.textContent}\n\nUpload failed: ${error instanceof Error ? error.message : String(error)}`;
+    setStatus("Send failed");
+  } finally {
+    sendButton.disabled = false;
+    if (statusPill.textContent === "Sending") setStatus(previous);
   }
 });
 
@@ -593,3 +642,17 @@ downloadButton.addEventListener("click", () => {
 });
 
 window.WordLoverPhase0 = { runAllPocs };
+
+async function initSavedResults() {
+  const saved = await loadStoreValue(KV_STORE, "lastResults", null);
+  if (saved) {
+    lastResults = saved;
+    renderResults(saved);
+    downloadButton.disabled = false;
+    sendButton.disabled = !canSendResults();
+  }
+  if (!isAutorun()) return;
+  runButton.click();
+}
+
+void initSavedResults();

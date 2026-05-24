@@ -99,11 +99,25 @@ This trust is only for your local POC certificate. Remove it after testing if yo
 
 ## 5. Start The HTTPS Server On Windows
 
-From the repo root:
+Recommended from the repo root:
+
+```powershell
+.\start-iphone-https.ps1
+```
+
+If you are currently in `poc\windows-pwa\public`, run:
+
+```powershell
+.\start-iphone-https.ps1
+```
+
+You can also run the Python server directly from the repo root:
 
 ```powershell
 python poc\iphone-pwa\serve-https.py --host 0.0.0.0 --port 8443
 ```
+
+Do not run `python poc\iphone-pwa\serve-https.py` from `poc\windows-pwa\public`; from that folder the relative path points to the wrong place.
 
 If Windows Firewall asks, allow Python on your private Wi-Fi network.
 
@@ -150,6 +164,28 @@ In Safari:
 Expected:
 
 - Diagnostics display mode should show `standalone` or `ios-standalone`.
+
+## 7A. Run The Automated iPhone Suite
+
+Open this URL on the iPhone while the Windows HTTPS server is running:
+
+```text
+https://192.168.1.73:8443/poc-suite.html?autorun=1
+```
+
+Expected:
+
+- The suite starts automatically.
+- It runs dictionary load, persistence, lookup timing, service worker, export/import, and diagnostics checks.
+- When complete, it sends a JSON result back to Windows.
+
+On Windows, received iPhone/browser reports are saved here:
+
+```text
+poc\iphone-pwa\received-results\
+```
+
+This folder is ignored by git because it contains generated local test results.
 
 ## 8. Load The Dictionary
 

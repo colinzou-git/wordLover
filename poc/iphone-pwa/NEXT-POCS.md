@@ -19,7 +19,7 @@ Manual iPhone steps:
 2. Start the HTTPS server on Windows:
 
 ```powershell
-python poc\iphone-pwa\serve-https.py --host 0.0.0.0 --port 8443
+.\start-iphone-https.ps1
 ```
 
 3. On iPhone Safari, open the HTTPS POC URL, for example:
@@ -58,16 +58,22 @@ Question: what are the real iPhone p50/p95 numbers for dictionary load, persiste
 
 Manual iPhone steps:
 
-1. Open the POC while online.
-2. Open:
+1. Make sure the Windows HTTPS server is running.
+2. Open this autorun URL on iPhone Safari or the Home Screen PWA:
 
 ```text
-https://192.168.1.73:8443/poc-suite.html
+https://192.168.1.73:8443/poc-suite.html?autorun=1
 ```
 
-3. Tap **Run all automated POCs**.
-4. Wait for completion.
-5. Save or screenshot the Results section.
+3. Wait for completion.
+4. Confirm the status shows `Sent`.
+5. On Windows, check:
+
+```text
+poc\iphone-pwa\received-results\
+```
+
+If the status does not show `Sent`, tap **Send results to Windows**.
 
 Record:
 

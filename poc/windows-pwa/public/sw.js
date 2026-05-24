@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordlover-poc-shell-v4";
+const CACHE_NAME = "wordlover-poc-shell-v6";
 const SHELL_ASSETS = [
   "/",
   "/app.js",
