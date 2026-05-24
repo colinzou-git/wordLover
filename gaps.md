@@ -14,6 +14,8 @@ The PRD and architecture have been updated to address the review's major finding
 
 No blocking document contradiction remains, but several implementation decisions intentionally remain open because they require Phase 0 technical validation on real devices.
 
+Update, 2026-05-24: the Windows PWA dictionary POC passed, and the real iPhone 17 Pro PWA POC was reported to work well with fast startup and fast dictionary loading. This lowers the highest SQLite WASM feasibility risk and supports continuing with the PWA-first, SQLite WASM-first plan. The remaining items below are narrower production-validation tasks, not document gaps.
+
 ## Review Items Addressed
 
 | Review item | Status | Resolution |
@@ -46,11 +48,12 @@ These are not gaps between the documents; they are technical decisions that need
 
 | Topic | Current document state | Next action |
 | --- | --- | --- |
-| SQLite WASM implementation | Architecture recommends evaluating `wa-sqlite` with OPFS VFS first. | Run Phase 0 benchmark on iPhone Safari, Android Chrome, and Windows browser. |
+| SQLite WASM implementation | Windows PWA and real iPhone 17 Pro PWA POCs support SQLite WASM-first. Architecture still requires production persistence validation. | Evaluate `wa-sqlite` OPFS/IndexedDB VFS versus the current simpler `sql.js` approach, then choose the production persistence mode. |
 | Dictionary fallback format | Architecture defines sharded dictionary fallback, but exact binary schema is not finalized. | Design only if SQLite WASM fails Phase 0 criteria or is too slow/heavy. |
 | Browser encryption recovery UX | Architecture selects DEK + recovery export + optional Google key-wrap. | Prototype recovery file creation/import and decide passphrase UX. |
 | Export encryption mode | Architecture leaves open whether normal tar exports are always encrypted or can be plain. | Decide before implementing export/import UI. |
 | Advanced Git diagnostic upload | PRD/architecture make it optional. | Defer until Web Share/browser download diagnostics are working. |
+| Android PWA validation | Architecture supports Android PWA, but POC coverage is currently Windows and iPhone. | Run a smaller Android Chrome PWA install/storage/offline POC after the persistence mode is chosen. |
 | Native wrappers | Architecture makes wrappers optional. | Revisit only after PWA core works well. |
 
 ## Residual Risks
@@ -61,7 +64,7 @@ The PRD requires local-first offline use, and architecture mitigates browser sto
 
 ### Large Dictionary Package On iPhone
 
-The local SQLite dictionary is large. Architecture requires Phase 0 validation and fallback to sharded data if SQLite WASM fails. This is still the highest implementation risk.
+The local SQLite dictionary is large. The iPhone 17 Pro POC passed for startup and dictionary loading, so this is no longer the top feasibility blocker. The remaining risk is whether the production storage mode survives app restarts, storage pressure, and older supported phones.
 
 ### AI Provider Requirement Shift
 
@@ -90,7 +93,7 @@ The architecture explicitly documents that browser storage is not equivalent to 
 
 ## Suggested Next Documentation Step
 
-Before implementation planning, create a short Phase 0 test plan from the architecture's validation criteria. That should become the first implementation milestone because it decides whether the app can use SQLite WASM directly or must switch to the sharded dictionary fallback.
+Before full implementation planning, finish the remaining Phase 0 validation notes for persistence, offline launch, export/import, encryption recovery, sync, and Android. The SQLite WASM direction is now strong enough to use for the first implementation plan, while the sharded dictionary package remains a contingency.
 
 ## Additional Review Follow-up
 

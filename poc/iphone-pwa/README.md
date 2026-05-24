@@ -1,5 +1,7 @@
 # WordLover iPhone 17 Pro PWA POC
 
+Current result: pass. On 2026-05-24, the real iPhone 17 Pro POC was reported to work well: the web app starts fast and loads the dictionary fast. See `RESULTS.md` for the recorded outcome and remaining measurements to capture later.
+
 This POC tests the real iPhone Safari/Home Screen PWA risks:
 
 - HTTPS install path from a Windows PC.

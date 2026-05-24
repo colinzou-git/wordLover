@@ -59,11 +59,18 @@ The Windows browser POC is promising:
 - IndexedDB persistence for small user state works.
 - PWA shell registration works.
 
-The main remaining feasibility risks are not Windows-specific:
+Follow-up iPhone validation:
 
-- iPhone Safari memory and persistence must still be validated separately.
-- `sql.js` loads the full database into memory; this may be acceptable on Windows but may not be acceptable on iPhone.
-- The production architecture should still evaluate `wa-sqlite` with OPFS VFS and the sharded fallback described in `docs/architecture-design.md`.
+- The next POC on a real iPhone 17 Pro was reported successful on 2026-05-24.
+- The web app starts fast and loads the dictionary fast on iPhone.
+- This reduces the biggest SQLite WASM feasibility risk.
+
+The main remaining feasibility risks are now persistence and production hardening:
+
+- `sql.js` loads the full database into memory; this worked in the POCs, but older phones still need timed validation.
+- Production must persist the dictionary package in IndexedDB or OPFS, not rely on HTTP cache.
+- The production architecture should still evaluate `wa-sqlite` with OPFS VFS for durable browser persistence.
+- Keep the sharded fallback described in `docs/architecture-design.md`, but do not activate it unless persistence, memory, or older-device performance fails.
 
 ## How To Run
 
