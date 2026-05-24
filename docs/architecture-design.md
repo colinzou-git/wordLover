@@ -869,6 +869,7 @@ Current validation snapshot:
 | --- | --- | --- |
 | Windows PWA dictionary POC | Pass | App shell, service worker, SQLite fetch/open, exact word lookup, phrase lookup, invalid input rejection, IndexedDB history persistence, and export-button flow were validated. Exact observed lookup times were far below 1 second. |
 | Real iPhone 17 Pro PWA POC | Pass for current feasibility scope | User reported the web app starts fast and loads the dictionary fast. This validates the PWA-first and SQLite WASM-first direction on the most important target device. Exact p50/p95 timing, durable dictionary persistence, and offline launch measurements still need a timed validation pass. |
+| Phase 0 automated browser POC suite | Pass on Windows browser | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell reload, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android and real Google OAuth remain device/account-gated. |
 
 Validation report contents:
 
@@ -906,12 +907,12 @@ Validation report contents:
 ### Phase 0: Technical Validation
 
 - Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro feasibility with `sql.js`.
-- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: still needed for production persistence decision.
+- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows; still measure iPhone and Android before final production decision.
 - Measure startup and lookup time on iPhone, Android, and Windows. Status: Windows measured; iPhone qualitatively passed; timed iPhone p50/p95 and Android measurements still needed.
-- Validate storage quota and persistence behavior. Status: still needed.
+- Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser; iPhone and Android persistence numbers still needed.
 - Validate Add to Home Screen install flow. Status: iPhone PWA path validated at feasibility level; document exact iOS version in timed pass.
-- Validate offline launch after install. Status: still needed for final Phase 0 report.
-- Validate export/import tar in browser. Status: export-button flow partially validated on Windows; tar export/import still needed.
+- Validate offline launch after install. Status: Windows service-worker shell reload passed with the local server stopped; iPhone and Android offline launch still need device runs.
+- Validate export/import tar in browser. Status: encrypted tar-style export/import round trip passed in the automated browser POC; full product UI export/import still needs implementation.
 - Produce the Phase 0 validation report required by PRD Req 167.
 - Confirm or reject SQLite WASM. Current direction: continue with SQLite WASM first; keep sharded package as fallback only if persistence, older-device memory, or timed latency fails.
 
@@ -969,7 +970,7 @@ Validation report contents:
 
 ## Open Decisions
 
-- Exact SQLite WASM production persistence mode. The POCs support SQLite WASM direction, but production still needs the choice between `sql.js` plus IndexedDB packaging and `wa-sqlite` with OPFS/IndexedDB VFS.
+- Exact SQLite WASM production persistence mode. The automated Windows POC shows that both IndexedDB and OPFS can persist the dictionary package with `sql.js`; production still needs iPhone and Android numbers before choosing the final storage path.
 - Exact dictionary packaging format and compression for first-time setup and updates.
 - Whether user-data export is encrypted by default or offers encrypted and plain tar modes.
 - Whether fuzzy search should support numbers later for terms like `360-degree feedback`.
@@ -998,11 +999,11 @@ Date: 2026-05-24
 
 Status: Accepted for Phase 1 direction, with persistence validation still required
 
-Context: The existing dictionary pipeline already produces SQLite. Windows and real iPhone 17 Pro POCs validated that the current SQLite dictionary can support fast PWA startup and dictionary loading in the feasibility prototype. Durable browser persistence and older-device behavior still need validation.
+Context: The existing dictionary pipeline already produces SQLite. Windows and real iPhone 17 Pro POCs validated that the current SQLite dictionary can support fast PWA startup and dictionary loading in the feasibility prototype. The automated Windows POC also validated IndexedDB and OPFS package persistence. Durable mobile browser persistence and older-device behavior still need validation.
 
 Decision: Continue with SQLite WASM as the first implementation path. Evaluate the production persistence layer, preferably `wa-sqlite` with OPFS or IndexedDB VFS compared with the simpler `sql.js` approach. If persistence, older-device memory, or timed latency fails, switch to a sharded dictionary package.
 
-Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish persistence, offline launch, Android, export/import, and security recovery validation before the architecture is considered fully proven.
+Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish mobile persistence, mobile offline launch, Android, and real Google OAuth validation before the architecture is considered fully proven.
 
 ### ADR-003 - Local Generated Key With Recovery Export
 

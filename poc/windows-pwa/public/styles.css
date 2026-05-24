@@ -19,7 +19,8 @@ input {
   font: inherit;
 }
 
-button {
+button,
+.button-link {
   min-height: 44px;
   border: 0;
   border-radius: 8px;
@@ -27,6 +28,12 @@ button {
   color: #fff;
   padding: 0 16px;
   cursor: pointer;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 button:disabled {
@@ -179,6 +186,20 @@ li button {
   margin-right: 12px;
   background: #dfeeed;
   color: #1d2b2f;
+}
+
+.progress-list li {
+  line-height: 1.45;
+}
+
+.raw-results {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #ded8ca;
+  border-radius: 8px;
+  background: #fbfaf6;
+  padding: 12px;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 700px) {

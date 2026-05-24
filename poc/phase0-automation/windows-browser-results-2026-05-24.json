@@ -1,0 +1,173 @@
+{
+  "completedAt": "2026-05-24T19:09:35.385Z",
+  "verdict": {
+    "sqliteWasmDirection": "pass",
+    "indexedDbDictionaryPersistence": "pass",
+    "opfsDictionaryPersistence": "pass",
+    "offlineShellCacheReadiness": "pass",
+    "encryptedExportImport": "pass",
+    "mockCloudSync": "pass",
+    "androidRealDevice": "requires-android-device",
+    "timedBenchmark": "pass"
+  },
+  "diagnostics": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Codex/26.513.40821 Chrome/148.0.7778.97 Electron/42.0.1 Safari/537.36",
+    "platform": "Win32",
+    "secureContext": true,
+    "displayMode": "browser",
+    "indexedDb": true,
+    "webAssembly": true,
+    "webCrypto": true,
+    "opfs": true,
+    "storagePersistedBefore": false,
+    "storagePersistRequestResult": false,
+    "storagePersistedAfter": false,
+    "storageEstimate": {
+      "quota": 365532175990,
+      "usage": 921206,
+      "usageDetails": {
+        "caches": 917248,
+        "indexedDB": 2951,
+        "serviceWorkerRegistrations": 1007
+      }
+    },
+    "isAndroid": false,
+    "isIphoneOrIpad": false
+  },
+  "serviceWorker": {
+    "available": true,
+    "ready": true,
+    "scope": "http://127.0.0.1:4173/",
+    "controller": true
+  },
+  "offlineShell": {
+    "supported": true,
+    "cacheNames": [
+      "wordlover-poc-shell-v2"
+    ],
+    "allShellAssetsCached": true,
+    "missing": [],
+    "note": "This verifies shell cache readiness. A true network-off launch still requires device/browser offline mode."
+  },
+  "dictionaryFetch": {
+    "fetchMs": 1006.5,
+    "bytes": 206606336,
+    "sampleChecksum": "383dc5bf"
+  },
+  "dictionaryOpen": {
+    "initMs": 31.899999976158142,
+    "openMs": 77.79999995231628,
+    "rows": 770611
+  },
+  "benchmark": {
+    "terms": [
+      "abandon",
+      "take off",
+      "in terms of",
+      "abundant",
+      "accurate"
+    ],
+    "allFound": true,
+    "timing": {
+      "count": 100,
+      "minMs": 0,
+      "medianMs": 0.19999992847442627,
+      "p95Ms": 0.5,
+      "maxMs": 7.5
+    },
+    "samples": [
+      {
+        "status": "found",
+        "term": "abandon",
+        "entryType": "word",
+        "queryMs": 0.5,
+        "hasEnglish": true,
+        "hasChinese": true,
+        "source": "ECDICT"
+      },
+      {
+        "status": "found",
+        "term": "take off",
+        "entryType": "phrase",
+        "queryMs": 0.20000004768371582,
+        "hasEnglish": true,
+        "hasChinese": true,
+        "source": "WordNet 3.0"
+      },
+      {
+        "status": "found",
+        "term": "in terms of",
+        "entryType": "phrase",
+        "queryMs": 0.10000002384185791,
+        "hasEnglish": false,
+        "hasChinese": true,
+        "source": "ECDICT"
+      },
+      {
+        "status": "found",
+        "term": "abundant",
+        "entryType": "word",
+        "queryMs": 0.20000004768371582,
+        "hasEnglish": true,
+        "hasChinese": true,
+        "source": "ECDICT"
+      },
+      {
+        "status": "found",
+        "term": "accurate",
+        "entryType": "word",
+        "queryMs": 0.2999999523162842,
+        "hasEnglish": true,
+        "hasChinese": true,
+        "source": "ECDICT"
+      }
+    ]
+  },
+  "indexedDbPersistence": {
+    "saveMs": 999.5999999046326,
+    "loadMs": 601.5,
+    "bytes": 206606336,
+    "sampleChecksum": "383dc5bf",
+    "reopenedRows": 770611,
+    "lookup": {
+      "status": "found",
+      "term": "abandon",
+      "entryType": "word",
+      "queryMs": 0.3999999761581421,
+      "hasEnglish": true,
+      "hasChinese": true,
+      "source": "ECDICT"
+    }
+  },
+  "opfsPersistence": {
+    "supported": true,
+    "saveMs": 757.3000000715256,
+    "loadMs": 321.5,
+    "bytes": 206606336,
+    "sampleChecksum": "383dc5bf"
+  },
+  "exportImport": {
+    "archiveBytes": 3072,
+    "files": [
+      "manifest.json",
+      "user-data.enc"
+    ],
+    "manifestValid": true,
+    "roundTripMatches": true
+  },
+  "mockGoogleDriveSync": {
+    "mode": "mock",
+    "oauthPerformed": false,
+    "synced": true,
+    "statusSequence": [
+      "pending",
+      "synced"
+    ],
+    "note": "Real Google Drive OAuth/upload needs user account authorization and cannot be completed silently by automation."
+  },
+  "deviceCoverage": {
+    "androidPoc": "not-executed-on-android-from-this-browser",
+    "iphonePoc": "not-executed-on-ios-from-this-browser",
+    "note": "Run this same page on Android Chrome and iPhone Safari/Home Screen to collect real mobile rows automatically."
+  }
+}

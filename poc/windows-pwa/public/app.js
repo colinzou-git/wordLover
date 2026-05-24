@@ -163,7 +163,7 @@ async function loadDictionary() {
   dictionaryDb = new SQL.Database(bytes);
   const opened = performance.now();
   const count = dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
-  return {
+  lastMetrics = {
     fetchMs: fetched - start,
     initMs: initialized - fetched,
     openMs: opened - initialized,

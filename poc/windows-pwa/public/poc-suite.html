@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#256d85" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>WordLover Phase 0 POC Suite</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Phase 0 automation</p>
+          <h1>WordLover POC suite</h1>
+        </div>
+        <div id="suiteStatus" class="status-pill">Ready</div>
+      </section>
+
+      <section class="panel">
+        <div class="toolbar">
+          <button id="runSuite" type="button">Run all automated POCs</button>
+          <button id="downloadResults" type="button" disabled>Download results</button>
+        </div>
+        <p class="small">
+          Runs browser-automatable checks for dictionary persistence, lookup timing, offline shell cache readiness,
+          encrypted export/import, mock cloud sync, and device capability reporting.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Progress</h2>
+        <ol id="progressList" class="progress-list"></ol>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <div id="summary" class="metrics"></div>
+        <pre id="rawResults" class="raw-results">{}</pre>
+      </section>
+    </main>
+
+    <script src="/vendor/sql-wasm.js"></script>
+    <script type="module" src="/poc-suite.js"></script>
+  </body>
+</html>

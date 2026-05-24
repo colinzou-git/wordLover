@@ -26,6 +26,14 @@ Then open:
 http://127.0.0.1:4173
 ```
 
+To run the broader Phase 0 automated suite, open:
+
+```text
+http://127.0.0.1:4173/poc-suite.html
+```
+
+Click **Run all automated POCs**. The suite covers dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
+
 ## Pass Criteria
 
 - App shell visible in under 1 second.

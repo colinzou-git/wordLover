@@ -10,6 +10,7 @@ poc/windows-pwa/dist/
 poc/windows-pwa/node_modules/
 poc/windows-pwa/.vite/
 poc/windows-pwa/.server.pid
+poc/windows-pwa/.offline-test-stopped.pid
 poc/windows-pwa/server.*.log
 poc/iphone-pwa/certs/
 poc/iphone-pwa/.server.pid

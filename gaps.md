@@ -14,7 +14,7 @@ The PRD and architecture have been updated to address the review's major finding
 
 No blocking document contradiction remains, but several implementation decisions intentionally remain open because they require Phase 0 technical validation on real devices.
 
-Update, 2026-05-24: the Windows PWA dictionary POC passed, and the real iPhone 17 Pro PWA POC was reported to work well with fast startup and fast dictionary loading. This lowers the highest SQLite WASM feasibility risk and supports continuing with the PWA-first, SQLite WASM-first plan. The remaining items below are narrower production-validation tasks, not document gaps.
+Update, 2026-05-24: the Windows PWA dictionary POC passed, and the real iPhone 17 Pro PWA POC was reported to work well with fast startup and fast dictionary loading. The automated browser POC suite also passed on Windows for IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell reload, encrypted export/import, mock cloud sync, and lookup timing. This lowers the highest SQLite WASM feasibility risk and supports continuing with the PWA-first, SQLite WASM-first plan. The remaining items below are narrower production-validation tasks, not document gaps.
 
 ## Review Items Addressed
 
@@ -48,10 +48,10 @@ These are not gaps between the documents; they are technical decisions that need
 
 | Topic | Current document state | Next action |
 | --- | --- | --- |
-| SQLite WASM implementation | Windows PWA and real iPhone 17 Pro PWA POCs support SQLite WASM-first. Architecture still requires production persistence validation. | Evaluate `wa-sqlite` OPFS/IndexedDB VFS versus the current simpler `sql.js` approach, then choose the production persistence mode. |
+| SQLite WASM implementation | Windows PWA, real iPhone 17 Pro, and automated Windows persistence POCs support SQLite WASM-first. Architecture still requires mobile persistence validation. | Run the automated suite on iPhone Safari/Home Screen and Android Chrome, then choose the production persistence mode. |
 | Dictionary fallback format | Architecture defines sharded dictionary fallback, but exact binary schema is not finalized. | Design only if SQLite WASM fails Phase 0 criteria or is too slow/heavy. |
-| Browser encryption recovery UX | Architecture selects DEK + recovery export + optional Google key-wrap. | Prototype recovery file creation/import and decide passphrase UX. |
-| Export encryption mode | Architecture leaves open whether normal tar exports are always encrypted or can be plain. | Decide before implementing export/import UI. |
+| Browser encryption recovery UX | Architecture selects DEK + recovery export + optional Google key-wrap. The automated suite proved Web Crypto encrypted export/import round trip. | Decide user-facing passphrase and recovery-file UX before product UI implementation. |
+| Export encryption mode | Architecture leaves open whether normal tar exports are always encrypted or can be plain. | Decide product policy before implementing export/import UI. |
 | Advanced Git diagnostic upload | PRD/architecture make it optional. | Defer until Web Share/browser download diagnostics are working. |
 | Android PWA validation | Architecture supports Android PWA, but POC coverage is currently Windows and iPhone. | Run a smaller Android Chrome PWA install/storage/offline POC after the persistence mode is chosen. |
 | Native wrappers | Architecture makes wrappers optional. | Revisit only after PWA core works well. |
@@ -93,7 +93,7 @@ The architecture explicitly documents that browser storage is not equivalent to 
 
 ## Suggested Next Documentation Step
 
-Before full implementation planning, finish the remaining Phase 0 validation notes for persistence, offline launch, export/import, encryption recovery, sync, and Android. The SQLite WASM direction is now strong enough to use for the first implementation plan, while the sharded dictionary package remains a contingency.
+Before full implementation planning, finish the remaining Phase 0 validation notes for iPhone/Android persistence, mobile offline launch, real Google Drive OAuth sync, and mobile timed benchmarks. The SQLite WASM direction is now strong enough to use for the first implementation plan, while the sharded dictionary package remains a contingency.
 
 ## Additional Review Follow-up
 

@@ -1,0 +1,595 @@
+const runButton = document.querySelector("#runSuite");
+const downloadButton = document.querySelector("#downloadResults");
+const statusPill = document.querySelector("#suiteStatus");
+const progressList = document.querySelector("#progressList");
+const summary = document.querySelector("#summary");
+const rawResults = document.querySelector("#rawResults");
+
+const AUTOMATION_DB = "wordlover-phase0-poc";
+const KV_STORE = "kv";
+const FILE_STORE = "files";
+const DICTIONARY_KEY = "dictionary.sqlite";
+const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
+const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
+const SHELL_ASSETS = [
+  "/",
+  "/app.js",
+  "/styles.css",
+  "/manifest.webmanifest",
+  "/icon.svg",
+  "/vendor/sql-wasm.js",
+  "/vendor/sql-wasm.wasm",
+  "/poc-suite.html",
+  "/poc-suite.js",
+];
+
+let lastResults = null;
+let SQL = null;
+
+function addProgress(text) {
+  const item = document.createElement("li");
+  item.textContent = text;
+  progressList.appendChild(item);
+}
+
+function setStatus(text) {
+  statusPill.textContent = text;
+}
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function openAutomationDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(AUTOMATION_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(KV_STORE)) db.createObjectStore(KV_STORE);
+      if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveStoreValue(storeName, key, value) {
+  const db = await openAutomationDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function loadStoreValue(storeName, key, fallback = null) {
+  const db = await openAutomationDb();
+  const tx = db.transaction(storeName, "readonly");
+  const value = await requestToPromise(tx.objectStore(storeName).get(key));
+  db.close();
+  return value ?? fallback;
+}
+
+function normalizeTerm(term) {
+  return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+}
+
+function sampleChecksum(bytes) {
+  let value = bytes.length;
+  const sampleSize = Math.min(4096, bytes.length);
+  for (let i = 0; i < sampleSize; i += 1) {
+    value = (value + bytes[i] * (i + 1)) >>> 0;
+  }
+  for (let i = Math.max(0, bytes.length - sampleSize); i < bytes.length; i += 1) {
+    value = (value + bytes[i] * ((bytes.length - i) + 1)) >>> 0;
+  }
+  return value.toString(16).padStart(8, "0");
+}
+
+async function initSql() {
+  SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
+  return SQL;
+}
+
+async function openDictionary(bytes) {
+  const start = performance.now();
+  const sql = await initSql();
+  const initialized = performance.now();
+  const db = new sql.Database(bytes);
+  const opened = performance.now();
+  const count = db.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
+  return {
+    db,
+    metrics: {
+      initMs: initialized - start,
+      openMs: opened - initialized,
+      rows: count,
+    },
+  };
+}
+
+function lookupTerm(db, input) {
+  const normalized = normalizeTerm(input);
+  if (!TERM_RE.test(normalized)) return { status: "invalid_input", term: input, queryMs: 0 };
+  const start = performance.now();
+  const statement = db.prepare(`
+    SELECT word, phonetic, definition, definition_source, translation, tag
+    FROM dictionary_entries
+    WHERE normalized_word = :term
+    ORDER BY
+      CASE WHEN word = :raw THEN 0 ELSE 1 END,
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc
+    LIMIT 1
+  `);
+  try {
+    statement.bind({ ":term": normalized, ":raw": input.trim() });
+    if (!statement.step()) return { status: "not_found", term: input, queryMs: performance.now() - start };
+    const row = statement.getAsObject();
+    return {
+      status: "found",
+      term: row.word ?? input,
+      entryType: row.word?.includes(" ") ? "phrase" : "word",
+      queryMs: performance.now() - start,
+      hasEnglish: Boolean(row.definition),
+      hasChinese: Boolean(row.translation),
+      source: row.definition_source ?? "unknown",
+    };
+  } finally {
+    statement.free();
+  }
+}
+
+function percentile(values, percentileRank) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil((percentileRank / 100) * sorted.length) - 1);
+  return sorted[index] ?? 0;
+}
+
+function summarizeTiming(values) {
+  return {
+    count: values.length,
+    minMs: Math.min(...values),
+    medianMs: percentile(values, 50),
+    p95Ms: percentile(values, 95),
+    maxMs: Math.max(...values),
+  };
+}
+
+async function fetchDictionary() {
+  const start = performance.now();
+  const response = await fetch("/dictionary.sqlite", { cache: "no-store" });
+  if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return {
+    bytes,
+    metrics: {
+      fetchMs: performance.now() - start,
+      bytes: bytes.byteLength,
+      sampleChecksum: sampleChecksum(bytes),
+    },
+  };
+}
+
+async function saveDictionaryToIndexedDb(bytes) {
+  const start = performance.now();
+  await saveStoreValue(FILE_STORE, DICTIONARY_KEY, bytes);
+  return performance.now() - start;
+}
+
+async function loadDictionaryFromIndexedDb() {
+  const start = performance.now();
+  const bytes = await loadStoreValue(FILE_STORE, DICTIONARY_KEY);
+  if (!bytes) throw new Error("Dictionary was not found in IndexedDB.");
+  return {
+    bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+    loadMs: performance.now() - start,
+  };
+}
+
+async function saveDictionaryToOpfs(bytes) {
+  if (!navigator.storage?.getDirectory) {
+    return { supported: false, saveMs: null, loadMs: null, bytes: null, sampleChecksum: null };
+  }
+  const root = await navigator.storage.getDirectory();
+  const startSave = performance.now();
+  const handle = await root.getFileHandle(DICTIONARY_KEY, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(bytes);
+  await writable.close();
+  const saveMs = performance.now() - startSave;
+
+  const startLoad = performance.now();
+  const file = await handle.getFile();
+  const restored = new Uint8Array(await file.arrayBuffer());
+  const loadMs = performance.now() - startLoad;
+  return {
+    supported: true,
+    saveMs,
+    loadMs,
+    bytes: restored.byteLength,
+    sampleChecksum: sampleChecksum(restored),
+  };
+}
+
+async function benchmarkDictionary(db) {
+  const lookups = [];
+  for (let round = 0; round < 20; round += 1) {
+    for (const term of BENCHMARK_TERMS) {
+      lookups.push(lookupTerm(db, term));
+    }
+  }
+  const timings = lookups.map((item) => item.queryMs);
+  return {
+    terms: BENCHMARK_TERMS,
+    allFound: lookups.every((item) => item.status === "found"),
+    timing: summarizeTiming(timings),
+    samples: BENCHMARK_TERMS.map((term) => lookupTerm(db, term)),
+  };
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return { available: false, ready: false };
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  return {
+    available: true,
+    ready: Boolean(registration.active || registration.waiting || registration.installing),
+    scope: registration.scope,
+    controller: Boolean(navigator.serviceWorker.controller),
+  };
+}
+
+async function checkOfflineShellCache() {
+  if (!("caches" in window)) return { supported: false, allShellAssetsCached: false, missing: SHELL_ASSETS };
+  const keys = await caches.keys();
+  const missing = [];
+  for (const asset of SHELL_ASSETS) {
+    const match = await caches.match(asset);
+    if (!match) missing.push(asset);
+  }
+  return {
+    supported: true,
+    cacheNames: keys,
+    allShellAssetsCached: missing.length === 0,
+    missing,
+    note: "This verifies shell cache readiness. A true network-off launch still requires device/browser offline mode.",
+  };
+}
+
+function utf8Bytes(text) {
+  return new TextEncoder().encode(text);
+}
+
+function utf8Text(bytes) {
+  return new TextDecoder().decode(bytes);
+}
+
+function concatBytes(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+function writeAscii(target, offset, length, value) {
+  const text = String(value);
+  for (let i = 0; i < Math.min(length, text.length); i += 1) {
+    target[offset + i] = text.charCodeAt(i) & 0x7f;
+  }
+}
+
+function tarChecksum(header) {
+  let sum = 0;
+  for (let i = 0; i < header.length; i += 1) {
+    sum += i >= 148 && i < 156 ? 32 : header[i];
+  }
+  return sum;
+}
+
+function createTar(files) {
+  const chunks = [];
+  for (const file of files) {
+    const data = file.data instanceof Uint8Array ? file.data : utf8Bytes(file.data);
+    const header = new Uint8Array(512);
+    writeAscii(header, 0, 100, file.name);
+    writeAscii(header, 100, 8, "0000644");
+    writeAscii(header, 108, 8, "0000000");
+    writeAscii(header, 116, 8, "0000000");
+    writeAscii(header, 124, 12, data.length.toString(8).padStart(11, "0"));
+    writeAscii(header, 136, 12, Math.floor(Date.now() / 1000).toString(8).padStart(11, "0"));
+    writeAscii(header, 148, 8, "        ");
+    header[156] = "0".charCodeAt(0);
+    writeAscii(header, 257, 6, "ustar");
+    writeAscii(header, 263, 2, "00");
+    writeAscii(header, 148, 8, tarChecksum(header).toString(8).padStart(6, "0") + "\0 ");
+    chunks.push(header, data);
+    const padding = (512 - (data.length % 512)) % 512;
+    if (padding) chunks.push(new Uint8Array(padding));
+  }
+  chunks.push(new Uint8Array(1024));
+  return concatBytes(chunks);
+}
+
+function parseTar(bytes) {
+  const files = {};
+  let offset = 0;
+  while (offset + 512 <= bytes.length) {
+    const header = bytes.slice(offset, offset + 512);
+    if (header.every((value) => value === 0)) break;
+    const name = utf8Text(header.slice(0, 100)).replace(/\0.*$/, "");
+    const sizeText = utf8Text(header.slice(124, 136)).replace(/\0.*$/, "").trim();
+    const size = Number.parseInt(sizeText || "0", 8);
+    const dataStart = offset + 512;
+    files[name] = bytes.slice(dataStart, dataStart + size);
+    offset = dataStart + size + ((512 - (size % 512)) % 512);
+  }
+  return files;
+}
+
+async function deriveKey(passphrase, salt) {
+  const material = await crypto.subtle.importKey("raw", utf8Bytes(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 120000, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+function randomBytes(length) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+async function encryptJson(value, passphrase) {
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const key = await deriveKey(passphrase, salt);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, utf8Bytes(JSON.stringify(value))));
+  return { salt, iv, ciphertext };
+}
+
+async function decryptJson(envelope, passphrase) {
+  const key = await deriveKey(passphrase, envelope.salt);
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: envelope.iv }, key, envelope.ciphertext);
+  return JSON.parse(utf8Text(new Uint8Array(plaintext)));
+}
+
+async function runExportImportPoc() {
+  const userData = {
+    app: "wordlover",
+    dataFormatVersion: "poc-1",
+    exportedAt: new Date().toISOString(),
+    vocabulary: [
+      { term: "abandon", grade: "Again", source: "ECDICT" },
+      { term: "take off", grade: "Hard", source: "ECDICT" },
+    ],
+    stats: { newSavedToday: 2, reviewedToday: 1, masteredToday: 0 },
+  };
+  const passphrase = "wordlover-phase0-recovery-passphrase";
+  const encrypted = await encryptJson(userData, passphrase);
+  const manifest = {
+    app: "wordlover",
+    exportFormat: "encrypted-tar-poc",
+    dataFormatVersion: userData.dataFormatVersion,
+    createdAt: userData.exportedAt,
+    encryption: {
+      algorithm: "AES-GCM",
+      kdf: "PBKDF2-SHA256",
+      iterations: 120000,
+      saltHex: Array.from(encrypted.salt, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      ivHex: Array.from(encrypted.iv, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    },
+  };
+  const archive = createTar([
+    { name: "manifest.json", data: JSON.stringify(manifest, null, 2) },
+    { name: "user-data.enc", data: encrypted.ciphertext },
+  ]);
+  const parsed = parseTar(archive);
+  const parsedManifest = JSON.parse(utf8Text(parsed["manifest.json"]));
+  const restored = await decryptJson(
+    {
+      salt: encrypted.salt,
+      iv: encrypted.iv,
+      ciphertext: parsed["user-data.enc"],
+    },
+    passphrase,
+  );
+  const matches = JSON.stringify(restored) === JSON.stringify(userData);
+  return {
+    archiveBytes: archive.byteLength,
+    files: Object.keys(parsed),
+    manifestValid: parsedManifest.app === "wordlover" && parsedManifest.encryption.algorithm === "AES-GCM",
+    roundTripMatches: matches,
+  };
+}
+
+async function runMockGoogleDriveSyncPoc(exportImportResult) {
+  const snapshot = {
+    provider: "mock-google-drive",
+    statusSequence: ["pending", "synced"],
+    appVersion: "poc",
+    dataFormatVersion: "poc-1",
+    createdAt: new Date().toISOString(),
+    encryptedArchiveBytes: exportImportResult.archiveBytes,
+  };
+  await saveStoreValue(KV_STORE, "mockDriveManifest", snapshot);
+  const restored = await loadStoreValue(KV_STORE, "mockDriveManifest");
+  return {
+    mode: "mock",
+    oauthPerformed: false,
+    synced: restored?.statusSequence?.at(-1) === "synced",
+    statusSequence: restored?.statusSequence ?? [],
+    note: "Real Google Drive OAuth/upload needs user account authorization and cannot be completed silently by automation.",
+  };
+}
+
+async function collectDeviceDiagnostics() {
+  const storageEstimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
+  const persistedBefore = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+  const persistGranted = navigator.storage?.persist ? await navigator.storage.persist() : null;
+  const persistedAfter = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+  const userAgent = navigator.userAgent;
+  return {
+    userAgent,
+    platform: navigator.platform,
+    secureContext: window.isSecureContext,
+    displayMode: window.matchMedia("(display-mode: standalone)").matches
+      ? "standalone"
+      : window.navigator.standalone
+        ? "ios-standalone"
+        : "browser",
+    indexedDb: "indexedDB" in window,
+    webAssembly: "WebAssembly" in window,
+    webCrypto: Boolean(crypto?.subtle),
+    opfs: Boolean(navigator.storage?.getDirectory),
+    storagePersistedBefore: persistedBefore,
+    storagePersistRequestResult: persistGranted,
+    storagePersistedAfter: persistedAfter,
+    storageEstimate,
+    isAndroid: /Android/i.test(userAgent),
+    isIphoneOrIpad: /iPhone|iPad/i.test(userAgent),
+  };
+}
+
+async function runAllPocs() {
+  setStatus("Running");
+  progressList.innerHTML = "";
+  summary.innerHTML = "";
+  rawResults.textContent = "{}";
+  addProgress("Collecting browser and storage diagnostics.");
+  const diagnostics = await collectDeviceDiagnostics();
+
+  addProgress("Registering service worker and checking app shell cache.");
+  const serviceWorker = await registerServiceWorker();
+  const offlineShell = await checkOfflineShellCache();
+
+  addProgress("Fetching current SQLite dictionary.");
+  let dictionary = await fetchDictionary();
+  const dictionaryFetchMetrics = dictionary.metrics;
+
+  addProgress("Opening SQLite dictionary and running timed lookups.");
+  const opened = await openDictionary(dictionary.bytes);
+  const benchmark = await benchmarkDictionary(opened.db);
+  opened.db.close();
+
+  addProgress("Saving dictionary package to IndexedDB.");
+  const indexedDbSaveMs = await saveDictionaryToIndexedDb(dictionary.bytes);
+
+  addProgress("Saving dictionary package to OPFS when available.");
+  const opfs = await saveDictionaryToOpfs(dictionary.bytes);
+  const originalChecksum = dictionary.metrics.sampleChecksum;
+  dictionary = null;
+
+  addProgress("Reloading dictionary package from IndexedDB and proving it can query.");
+  const indexedDbLoad = await loadDictionaryFromIndexedDb();
+  const indexedDbOpened = await openDictionary(indexedDbLoad.bytes);
+  const indexedDbLookup = lookupTerm(indexedDbOpened.db, "abandon");
+  indexedDbOpened.db.close();
+
+  addProgress("Running encrypted tar export/import recovery POC.");
+  const exportImport = await runExportImportPoc();
+
+  addProgress("Running mock Google Drive encrypted snapshot sync POC.");
+  const mockSync = await runMockGoogleDriveSyncPoc(exportImport);
+
+  addProgress("Recording Android and iPhone device coverage status.");
+  const deviceCoverage = {
+    androidPoc: diagnostics.isAndroid ? "executed-on-android-browser" : "not-executed-on-android-from-this-browser",
+    iphonePoc: diagnostics.isIphoneOrIpad ? "executed-on-ios-browser" : "not-executed-on-ios-from-this-browser",
+    note: "Run this same page on Android Chrome and iPhone Safari/Home Screen to collect real mobile rows automatically.",
+  };
+
+  const completedAt = new Date().toISOString();
+  const results = {
+    completedAt,
+    verdict: {
+      sqliteWasmDirection: benchmark.allFound && benchmark.timing.p95Ms < 1000 ? "pass" : "investigate",
+      indexedDbDictionaryPersistence: indexedDbLookup.status === "found" ? "pass" : "fail",
+      opfsDictionaryPersistence: opfs.supported ? (opfs.sampleChecksum === originalChecksum ? "pass" : "fail") : "not-supported",
+      offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
+      encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
+      mockCloudSync: mockSync.synced ? "pass" : "fail",
+      androidRealDevice: diagnostics.isAndroid ? "captured" : "requires-android-device",
+      timedBenchmark: benchmark.timing.p95Ms < 1000 ? "pass" : "fail",
+    },
+    diagnostics,
+    serviceWorker,
+    offlineShell,
+    dictionaryFetch: dictionaryFetchMetrics,
+    dictionaryOpen: opened.metrics,
+    benchmark,
+    indexedDbPersistence: {
+      saveMs: indexedDbSaveMs,
+      loadMs: indexedDbLoad.loadMs,
+      bytes: indexedDbLoad.bytes.byteLength,
+      sampleChecksum: sampleChecksum(indexedDbLoad.bytes),
+      reopenedRows: indexedDbOpened.metrics.rows,
+      lookup: indexedDbLookup,
+    },
+    opfsPersistence: opfs,
+    exportImport,
+    mockGoogleDriveSync: mockSync,
+    deviceCoverage,
+  };
+  await saveStoreValue(KV_STORE, "lastResults", results);
+  return results;
+}
+
+function renderResults(results) {
+  const verdictRows = Object.entries(results.verdict)
+    .map(([key, value]) => `<div><strong>${key}</strong><span>${value}</span></div>`)
+    .join("");
+  const lookup = results.benchmark.timing;
+  summary.innerHTML = `
+    ${verdictRows}
+    <div><strong>Dictionary</strong><span>${results.dictionaryOpen.rows.toLocaleString()} rows</span></div>
+    <div><strong>Lookup p95</strong><span>${Math.round(lookup.p95Ms)} ms across ${lookup.count} lookups</span></div>
+    <div><strong>IndexedDB dictionary</strong><span>${(results.indexedDbPersistence.bytes / 1024 / 1024).toFixed(1)} MB restored</span></div>
+  `;
+  rawResults.textContent = JSON.stringify(results, null, 2);
+}
+
+runButton.addEventListener("click", async () => {
+  runButton.disabled = true;
+  downloadButton.disabled = true;
+  try {
+    lastResults = await runAllPocs();
+    renderResults(lastResults);
+    setStatus("Complete");
+    downloadButton.disabled = false;
+  } catch (error) {
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    rawResults.textContent = message;
+    setStatus("Failed");
+  } finally {
+    runButton.disabled = false;
+  }
+});
+
+downloadButton.addEventListener("click", () => {
+  if (!lastResults) return;
+  const blob = new Blob([JSON.stringify(lastResults, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `wordlover-phase0-poc-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+});
+
+window.WordLoverPhase0 = { runAllPocs };
