@@ -11,5 +11,8 @@ poc/windows-pwa/node_modules/
 poc/windows-pwa/.vite/
 poc/windows-pwa/.server.pid
 poc/windows-pwa/server.*.log
+poc/iphone-pwa/certs/
+poc/iphone-pwa/.server.pid
+poc/iphone-pwa/server.*.log
 __pycache__/
 *.pyc

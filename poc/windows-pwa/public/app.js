@@ -3,6 +3,7 @@ const exportButton = document.querySelector("#exportState");
 const termInput = document.querySelector("#termInput");
 const result = document.querySelector("#result");
 const metrics = document.querySelector("#metrics");
+const diagnostics = document.querySelector("#diagnostics");
 const historyList = document.querySelector("#history");
 const pwaStatus = document.querySelector("#pwaStatus");
 
@@ -22,7 +23,7 @@ function formatMs(value) {
 }
 
 function normalizeTerm(term) {
-  return term.trim().replace(/[’`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
 }
 
 function topLines(value, limit = 3) {
@@ -84,6 +85,35 @@ function renderMetrics() {
   `;
 }
 
+async function renderDiagnostics() {
+  const storageEstimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
+  const persisted = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+  const displayMode = window.matchMedia("(display-mode: standalone)").matches
+    ? "standalone"
+    : window.navigator.standalone
+      ? "ios-standalone"
+      : "browser";
+  const serviceWorker = "serviceWorker" in navigator
+    ? navigator.serviceWorker.controller
+      ? "registered and controlling page"
+      : "available; reload after registration for controller"
+    : "not available";
+  const quotaText = storageEstimate
+    ? `${((storageEstimate.usage ?? 0) / 1024 / 1024).toFixed(1)} MB used / ${((storageEstimate.quota ?? 0) / 1024 / 1024).toFixed(1)} MB quota`
+    : "not available";
+
+  diagnostics.innerHTML = `
+    <div><strong>Secure context</strong><span>${window.isSecureContext ? "yes" : "no"}</span></div>
+    <div><strong>Display mode</strong><span>${displayMode}</span></div>
+    <div><strong>Service worker</strong><span>${serviceWorker}</span></div>
+    <div><strong>IndexedDB</strong><span>${"indexedDB" in window ? "available" : "unavailable"}</span></div>
+    <div><strong>WebAssembly</strong><span>${"WebAssembly" in window ? "available" : "unavailable"}</span></div>
+    <div><strong>Storage persisted</strong><span>${persisted === null ? "unknown" : persisted ? "yes" : "no"}</span></div>
+    <div><strong>Storage estimate</strong><span>${quotaText}</span></div>
+    <div><strong>User agent</strong><span>${navigator.userAgent}</span></div>
+  `;
+}
+
 function renderHistory() {
   historyList.innerHTML = historyItems
     .map((item) => `<li><button type="button" data-term="${item.term}">${item.term}</button><span>${formatMs(item.queryMs)}</span></li>`)
@@ -103,7 +133,7 @@ function renderResult(data) {
     <div class="result-head">
       <div>
         <h2>${data.term}</h2>
-        <p>${data.entryType}${data.phonetic ? ` · ${data.phonetic}` : ""}</p>
+        <p>${data.entryType}${data.phonetic ? ` - ${data.phonetic}` : ""}</p>
       </div>
       <span>${formatMs(data.queryMs ?? 0)}</span>
     </div>
@@ -140,6 +170,9 @@ async function loadDictionary() {
     bytes: bytes.byteLength,
     entries: count,
   };
+  await saveValue("lastMetrics", lastMetrics);
+  await renderDiagnostics();
+  return lastMetrics;
 }
 
 function lookupTerm(input) {
@@ -206,6 +239,7 @@ async function runLookup() {
 
 async function init() {
   historyItems = await loadValue("history", []);
+  lastMetrics = await loadValue("lastMetrics", null);
   renderHistory();
   renderMetrics();
   result.innerHTML = `<p class="muted">Load the local dictionary to start the benchmark.</p>`;
@@ -224,6 +258,7 @@ async function init() {
   if ("storage" in navigator && "persist" in navigator.storage) {
     await navigator.storage.persist();
   }
+  await renderDiagnostics();
 }
 
 loadButton.addEventListener("click", async () => {
