@@ -5,5 +5,11 @@ data/dictionary-report.json
 data/wordnet-augmentation-report.json
 data/opted-augmentation-report.json
 data/sources/
+poc/windows-pwa/public/dictionary.sqlite
+poc/windows-pwa/dist/
+poc/windows-pwa/node_modules/
+poc/windows-pwa/.vite/
+poc/windows-pwa/.server.pid
+poc/windows-pwa/server.*.log
 __pycache__/
 *.pyc

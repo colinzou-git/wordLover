@@ -1,0 +1,16 @@
+{
+  "name": "WordLover PWA POC",
+  "short_name": "WordLover POC",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f4ec",
+  "theme_color": "#256d85",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
