@@ -1,0 +1,9 @@
+data/*.sqlite
+data/*.sqlite-*
+data/*.db
+data/dictionary-report.json
+data/wordnet-augmentation-report.json
+data/opted-augmentation-report.json
+data/sources/
+__pycache__/
+*.pyc
