@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact dictionary lookup prototype for the WordLover PRD."""
+"""Exact dictionary lookup prototype for WordLover terms."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from pathlib import Path
 
 
 DEFAULT_DATABASE = Path("data/dictionary.sqlite")
-WORD_RE = re.compile(r"^[A-Za-z]+$")
+TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Look up one English word.")
-    parser.add_argument("word", help="Single English word to look up.")
+    parser = argparse.ArgumentParser(description="Look up one English term.")
+    parser.add_argument("term", help="Single word or short English phrase to look up.")
     parser.add_argument(
         "--database",
         type=Path,
@@ -25,6 +25,12 @@ def parse_args() -> argparse.Namespace:
         help="SQLite dictionary path.",
     )
     return parser.parse_args()
+
+
+def normalize_term(term: str) -> str:
+    term = term.strip().replace("’", "'").replace("`", "'")
+    term = re.sub(r"\s+", " ", term)
+    return term.casefold()
 
 
 def top_lines(value: str | None, limit: int = 3) -> list[str]:
@@ -35,13 +41,16 @@ def top_lines(value: str | None, limit: int = 3) -> list[str]:
 
 
 def lookup_word(database: Path, word: str) -> dict:
-    if not WORD_RE.match(word):
+    normalized = normalize_term(word)
+    if not TERM_RE.match(normalized):
         return {
             "status": "invalid_input",
-            "message": "Input must be a single English word with letters only.",
+            "message": (
+                "Input must be one English word or a short phrase, up to 6 words, "
+                "using letters, spaces, hyphens, or apostrophes."
+            ),
         }
 
-    normalized = word.casefold()
     with sqlite3.connect(database) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -71,15 +80,16 @@ def lookup_word(database: Path, word: str) -> dict:
                 bnc
             LIMIT 1
             """,
-            (normalized, word),
+            (normalized, word.strip()),
         ).fetchone()
 
     if row is None:
-        return {"status": "not_found", "word": word}
+        return {"status": "not_found", "term": word}
 
     return {
         "status": "found",
-        "word": row["word"],
+        "term": row["word"],
+        "entry_type": "phrase" if " " in row["word"].strip() else "word",
         "phonetic": row["phonetic"],
         "english_meanings": top_lines(row["definition"]),
         "english_meaning_source": row["definition_source"],
@@ -105,7 +115,7 @@ def main() -> int:
     if not args.database.exists():
         print(f"ERROR: database not found: {args.database}", file=sys.stderr)
         return 1
-    print(json.dumps(lookup_word(args.database, args.word), ensure_ascii=False, indent=2))
+    print(json.dumps(lookup_word(args.database, args.term), ensure_ascii=False, indent=2))
     return 0
 
 

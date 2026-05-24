@@ -22,6 +22,7 @@ DEFAULT_OUTPUT = Path("data/dictionary.sqlite")
 DEFAULT_REPORT = Path("data/dictionary-report.json")
 DEFAULT_CSV_NAME = "ecdict.csv"
 SINGLE_WORD_RE = re.compile(r"^[A-Za-z]+$")
+SHORT_TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,7 +62,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_word(word: str) -> str:
-    return word.strip().casefold()
+    word = word.strip().replace("’", "'").replace("`", "'")
+    word = re.sub(r"\s+", " ", word)
+    return word.casefold()
 
 
 def clean_text(value: str | None) -> str | None:
@@ -224,6 +227,8 @@ def update_stats(stats: dict, record: tuple) -> None:
     stats["total_entries"] += 1
     if is_single_word:
         stats["single_english_word_entries"] += 1
+    if SHORT_TERM_RE.match(word):
+        stats["short_english_term_entries"] += 1
     if is_toefl:
         stats["toefl_entries"] += 1
         if is_single_word:
@@ -277,6 +282,7 @@ def build_database(args: argparse.Namespace) -> dict:
         "output": str(output),
         "total_entries": 0,
         "single_english_word_entries": 0,
+        "short_english_term_entries": 0,
         "toefl_entries": 0,
         "toefl_single_english_word_entries": 0,
         "toefl_missing_phonetic": 0,

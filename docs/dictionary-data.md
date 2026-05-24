@@ -37,6 +37,10 @@ The SQLite database is generated output and is ignored by git. Rebuild it whenev
 Current `ecdict.csv` audit:
 
 - total entries: 770,611
+- short English term entries: 758,320
+- entries containing spaces: 366,599
+- phrase entries with Chinese translations: 365,726
+- phrase entries with English definitions after augmentation: 63,892
 - TOEFL-tagged entries: 6,974
 - TOEFL-tagged single English words: 6,951
 - TOEFL entries missing phonetic text: 109
@@ -90,7 +94,7 @@ python scripts/augment_dictionary_wordnet.py
 python scripts/augment_dictionary_opted.py
 ```
 
-The importer accepts either a CSV with a `word` column or a plain-text file with one word per line. Existing entries get the new tag; missing entries are inserted with the chosen source label so the app can review them later.
+The importer accepts either a CSV with a `word` column or a plain-text file with one term per line. Existing entries get the new tag; missing entries are inserted with the chosen source label so the app can review them later.
 
 ## App Lookup Contract
 
@@ -98,18 +102,21 @@ The first app lookup should behave like `scripts/lookup_word.py`:
 
 ```powershell
 python scripts/lookup_word.py abandon
+python scripts/lookup_word.py "in terms of"
 ```
 
 Input rules:
 
-- one English word only
-- letters only
+- one English word or short phrase
+- up to 6 words
 - case-insensitive lookup
-- no spaces, punctuation, phrases, or numbers
+- letters, spaces, hyphens, and apostrophes are allowed
+- numbers and other punctuation are rejected for user-entered study terms
 
 Returned fields:
 
-- `word`
+- `term`
+- `entry_type`
 - `phonetic`
 - top English meanings
 - top Chinese meanings

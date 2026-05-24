@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import an extra study word list into the local dictionary."""
+"""Import an extra study term list into the local dictionary."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from pathlib import Path
 
 
 DEFAULT_DATABASE = Path("data/dictionary.sqlite")
-WORD_RE = re.compile(r"^[A-Za-z]+$")
+TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Tag or insert words from an external study list."
+        description="Tag or insert words/short phrases from an external study list."
     )
-    parser.add_argument("word_list", type=Path, help="CSV or plain-text word list.")
+    parser.add_argument("word_list", type=Path, help="CSV or plain-text term list.")
     parser.add_argument(
         "--database",
         type=Path,
@@ -40,13 +40,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--word-column",
         default="word",
-        help="CSV column containing words. Ignored for plain-text files.",
+        help="CSV column containing terms. Ignored for plain-text files.",
     )
     return parser.parse_args()
 
 
 def normalize_word(word: str) -> str:
-    return word.strip().casefold()
+    word = word.strip().replace("’", "'").replace("`", "'")
+    word = re.sub(r"\s+", " ", word)
+    return word.casefold()
 
 
 def is_csv(path: Path) -> bool:
@@ -65,24 +67,27 @@ def read_words(path: Path, word_column: str) -> tuple[list[str], list[str]]:
                 reader = csv.DictReader(handle)
                 for row in reader:
                     candidate = (row.get(word_column) or "").strip()
-                    if WORD_RE.match(candidate):
-                        words.append(normalize_word(candidate))
+                    normalized = normalize_word(candidate)
+                    if TERM_RE.match(normalized):
+                        words.append(normalized)
                     elif candidate:
                         invalid.append(candidate)
             else:
                 reader = csv.reader(handle)
                 for row in reader:
                     candidate = (row[0] if row else "").strip()
-                    if WORD_RE.match(candidate):
-                        words.append(normalize_word(candidate))
+                    normalized = normalize_word(candidate)
+                    if TERM_RE.match(normalized):
+                        words.append(normalized)
                     elif candidate:
                         invalid.append(candidate)
     else:
         with path.open("r", encoding="utf-8-sig") as handle:
             for line in handle:
                 candidate = line.strip()
-                if WORD_RE.match(candidate):
-                    words.append(normalize_word(candidate))
+                normalized = normalize_word(candidate)
+                if TERM_RE.match(normalized):
+                    words.append(normalized)
                 elif candidate:
                     invalid.append(candidate)
     return sorted(set(words)), invalid
