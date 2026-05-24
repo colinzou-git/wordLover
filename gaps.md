@@ -91,3 +91,17 @@ The architecture explicitly documents that browser storage is not equivalent to 
 ## Suggested Next Documentation Step
 
 Before implementation planning, create a short Phase 0 test plan from the architecture's validation criteria. That should become the first implementation milestone because it decides whether the app can use SQLite WASM directly or must switch to the sharded dictionary fallback.
+
+## Additional Review Follow-up
+
+After the initial self-review, `docs/germini-review.md` was also scanned. Most of its concerns were already covered by the PWA-first architecture:
+
+- It warns against `localStorage`; the architecture uses encrypted IndexedDB/OPFS instead.
+- It recommends offline/PWA support; the architecture is PWA-first.
+- It discusses cloud persistence alternatives such as Firestore; the PRD currently requires Google Drive full-copy sync, so Firestore is not adopted.
+- It mentions dynamic AI challenge latency; the PRD's proactive study flow uses local dictionary/frequency data first, not AI-generated first-load challenges.
+
+Two useful additions were made:
+
+- PRD Req 169 and architecture review scheduling now define a review backlog grace window.
+- PRD Req 170 and architecture AI service now require structured AI output validation before display or save.

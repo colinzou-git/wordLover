@@ -423,6 +423,7 @@ Review scheduling:
 - Initial schedule supports 10 minutes, same evening, 1 day, 3 days, 7 days, 14 days, and 30 days.
 - Adaptive scheduling updates from correctness, first-attempt result, FSRS rating, response time, quiz mode, and difficult-word signals.
 - Mastered terms are excluded from normal due-review lists but remain available for optional review and can re-enter review if the user later fails or manually marks the term as not mastered.
+- Use a review backlog grace window for daily grouping. A term can be included in a review session when `now >= nextReviewAt - REVIEW_GRACE_WINDOW`, with an initial constant such as `REVIEW_GRACE_WINDOW_HOURS = 12`. This improves user ergonomics without changing the scheduler's stored due date.
 
 FSRS integration:
 
@@ -501,6 +502,29 @@ PWA implementation options:
 - Optional provider: ChatGPT/OpenAI through a user-connected online flow or user-configured credentials.
 - Provider selection must be abstracted so the UI calls `AiDetailProvider` and does not depend on one vendor.
 - AI must remain optional; local dictionary and learning flows continue without any AI provider.
+- Request structured JSON output from AI providers whenever possible and validate it before display or save.
+
+AI structured output shape:
+
+```text
+AiTermDetail
+  term
+  normalizedTerm
+  meanings[]
+    sourceMeaningId
+    learnerDefinition
+    exampleSentences[2]
+    clozeSentences[]
+    commonPhrases[]
+  quickPrompts[]
+    id
+    label
+    prompt
+  provider
+  generatedAt
+```
+
+Invalid, partial, or unsafe AI output should be discarded or shown as a recoverable error rather than saved silently.
 
 AI data rule:
 
@@ -867,6 +891,7 @@ Validation report contents:
 | Accessibility | 155-156 |
 | Performance | 143-144 |
 | Setup, dictionary update, compatibility, and Phase 0 validation | 160-168 |
+| Review grace and AI structured output | 169-170 |
 
 ## Implementation Phases
 
