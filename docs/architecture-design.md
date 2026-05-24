@@ -868,9 +868,10 @@ Current validation snapshot:
 | POC | Result | Notes |
 | --- | --- | --- |
 | Windows PWA dictionary POC | Pass | App shell, service worker, SQLite fetch/open, exact word lookup, phrase lookup, invalid input rejection, IndexedDB history persistence, and export-button flow were validated. Exact observed lookup times were far below 1 second. |
-| Real iPhone 17 Pro PWA POC | Partial pass, with offline dictionary gap found | User reported the web app starts fast and loads the dictionary fast while online. When Wi-Fi is disconnected, the app shell starts but dictionary load/search do not work in the original POC because the dictionary was not persisted for offline use. |
-| Phase 0 automated browser POC suite | Pass on Windows browser | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell reload, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android is intentionally deferred. Real Google OAuth remains account-gated. |
-| Offline dictionary fallback POC | Pass on Windows fallback automation | Main POC now saves the dictionary to IndexedDB after an online load. With the server stopped, the app shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. This must now be repeated on iPhone Safari/Home Screen. |
+| Real iPhone 17 Pro PWA POC | Pass, with one remaining manual offline confirmation | User reported the web app starts fast and loads the dictionary fast while online. Automated iPhone reports later verified service worker readiness, IndexedDB persistence, OPFS persistence, encrypted export/import, mock sync, and lookup p95 far under 1 second after open. First full dictionary network fetch was about 7.5-7.8 seconds for 206 MB. |
+| Phase 0 automated browser POC suite | Pass on Windows and iPhone Safari | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell cache readiness, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android is intentionally deferred. Real Google OAuth remains account-gated. |
+| Offline dictionary fallback POC | Pass on Windows fallback automation; partial iPhone pass | Main POC now saves the dictionary to IndexedDB after an online load. With the server stopped, the app shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. iPhone automated suite confirms IndexedDB persistence; true Wi-Fi-off Home Screen search still needs manual final confirmation. |
+| Chinese/fuzzy dictionary smoke | Pass on Windows fallback automation | `放弃` returns English candidates and `abanden` suggests `abandon`. Production should move this logic into FTS/trigram indexes rather than relying only on JavaScript candidates. |
 
 Validation report contents:
 
@@ -910,9 +911,9 @@ Detailed phase execution lives in `docs/development-plan.md`. The architecture p
 ### Phase 0: Technical Validation
 
 - Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro feasibility with `sql.js`.
-- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows; measure iPhone next before final production decision.
-- Measure startup and lookup time on iPhone and Windows. Status: Windows measured; iPhone qualitatively passed while online; timed iPhone p50/p95 still needed. Android timing is deferred until the end.
-- Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser; iPhone persistence numbers still needed. Android persistence is deferred.
+- Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows and iPhone Safari; `wa-sqlite` still needs a dedicated benchmark before final production decision because `sql.js` keeps the full dictionary in memory.
+- Measure startup and lookup time on iPhone and Windows. Status: Windows measured; iPhone automated report measured lookup p95 far below 1 second after dictionary open. First full dictionary network fetch is still too large for production UX. Android timing is deferred until the end.
+- Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser and iPhone Safari automated suite. Android persistence is deferred.
 - Validate Add to Home Screen install flow. Status: iPhone PWA path validated at feasibility level; document exact iOS version in timed pass.
 - Validate offline launch after install. Status: Windows service-worker shell reload passed with the local server stopped; original iPhone test showed shell launch works but dictionary load/search fail until offline dictionary persistence is installed and retested.
 - Validate export/import tar in browser. Status: encrypted tar-style export/import round trip passed in the automated browser POC; full product UI export/import still needs implementation.
@@ -927,6 +928,9 @@ Detailed phase execution lives in `docs/development-plan.md`. The architecture p
 - Term normalization, exact/prefix search, dictionary details.
 - iPhone-first dictionary UI with search as the primary first-screen action.
 - URL-driven search smoke tests for iPhone automation, such as `/?q=take%20off&report=1`.
+- Chinese-to-English lookup, fuzzy suggestion fallback, and phrase-friendly suggestions.
+- Encrypted user record storage and persistent IndexedDB connection before saving vocabulary items.
+- Resumable dictionary installer checkpoints for interrupted first install.
 - Encrypted user data repository.
 - Vocabulary save/edit/archive.
 - Autosave and search history.

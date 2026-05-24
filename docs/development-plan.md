@@ -17,6 +17,9 @@ This plan follows the current product priority:
 - Initial iPhone offline test found a real gap: shell starts offline, but dictionary search did not work until dictionary persistence was added.
 - The POC now saves the dictionary into IndexedDB after online load and falls back to the saved copy offline.
 - Windows fallback automation verifies offline dictionary load/search from IndexedDB works.
+- iPhone automated suite reports now verify service worker readiness, IndexedDB dictionary persistence, OPFS persistence, encrypted export/import, mock sync, and p95 lookup time well under 1 second after open.
+- The current `sql.js` POC still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but remains a Phase 0 production-engine risk for older supported iPhones.
+- The live POC now has encrypted user key-value records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, and an iPhone install-context banner.
 
 ## Phase 0: Finish iPhone Feasibility
 
@@ -25,9 +28,11 @@ Goal: prove the fundamental iPhone technical path before expanding features.
 Scope:
 
 - Run updated iPhone offline dictionary persistence test.
-- Run iPhone automated timed suite with `?autorun=1`.
-- Verify iPhone result upload into `poc/iphone-pwa/received-results`.
+- Run iPhone automated timed suite with `?autorun=1`. Status: passed on iPhone Safari.
+- Verify iPhone result upload into `poc/iphone-pwa/received-results`. Status: passed.
 - Test iPhone close/reopen and iPhone restart persistence.
+- POC `wa-sqlite` + OPFS on iPhone and compare with `sql.js` memory/startup behavior before choosing the production dictionary engine.
+- Add Vite + TypeScript + Workbox before Phase 1 grows beyond the current single-page POC.
 - Test basic Google OAuth feasibility only after OAuth client setup exists.
 
 Exit criteria:
@@ -48,10 +53,14 @@ Scope:
 - iPhone-friendly home screen with search as the first interaction.
 - Dictionary install/load state clearly visible.
 - Exact word and short phrase search.
-- Prefix suggestions for typed input.
+- Prefix, phrase, Chinese-to-English, and fuzzy misspelling suggestions for typed input.
 - English meaning, Chinese meaning, IPA/pronunciation field, source, tags, and lookup latency.
 - Recent valid searches.
 - Offline dictionary load from IndexedDB.
+- Encrypted storage for user-specific POC records before vocabulary data is introduced.
+- Persistent IndexedDB connection instead of opening a new database connection per read/write.
+- Resumable dictionary install checkpoints for interrupted first-time dictionary download.
+- Lightweight frequency-ranked "Explore next" word prompt.
 - Diagnostics hidden behind an advanced panel.
 - PWA install/update behavior that reliably refreshes service worker assets.
 
@@ -60,6 +69,12 @@ Current implementation started:
 - Search-first iPhone UI added in the PWA.
 - Dictionary status cards added.
 - Prefix suggestions added.
+- Chinese-to-English lookup and fuzzy misspelling suggestions added.
+- Startup auto-load now shows a loading state instead of asking the user to tap after install.
+- User-specific POC records are encrypted with Web Crypto before storage.
+- IndexedDB access now reuses one connection for the app lifetime.
+- Dictionary installer now stores 4 MB chunk checkpoints when the server supports `Range`.
+- Frequency-ranked "Explore next" prompt added.
 - Versioned app assets added to avoid stale service worker JavaScript/CSS.
 - URL-based automated search smoke added, for example `/?q=take%20off&report=1`.
 

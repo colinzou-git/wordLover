@@ -34,6 +34,12 @@ data/dictionary-report.json
 
 The SQLite database is generated output and is ignored by git. Rebuild it whenever the source data or schema changes.
 
+The builder now creates a `dictionary_search_fts` FTS5 table by default so rebuilt dictionaries can support ranked prefix, phrase, and future fuzzy search in SQLite instead of JavaScript-only filtering. For quick experiments that do not need the FTS index:
+
+```powershell
+python scripts/build_dictionary.py --skip-fts
+```
+
 Current `ecdict.csv` audit:
 
 - total entries: 770,611

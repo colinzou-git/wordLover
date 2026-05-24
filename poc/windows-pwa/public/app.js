@@ -10,12 +10,22 @@ const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
 const dictionarySource = document.querySelector("#dictionarySource");
 const suggestions = document.querySelector("#suggestions");
+const installBanner = document.querySelector("#installBanner");
+const wordPromptPanel = document.querySelector("#wordPromptPanel");
+const wordPromptText = document.querySelector("#wordPromptText");
+const exploreWordButton = document.querySelector("#exploreWord");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
 const FILE_STORE = "files";
+const KEY_STORE = "keys";
 const DICTIONARY_KEY = "dictionary.sqlite";
+const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
+const DICTIONARY_CHUNK_PREFIX = "dictionary.sqlite.chunk.";
+const DICTIONARY_CHUNK_SIZE = 4 * 1024 * 1024;
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
+const HAN_RE = /[\u3400-\u9fff]/;
+const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 
 let SQL = null;
 let dictionaryDb = null;
@@ -24,6 +34,9 @@ let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
 let suggestionHandle = 0;
+let dbPromise = null;
+let encryptionKeyPromise = null;
+let currentPromptTerm = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -31,6 +44,19 @@ function formatMs(value) {
 
 function normalizeTerm(term) {
   return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isChineseInput(value) {
+  return HAN_RE.test(value);
 }
 
 function topLines(value, limit = 3) {
@@ -54,34 +80,105 @@ function requestToPromise(request) {
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 2);
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE);
+      if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-async function saveValue(key, value) {
-  const db = await openUserDb();
+async function getUserDb() {
+  dbPromise ??= openUserDb();
+  return dbPromise;
+}
+
+async function saveRawValue(storeName, key, value) {
+  const db = await getUserDb();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(value, key);
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put(value, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-  db.close();
+}
+
+async function loadRawValue(storeName, key, fallback = null) {
+  const db = await getUserDb();
+  const tx = db.transaction(storeName, "readonly");
+  const value = await requestToPromise(tx.objectStore(storeName).get(key));
+  return value ?? fallback;
+}
+
+async function deleteRawValue(storeName, key) {
+  const db = await getUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function isEncryptedRecord(value) {
+  return Boolean(value && value.__encrypted === true && value.iv && value.ciphertext);
+}
+
+async function getEncryptionKey() {
+  if (!window.crypto?.subtle) {
+    throw new Error("Web Crypto is required for encrypted local user data.");
+  }
+  encryptionKeyPromise ??= (async () => {
+    let rawKey = await loadRawValue(KEY_STORE, "localAesGcmKey");
+    if (!rawKey) {
+      rawKey = crypto.getRandomValues(new Uint8Array(32));
+      await saveRawValue(KEY_STORE, "localAesGcmKey", rawKey);
+    }
+    return crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  })();
+  return encryptionKeyPromise;
+}
+
+async function encryptValue(value) {
+  const key = await getEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  return {
+    __encrypted: true,
+    v: 1,
+    alg: "AES-GCM",
+    iv,
+    ciphertext,
+  };
+}
+
+async function decryptValue(record) {
+  const key = await getEncryptionKey();
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: record.iv }, key, record.ciphertext);
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+async function saveValue(key, value) {
+  await saveRawValue(STORE, key, await encryptValue(value));
 }
 
 async function loadValue(key, fallback) {
-  const db = await openUserDb();
-  const tx = db.transaction(STORE, "readonly");
-  const value = await requestToPromise(tx.objectStore(STORE).get(key));
-  db.close();
-  return value ?? fallback;
+  const value = await loadRawValue(STORE, key);
+  if (value === null || value === undefined) return fallback;
+  if (!isEncryptedRecord(value)) {
+    await saveValue(key, value);
+    return value;
+  }
+  try {
+    return await decryptValue(value);
+  } catch {
+    return fallback;
+  }
 }
 
 async function hasInstalledDictionary() {
@@ -89,21 +186,11 @@ async function hasInstalledDictionary() {
 }
 
 async function saveFile(key, value) {
-  const db = await openUserDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(FILE_STORE, "readwrite");
-    tx.objectStore(FILE_STORE).put(value, key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  db.close();
+  await saveRawValue(FILE_STORE, key, value);
 }
 
 async function loadFile(key) {
-  const db = await openUserDb();
-  const tx = db.transaction(FILE_STORE, "readonly");
-  const value = await requestToPromise(tx.objectStore(FILE_STORE).get(key));
-  db.close();
+  const value = await loadRawValue(FILE_STORE, key);
   if (!value) return null;
   return value instanceof Uint8Array ? value : new Uint8Array(value);
 }
@@ -114,8 +201,8 @@ function renderMetrics() {
     : "Dictionary not loaded";
   const storage = "storage" in navigator ? "Storage API available" : "Storage API unavailable";
   metrics.innerHTML = `
-    <div><strong>Dictionary</strong><span>${dictionary}</span></div>
-    <div><strong>Persistence</strong><span>IndexedDB history enabled; ${storage}</span></div>
+    <div><strong>Dictionary</strong><span>${escapeHtml(dictionary)}</span></div>
+    <div><strong>Persistence</strong><span>Encrypted IndexedDB user records; persistent connection; ${escapeHtml(storage)}</span></div>
     <div><strong>Target</strong><span>Local lookup under 1 second after dictionary load</span></div>
   `;
   dictionaryState.textContent = loaded ? "Ready" : lastMetrics ? "Installed" : "Not loaded";
@@ -151,49 +238,169 @@ async function renderDiagnostics() {
   `;
 }
 
+function renderInstallContext() {
+  const userAgent = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(userAgent);
+  const isSafari = /Safari/.test(userAgent) && !/CriOS|FxiOS|EdgiOS/.test(userAgent);
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  if (!isIOS || isStandalone) {
+    installBanner.hidden = true;
+    return;
+  }
+  installBanner.hidden = false;
+  installBanner.textContent = isSafari
+    ? "For long-term offline use on iPhone, add WordLover to the Home Screen from Safari after the dictionary is installed."
+    : "For iPhone offline install, open this address in Safari, then add WordLover to the Home Screen.";
+}
+
 function renderHistory() {
   historyList.innerHTML = historyItems.length
     ? historyItems
-        .map((item) => `<li><button type="button" data-term="${item.term}">${item.term}</button><span>${formatMs(item.queryMs)}</span></li>`)
+        .map((item) => `<li><button type="button" data-term="${escapeHtml(item.term)}">${escapeHtml(item.term)}</button><span>${formatMs(item.queryMs)}</span></li>`)
         .join("")
     : '<li class="muted">No successful searches yet.</li>';
 }
 
 function renderResult(data) {
   if (data.status === "invalid_input") {
-    result.innerHTML = `<p class="muted">Invalid input. Use letters, spaces, hyphens, or apostrophes.</p>`;
+    result.innerHTML = `<p class="muted">Invalid input. Use English letters, Chinese characters, spaces, hyphens, or apostrophes.</p>`;
     return;
   }
   if (data.status === "not_found") {
-    result.innerHTML = `<p class="muted">No exact dictionary match found.</p><p class="small">Query time: ${formatMs(data.queryMs ?? 0)}</p>`;
+    result.innerHTML = `
+      <p class="muted">No exact dictionary match found.</p>
+      ${data.alternatives?.length ? renderResultList(data.alternatives, "Closest matches") : ""}
+      <p class="small">Query time: ${formatMs(data.queryMs ?? 0)}</p>
+    `;
+    return;
+  }
+  if (data.status === "chinese_results") {
+    result.innerHTML = `
+      <p class="muted">Chinese to English matches for <strong>${escapeHtml(data.term)}</strong>.</p>
+      ${renderResultList(data.matches, "English candidates")}
+      <p class="small">Query time: ${formatMs(data.queryMs ?? 0)}</p>
+    `;
     return;
   }
   result.innerHTML = `
     <div class="result-head">
       <div>
-        <h2>${data.term}</h2>
-        <p>${data.entryType}${data.phonetic ? ` - ${data.phonetic}` : ""}</p>
+        <h2>${escapeHtml(data.term)}</h2>
+        <p>${escapeHtml(data.entryType)}${data.phonetic ? ` - ${escapeHtml(data.phonetic)}` : ""}</p>
       </div>
       <span>${formatMs(data.queryMs ?? 0)}</span>
     </div>
     <div class="meaning-grid">
       <section>
-        <h3>English <em>${data.englishMeaningSource ?? ""}</em></h3>
-        ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${line}</p>`).join("") : '<p class="muted">No English definition.</p>'}
+        <h3>English <em>${escapeHtml(data.englishMeaningSource ?? "")}</em></h3>
+        ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No English definition.</p>'}
       </section>
       <section>
         <h3>Chinese</h3>
-        ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${line}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
+        ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
       </section>
     </div>
-    <p class="small">${data.tags?.length ? `Tags: ${data.tags.join(", ")}` : "No tags"}</p>
+    <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
+  `;
+}
+
+function renderResultList(items, title) {
+  if (!items?.length) return "";
+  return `
+    <h3>${escapeHtml(title)}</h3>
+    <div class="result-list">
+      ${items
+        .map(
+          (item) => `
+            <button class="result-option" type="button" data-term="${escapeHtml(item.word)}">
+              <strong>${escapeHtml(item.word)}</strong>
+              <span>${escapeHtml(item.preview ?? "")}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
   `;
 }
 
 function renderSuggestions(items) {
   suggestions.innerHTML = items.length
-    ? items.map((item) => `<button type="button" data-term="${item.word}">${item.word}</button>`).join("")
+    ? items.map((item) => `<button type="button" class="${item.kind === "fuzzy" ? "fuzzy" : ""}" data-term="${escapeHtml(item.word)}">${escapeHtml(item.word)}</button>`).join("")
     : "";
+}
+
+async function cleanupDictionaryChunks(chunkCount) {
+  await deleteRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY);
+  await Promise.allSettled(
+    Array.from({ length: chunkCount }, (_, index) => deleteRawValue(FILE_STORE, `${DICTIONARY_CHUNK_PREFIX}${index}`)),
+  );
+}
+
+async function assembleDictionaryChunks(totalBytes, chunkCount) {
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (let index = 0; index < chunkCount; index += 1) {
+    const chunk = await loadFile(`${DICTIONARY_CHUNK_PREFIX}${index}`);
+    if (!chunk) throw new Error(`Dictionary chunk ${index + 1} is missing; retry while online.`);
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function fetchDictionaryWithResume(url) {
+  let totalBytes = 0;
+  try {
+    const head = await fetch(url, { method: "HEAD", cache: "no-store" });
+    totalBytes = Number(head.headers.get("content-length") ?? 0);
+  } catch {
+    totalBytes = 0;
+  }
+
+  if (!totalBytes) {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await saveFile(DICTIONARY_KEY, bytes);
+    return bytes;
+  }
+
+  const expectedChunkCount = Math.ceil(totalBytes / DICTIONARY_CHUNK_SIZE);
+  let progress = await loadRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, null);
+  if (!progress || progress.totalBytes !== totalBytes || progress.chunkSize !== DICTIONARY_CHUNK_SIZE) {
+    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: 0 };
+    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
+  }
+
+  for (let index = progress.completedChunks; index < expectedChunkCount; index += 1) {
+    const start = index * DICTIONARY_CHUNK_SIZE;
+    const end = Math.min(start + DICTIONARY_CHUNK_SIZE - 1, totalBytes - 1);
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: { Range: `bytes=${start}-${end}` },
+    });
+    if (response.status === 200 && index === 0) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      await saveFile(DICTIONARY_KEY, bytes);
+      await cleanupDictionaryChunks(expectedChunkCount);
+      return bytes;
+    }
+    if (response.status !== 206) {
+      throw new Error(`Dictionary range fetch failed: ${response.status}`);
+    }
+    const chunk = new Uint8Array(await response.arrayBuffer());
+    await saveFile(`${DICTIONARY_CHUNK_PREFIX}${index}`, chunk);
+    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: index + 1 };
+    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
+    const percent = Math.round((progress.completedChunks / expectedChunkCount) * 100);
+    loadButton.textContent = `Downloading ${percent}%`;
+    result.innerHTML = `<p class="muted">Downloading dictionary ${percent}%.</p>`;
+  }
+
+  const bytes = await assembleDictionaryChunks(totalBytes, expectedChunkCount);
+  await saveFile(DICTIONARY_KEY, bytes);
+  await cleanupDictionaryChunks(expectedChunkCount);
+  return bytes;
 }
 
 async function loadDictionary() {
@@ -201,10 +408,7 @@ async function loadDictionary() {
   let source = "network";
   let bytes = null;
   try {
-    const response = await fetch("/dictionary.sqlite", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
-    bytes = new Uint8Array(await response.arrayBuffer());
-    await saveFile(DICTIONARY_KEY, bytes);
+    bytes = await fetchDictionaryWithResume("/dictionary.sqlite");
     await saveValue("dictionaryInstalled", true);
   } catch (error) {
     bytes = await loadFile(DICTIONARY_KEY);
@@ -235,20 +439,31 @@ async function loadDictionary() {
   return lastMetrics;
 }
 
+function setSearchLoading(isLoading) {
+  termInput.disabled = isLoading;
+  termInput.placeholder = isLoading ? "Loading dictionary..." : DEFAULT_PLACEHOLDER;
+  clearSearchButton.disabled = isLoading;
+}
+
 async function ensureDictionaryLoaded() {
   if (loaded) return true;
   loadButton.disabled = true;
   loadButton.textContent = "Loading dictionary...";
+  dictionaryState.textContent = "Loading";
+  setSearchLoading(true);
   result.innerHTML = `<p class="muted">Opening local dictionary.</p>`;
   try {
     await loadDictionary();
     loaded = true;
     loadButton.textContent = "Dictionary ready";
+    setSearchLoading(false);
     renderMetrics();
+    await renderWordPrompt();
     return true;
   } catch (error) {
     loadButton.disabled = false;
     loadButton.textContent = "Install/load dictionary";
+    setSearchLoading(false);
     result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
     return false;
   }
@@ -256,6 +471,7 @@ async function ensureDictionaryLoaded() {
 
 function lookupTerm(input) {
   const normalized = normalizeTerm(input);
+  if (isChineseInput(input)) return lookupChineseTerm(input);
   if (!TERM_RE.test(normalized)) return { status: "invalid_input", term: input };
   if (!dictionaryDb) throw new Error("Dictionary is not loaded yet.");
 
@@ -274,7 +490,10 @@ function lookupTerm(input) {
   `);
   try {
     statement.bind({ ":term": normalized, ":raw": input.trim() });
-    if (!statement.step()) return { status: "not_found", term: input, queryMs: performance.now() - start };
+    if (!statement.step()) {
+      const alternatives = findFuzzySuggestions(normalized, 6);
+      return { status: "not_found", term: input, queryMs: performance.now() - start, alternatives };
+    }
     const row = statement.getAsObject();
     return {
       status: "found",
@@ -292,31 +511,203 @@ function lookupTerm(input) {
   }
 }
 
-function suggestTerms(input) {
-  const normalized = normalizeTerm(input);
-  if (!TERM_RE.test(normalized) || normalized.length < 2 || !dictionaryDb) return [];
+function lookupChineseTerm(input) {
+  const term = input.trim();
+  if (!term || !dictionaryDb) return { status: "invalid_input", term: input };
+  const start = performance.now();
   const statement = dictionaryDb.prepare(`
-    SELECT word
+    SELECT word, translation, definition, frq, bnc
+    FROM dictionary_entries
+    WHERE translation LIKE :term
+    ORDER BY
+      is_toefl DESC,
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc,
+      length(word),
+      word
+    LIMIT 10
+  `);
+  const matches = [];
+  try {
+    statement.bind({ ":term": `%${term}%` });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      matches.push({
+        word: row.word,
+        preview: topLines(row.translation, 1)[0] ?? topLines(row.definition, 1)[0] ?? "",
+      });
+    }
+  } finally {
+    statement.free();
+  }
+  if (!matches.length) return { status: "not_found", term: input, queryMs: performance.now() - start, alternatives: [] };
+  return { status: "chinese_results", term, matches, queryMs: performance.now() - start };
+}
+
+function levenshteinWithin(a, b, maxDistance = 2) {
+  if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = new Array(b.length + 1);
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      rowMin = Math.min(rowMin, current[j]);
+    }
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[b.length];
+}
+
+function findFuzzySuggestions(normalized, limit = 6) {
+  if (!dictionaryDb || normalized.length < 4 || normalized.includes(" ")) return [];
+  const first = normalized.slice(0, 1);
+  const statement = dictionaryDb.prepare(`
+    SELECT word, normalized_word, definition, translation, frq, bnc
     FROM dictionary_entries
     WHERE normalized_word >= :prefix
       AND normalized_word < :upper
+      AND instr(normalized_word, ' ') = 0
+      AND length(normalized_word) BETWEEN :minLength AND :maxLength
+    ORDER BY
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc
+    LIMIT 700
+  `);
+  const candidates = [];
+  try {
+    statement.bind({
+      ":prefix": first,
+      ":upper": `${first}\uffff`,
+      ":minLength": Math.max(1, normalized.length - 2),
+      ":maxLength": normalized.length + 2,
+    });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      const distance = levenshteinWithin(normalized, row.normalized_word, 2);
+      if (distance <= 2) {
+        candidates.push({
+          word: row.word,
+          kind: "fuzzy",
+          distance,
+          preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
+        });
+      }
+    }
+  } finally {
+    statement.free();
+  }
+  return candidates.sort((left, right) => left.distance - right.distance || left.word.length - right.word.length).slice(0, limit);
+}
+
+function suggestTerms(input) {
+  const normalized = normalizeTerm(input);
+  if (!dictionaryDb || normalized.length < 2) return [];
+  if (isChineseInput(input)) return lookupChineseTerm(input).matches ?? [];
+  if (!TERM_RE.test(normalized)) return [];
+  const statement = dictionaryDb.prepare(`
+    SELECT word, definition, translation,
+      CASE
+        WHEN normalized_word = :term THEN 0
+        WHEN normalized_word LIKE :phrasePrefix THEN 1
+        WHEN normalized_word >= :prefix AND normalized_word < :upper THEN 2
+        ELSE 3
+      END AS tier
+    FROM dictionary_entries
+    WHERE (normalized_word >= :prefix AND normalized_word < :upper)
+       OR normalized_word LIKE :phrasePrefix
+    ORDER BY
+      tier,
+      is_toefl DESC,
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc,
+      word
+    LIMIT 8
+  `);
+  const upper = `${normalized}\uffff`;
+  const items = [];
+  try {
+    statement.bind({
+      ":term": normalized,
+      ":prefix": normalized,
+      ":upper": upper,
+      ":phrasePrefix": `${normalized} %`,
+    });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      items.push({
+        word: row.word,
+        kind: row.tier === 1 ? "phrase" : "prefix",
+        preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
+      });
+    }
+    if (items.length < 3) {
+      for (const item of findFuzzySuggestions(normalized, 3)) {
+        if (!items.some((existing) => existing.word === item.word)) items.push(item);
+      }
+    }
+    return items;
+  } finally {
+    statement.free();
+  }
+}
+
+function suggestWordOfTheDay() {
+  if (!dictionaryDb) return null;
+  const searched = new Set(historyItems.map((item) => normalizeTerm(item.term)));
+  const statement = dictionaryDb.prepare(`
+    SELECT word, definition, translation
+    FROM dictionary_entries
+    WHERE is_toefl = 1
+      AND definition IS NOT NULL
+      AND translation IS NOT NULL
+      AND instr(normalized_word, ' ') = 0
     ORDER BY
       frq IS NULL,
       frq,
       bnc IS NULL,
       bnc,
       word
-    LIMIT 6
+    LIMIT 200
   `);
-  const upper = `${normalized}\uffff`;
-  const items = [];
+  const candidates = [];
   try {
-    statement.bind({ ":prefix": normalized, ":upper": upper });
-    while (statement.step()) items.push(statement.getAsObject());
-    return items;
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      if (!searched.has(normalizeTerm(row.word))) {
+        candidates.push({
+          word: row.word,
+          preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
+        });
+      }
+    }
   } finally {
     statement.free();
   }
+  if (!candidates.length) return null;
+  const dayIndex = Math.floor(Date.now() / 86400000) % candidates.length;
+  return candidates[dayIndex];
+}
+
+async function renderWordPrompt() {
+  const suggestion = suggestWordOfTheDay();
+  if (!suggestion) {
+    wordPromptPanel.hidden = true;
+    currentPromptTerm = null;
+    return;
+  }
+  currentPromptTerm = suggestion.word;
+  wordPromptText.textContent = `${suggestion.word} - ${suggestion.preview}`;
+  wordPromptPanel.hidden = false;
 }
 
 async function addHistory(item) {
@@ -333,14 +724,15 @@ async function runLookup() {
     return;
   }
   if (!loaded) {
-    result.innerHTML = `<p class="muted">Dictionary is not loaded yet. Tap <strong>Install/load dictionary</strong> once, then search offline or online.</p>`;
-    return;
+    const ready = await ensureDictionaryLoaded();
+    if (!ready) return;
   }
   try {
     const data = lookupTerm(value);
     renderResult(data);
     if (data.status === "found") {
       await addHistory({ term: data.term, searchedAt: new Date().toISOString(), queryMs: data.queryMs ?? 0 });
+      await renderWordPrompt();
     }
   } catch (error) {
     result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
@@ -399,6 +791,7 @@ function runSuggestions() {
 }
 
 async function init() {
+  renderInstallContext();
   historyItems = await loadValue("history", []);
   lastMetrics = await loadValue("lastMetrics", null);
   renderHistory();
@@ -406,11 +799,12 @@ async function init() {
   const installed = await hasInstalledDictionary();
   if (installed && !lastMetrics) {
     dictionaryState.textContent = "Installed";
-    dictionarySource.textContent = "Tap load";
+    dictionarySource.textContent = "Opening local copy";
   }
   result.innerHTML = installed
-    ? `<p class="muted">Dictionary is installed. Tap <strong>Install/load dictionary</strong> to start searching.</p>`
+    ? `<p class="muted">Dictionary is installed. Opening the local copy now.</p>`
     : `<p class="muted">Install the local dictionary once while online. After that, search can work from the local copy.</p>`;
+  if (installed) setSearchLoading(true);
 
   if ("serviceWorker" in navigator) {
     try {
@@ -432,6 +826,7 @@ async function init() {
   const smokeTerm = params.get("q");
   if (installed && !smokeTerm) {
     void ensureDictionaryLoaded().then(() => {
+      termInput.focus();
       if (termInput.value.trim()) void runLookup();
     });
   }
@@ -465,11 +860,26 @@ suggestions.addEventListener("click", (event) => {
   void runLookup();
 });
 
+result.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("button[data-term]") : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  termInput.value = button.dataset.term ?? "";
+  renderSuggestions([]);
+  void runLookup();
+});
+
 clearSearchButton.addEventListener("click", () => {
   termInput.value = "";
   renderSuggestions([]);
   result.innerHTML = `<p class="muted">Type a term to search.</p>`;
   termInput.focus();
+});
+
+exploreWordButton.addEventListener("click", () => {
+  if (!currentPromptTerm) return;
+  termInput.value = currentPromptTerm;
+  renderSuggestions([]);
+  void runLookup();
 });
 
 exportButton.addEventListener("click", () => {
@@ -492,11 +902,14 @@ window.WordLoverApp = {
   ensureDictionaryLoaded,
   lookupTerm,
   suggestTerms,
+  lookupChineseTerm,
   runAutomatedSearchSmoke,
   getState: () => ({
     loaded,
     lastMetrics,
     historyItems,
+    encryptedUserStore: true,
+    persistentIndexedDbConnection: Boolean(dbPromise),
   }),
 };
 

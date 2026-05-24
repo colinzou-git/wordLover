@@ -36,6 +36,10 @@ button,
   text-decoration: none;
 }
 
+button[data-term] {
+  text-align: left;
+}
+
 .secondary-button,
 .secondary-link {
   border: 1px solid #b8c7c4;
@@ -102,6 +106,16 @@ h1 {
   color: #356066;
   white-space: nowrap;
   font-size: 0.9rem;
+}
+
+.notice-banner {
+  border: 1px solid #d4b15f;
+  border-radius: 8px;
+  background: #fff8df;
+  color: #4e3c12;
+  padding: 12px 14px;
+  line-height: 1.4;
+  margin: 4px 0 12px;
 }
 
 .panel,
@@ -213,8 +227,41 @@ input:focus {
   padding: 0 12px;
 }
 
+.suggestions .fuzzy {
+  background: #f5eee0;
+  color: #4b3616;
+}
+
 .result {
   margin-top: 16px;
+}
+
+.result-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.result-option {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  background: #fbfdfc;
+  color: #172426;
+  border: 1px solid #d8e0de;
+  padding: 12px;
+  text-align: left;
+}
+
+.result-option strong,
+.result-option span {
+  display: block;
+}
+
+.result-option span {
+  color: #607377;
+  margin-top: 4px;
+  line-height: 1.35;
 }
 
 .result-head {
@@ -320,6 +367,21 @@ li button {
   font-weight: 800;
 }
 
+.word-prompt {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.word-prompt[hidden] {
+  display: none;
+}
+
+.word-prompt h2 {
+  margin-bottom: 4px;
+}
+
 @media (max-width: 700px) {
   #app {
     width: min(100% - 20px, 920px);
@@ -354,5 +416,10 @@ li button {
   .toolbar {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .word-prompt {
+    align-items: stretch;
+    display: grid;
   }
 }

@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         default=5000,
         help="Rows inserted per batch.",
     )
+    parser.add_argument(
+        "--skip-fts",
+        action="store_true",
+        help="Skip building the SQLite FTS5 search table.",
+    )
     return parser.parse_args()
 
 
@@ -183,6 +188,16 @@ def create_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_dictionary_entries_frequency
             ON dictionary_entries(frq, bnc);
 
+        CREATE VIRTUAL TABLE dictionary_search_fts USING fts5(
+            word,
+            normalized_word,
+            definition,
+            translation,
+            content='dictionary_entries',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
         CREATE VIEW toefl_entries AS
             SELECT *
             FROM dictionary_entries
@@ -269,6 +284,28 @@ def insert_batch(conn: sqlite3.Connection, batch: list[tuple]) -> None:
     )
 
 
+def build_fts_index(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT INTO dictionary_search_fts(
+            rowid,
+            word,
+            normalized_word,
+            definition,
+            translation
+        )
+        SELECT
+            id,
+            word,
+            normalized_word,
+            COALESCE(definition, ''),
+            COALESCE(translation, '')
+        FROM dictionary_entries
+        """
+    )
+    conn.execute("INSERT INTO dictionary_search_fts(dictionary_search_fts) VALUES('optimize')")
+
+
 def build_database(args: argparse.Namespace) -> dict:
     start = time.time()
     output = args.output.resolve()
@@ -308,6 +345,13 @@ def build_database(args: argparse.Namespace) -> dict:
             if batch:
                 insert_batch(conn, batch)
                 conn.commit()
+
+        if not args.skip_fts:
+            build_fts_index(conn)
+            conn.commit()
+            stats["fts5_search_index"] = "built"
+        else:
+            stats["fts5_search_index"] = "skipped"
 
         metadata = {
             "source_name": "ECDICT",

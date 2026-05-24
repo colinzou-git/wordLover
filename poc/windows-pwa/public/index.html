@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260524-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260524-3" />
     <title>WordLover PWA POC</title>
   </head>
   <body>
@@ -18,6 +18,8 @@
         </div>
         <div id="pwaStatus" class="status-pill">Checking offline shell...</div>
       </section>
+
+      <div id="installBanner" class="notice-banner" hidden></div>
 
       <section class="search-surface">
         <label for="termInput">Search</label>
@@ -49,6 +51,14 @@
         <div id="metrics" class="metrics"></div>
       </section>
 
+      <section class="panel word-prompt" id="wordPromptPanel" hidden>
+        <div>
+          <h2>Explore next</h2>
+          <p id="wordPromptText" class="muted">Loading suggestion...</p>
+        </div>
+        <button id="exploreWord" class="secondary-button" type="button">Open</button>
+      </section>
+
       <section class="panel">
         <h2>Recent searches</h2>
         <ol id="history" class="history-list"></ol>
@@ -60,6 +70,6 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js?v=20260524-2"></script>
+    <script type="module" src="/app.js?v=20260524-3"></script>
   </body>
 </html>

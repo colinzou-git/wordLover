@@ -1,14 +1,14 @@
-const CACHE_NAME = "wordlover-poc-shell-v12";
+const CACHE_NAME = "wordlover-poc-shell-v13";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260524-2",
-  "/styles.css?v=20260524-2",
+  "/app.js?v=20260524-3",
+  "/styles.css?v=20260524-3",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260524-4",
+  "/poc-suite.js?v=20260524-5",
 ];
 
 self.addEventListener("install", (event) => {

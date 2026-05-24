@@ -24,6 +24,10 @@ Environment:
 | Timed benchmark | Pass | 100 local lookups across 5 terms had p95 below 1 second. |
 | Offline persisted dictionary fallback | Pass on Windows fallback | After the main POC stored the dictionary in IndexedDB, the server was stopped, the shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. |
 | iPhone-friendly dictionary UI smoke | Pass on Windows fallback | Search-first UI, dictionary status cards, versioned assets, URL search smoke, and local lookup were verified through browser automation. |
+| iPhone automated suite upload | Pass | iPhone Safari reported service worker readiness, IndexedDB persistence, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmark passing. |
+| Chinese-to-English lookup smoke | Pass on Windows fallback | Query `放弃` returned ranked English candidates such as `release`, `abandon`, `desert`, `yield`, `surrender`, and `relinquish`. |
+| Fuzzy misspelling smoke | Pass on Windows fallback | Query `abanden` returned `abandon` as the closest match. |
+| Resumable dictionary installer | Implemented in POC | Dictionary download now uses 4 MB range chunks with IndexedDB chunk checkpoints when the server supports `Range`; full-buffer `sql.js` opening remains a known production risk. |
 
 ## Key Metrics
 
@@ -56,9 +60,9 @@ All benchmark terms were found in the local dictionary.
 
 ## Production Implications
 
-The SQLite WASM-first direction is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on this Windows browser. OPFS was faster in this run, but iPhone Safari should still be measured before locking the production persistence layer. Android measurement is deferred until the end.
+The SQLite WASM-first direction is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on Windows and iPhone Safari. OPFS was available in the iPhone automated report, but the current `sql.js` path still loads the full 206 MB SQLite file into memory. `wa-sqlite` plus OPFS remains the next storage-engine POC before locking the production dictionary engine. Android measurement is deferred until the end.
 
-The first implementation slice should stay focused on the iPhone dictionary path: fast visible search UI, explicit dictionary install/load state, offline dictionary fallback, and reliable service-worker asset updates.
+The first implementation slice should stay focused on the iPhone dictionary path: fast visible search UI, explicit dictionary install/load state, offline dictionary fallback, reliable service-worker asset updates, encrypted user records, and persistent IndexedDB access.
 
 The sharded dictionary fallback should remain a contingency, not the default path.
 
