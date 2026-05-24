@@ -18,6 +18,7 @@ This plan follows the current product priority:
 - The POC now saves the dictionary into IndexedDB after online load and falls back to the saved copy offline.
 - Windows fallback automation verifies offline dictionary load/search from IndexedDB works.
 - iPhone automated suite reports now verify service worker readiness, IndexedDB dictionary persistence, OPFS persistence, encrypted export/import, mock sync, and p95 lookup time well under 1 second after open.
+- Latest iPhone Home Screen PWA suite runs reported standalone display mode, persistent storage granted, shell cache `wordlover-poc-shell-v13`, dictionary fetch about `7.31 s`, SQLite open about `14-17 ms`, and lookup p95 about `0.28 ms`.
 - The current `sql.js` POC still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but remains a Phase 0 production-engine risk for older supported iPhones.
 - The live POC now has encrypted user key-value records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, and an iPhone install-context banner.
 
@@ -98,6 +99,18 @@ Scope:
 - Preserve original dictionary meaning separately from user edits.
 - Archive/hide terms.
 - Encrypted local user-data storage.
+
+Current implementation started:
+
+- Vocabulary panel added to the PWA home screen.
+- Manual save from the current dictionary result added.
+- Saved-state button prevents duplicate active entries.
+- Autosave setting added and persisted per user; valid dictionary results autosave after a short dwell.
+- Saved vocabulary items preserve original dictionary meanings/source separately from editable user meanings.
+- Edit flow added for English meaning, Chinese meaning, and pronunciation.
+- Archive and restore controls added.
+- Vocabulary records include `createdDeviceId`, `syncVersion`, and `isSynced` fields to support later sync/version work.
+- Browser smoke verified manual save, autosave, archive, restore, saved-state rendering, and iPhone-width layout.
 
 Exit criteria:
 

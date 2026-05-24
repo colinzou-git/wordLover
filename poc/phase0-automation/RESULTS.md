@@ -28,6 +28,7 @@ Environment:
 | Chinese-to-English lookup smoke | Pass on Windows fallback | Query `放弃` returned ranked English candidates such as `release`, `abandon`, `desert`, `yield`, `surrender`, and `relinquish`. |
 | Fuzzy misspelling smoke | Pass on Windows fallback | Query `abanden` returned `abandon` as the closest match. |
 | Resumable dictionary installer | Implemented in POC | Dictionary download now uses 4 MB range chunks with IndexedDB chunk checkpoints when the server supports `Range`; full-buffer `sql.js` opening remains a known production risk. |
+| Vocabulary save/edit/archive slice | Pass on Windows fallback | Browser smoke verified manual save, autosave dwell, duplicate saved-state, archive, restore, and iPhone-width layout without horizontal overflow. |
 
 ## Key Metrics
 
@@ -47,6 +48,17 @@ Environment:
 | OPFS save | 757.3 ms |
 | OPFS load | 321.5 ms |
 | Encrypted export archive | 3,072 bytes |
+
+Latest iPhone Home Screen repeat runs:
+
+- Display mode: `standalone`
+- Shell cache: `wordlover-poc-shell-v13`
+- Persistent storage: granted
+- Dictionary fetch: about `7.31 s`
+- SQLite open: about `14-17 ms`
+- Lookup p95: about `0.28 ms`
+- IndexedDB restore: about `94-138 ms`
+- OPFS restore: about `277-297 ms`
 
 ## Terms Benchmarked
 

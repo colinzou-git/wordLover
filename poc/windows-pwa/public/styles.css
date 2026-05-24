@@ -36,6 +36,11 @@ button,
   text-decoration: none;
 }
 
+input[type="checkbox"] {
+  width: 20px;
+  min-height: 20px;
+}
+
 button[data-term] {
   text-align: left;
 }
@@ -192,6 +197,26 @@ h1 {
   border-top: 1px solid #edf1ef;
 }
 
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.panel-head h2 {
+  margin-bottom: 4px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  white-space: nowrap;
+}
+
 label {
   display: block;
   font-weight: 800;
@@ -240,6 +265,19 @@ input:focus {
   display: grid;
   gap: 10px;
   margin-top: 12px;
+}
+
+.result-actions,
+.vocab-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.result-actions button,
+.vocab-actions button {
+  min-height: 38px;
 }
 
 .result-option {
@@ -382,6 +420,38 @@ li button {
   margin-bottom: 4px;
 }
 
+.vocabulary-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.vocab-item {
+  border: 1px solid #d8e0de;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdfc;
+}
+
+.vocab-item.archived {
+  background: #f6f3ee;
+}
+
+.vocab-item h3 {
+  margin: 0 0 4px;
+}
+
+.vocab-item p {
+  color: #51676b;
+  line-height: 1.35;
+  margin: 4px 0;
+}
+
+.vocab-meta {
+  color: #718184;
+  font-size: 0.84rem;
+}
+
 @media (max-width: 700px) {
   #app {
     width: min(100% - 20px, 920px);
@@ -416,6 +486,10 @@ li button {
   .toolbar {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .panel-head {
+    display: grid;
   }
 
   .word-prompt {

@@ -14,6 +14,9 @@ const installBanner = document.querySelector("#installBanner");
 const wordPromptPanel = document.querySelector("#wordPromptPanel");
 const wordPromptText = document.querySelector("#wordPromptText");
 const exploreWordButton = document.querySelector("#exploreWord");
+const autosaveToggle = document.querySelector("#autosaveToggle");
+const vocabularySummary = document.querySelector("#vocabularySummary");
+const vocabularyList = document.querySelector("#vocabularyList");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
@@ -34,9 +37,14 @@ let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
 let suggestionHandle = 0;
+let autosaveHandle = 0;
 let dbPromise = null;
 let encryptionKeyPromise = null;
 let currentPromptTerm = null;
+let currentResult = null;
+let vocabularyItems = [];
+let autosaveEnabled = true;
+let deviceId = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -181,6 +189,16 @@ async function loadValue(key, fallback) {
   }
 }
 
+async function getDeviceId() {
+  if (deviceId) return deviceId;
+  deviceId = await loadValue("deviceId", null);
+  if (!deviceId) {
+    deviceId = crypto.randomUUID ? crypto.randomUUID() : `device-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await saveValue("deviceId", deviceId);
+  }
+  return deviceId;
+}
+
 async function hasInstalledDictionary() {
   return Boolean(await loadValue("dictionaryInstalled", false));
 }
@@ -263,10 +281,14 @@ function renderHistory() {
 
 function renderResult(data) {
   if (data.status === "invalid_input") {
+    currentResult = null;
+    scheduleAutosave(null);
     result.innerHTML = `<p class="muted">Invalid input. Use English letters, Chinese characters, spaces, hyphens, or apostrophes.</p>`;
     return;
   }
   if (data.status === "not_found") {
+    currentResult = null;
+    scheduleAutosave(null);
     result.innerHTML = `
       <p class="muted">No exact dictionary match found.</p>
       ${data.alternatives?.length ? renderResultList(data.alternatives, "Closest matches") : ""}
@@ -275,6 +297,8 @@ function renderResult(data) {
     return;
   }
   if (data.status === "chinese_results") {
+    currentResult = null;
+    scheduleAutosave(null);
     result.innerHTML = `
       <p class="muted">Chinese to English matches for <strong>${escapeHtml(data.term)}</strong>.</p>
       ${renderResultList(data.matches, "English candidates")}
@@ -282,6 +306,9 @@ function renderResult(data) {
     `;
     return;
   }
+  currentResult = data;
+  const vocabularyItem = getVocabularyItem(data.term);
+  const isActiveSaved = Boolean(vocabularyItem && !vocabularyItem.archivedAt);
   result.innerHTML = `
     <div class="result-head">
       <div>
@@ -301,7 +328,12 @@ function renderResult(data) {
       </section>
     </div>
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
+    <div class="result-actions">
+      <button id="saveCurrentTerm" type="button" ${isActiveSaved ? "disabled" : ""}>${isActiveSaved ? "Saved" : "Save to vocabulary"}</button>
+      ${vocabularyItem ? `<button id="editCurrentTerm" class="secondary-button" type="button">Edit saved meaning</button>` : ""}
+    </div>
   `;
+  scheduleAutosave(data);
 }
 
 function renderResultList(items, title) {
@@ -661,6 +693,149 @@ function suggestTerms(input) {
   }
 }
 
+function getVocabularyItem(term) {
+  const normalizedTerm = normalizeTerm(term);
+  return vocabularyItems.find((item) => item.normalizedTerm === normalizedTerm) ?? null;
+}
+
+function summarizeLines(lines) {
+  return Array.isArray(lines) && lines.length ? lines.join("; ") : "No meaning yet";
+}
+
+async function persistVocabulary() {
+  await saveValue("vocabularyItems", vocabularyItems);
+  renderVocabulary();
+}
+
+function resultToVocabularyItem(data) {
+  const now = new Date().toISOString();
+  const normalizedTerm = normalizeTerm(data.term);
+  return {
+    id: normalizedTerm,
+    term: data.term,
+    normalizedTerm,
+    entryType: data.entryType,
+    savedAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    original: {
+      phonetic: data.phonetic ?? "",
+      englishMeanings: data.englishMeanings ?? [],
+      englishMeaningSource: data.englishMeaningSource ?? "unknown",
+      chineseMeanings: data.chineseMeanings ?? [],
+      tags: data.tags ?? [],
+    },
+    user: {
+      phonetic: data.phonetic ?? "",
+      englishMeanings: data.englishMeanings ?? [],
+      chineseMeanings: data.chineseMeanings ?? [],
+    },
+    createdDeviceId: deviceId,
+    syncVersion: 1,
+    isSynced: false,
+  };
+}
+
+async function saveVocabularyItem(data, reason = "manual") {
+  if (!data || data.status !== "found") return null;
+  await getDeviceId();
+  const normalizedTerm = normalizeTerm(data.term);
+  const existing = getVocabularyItem(data.term);
+  const now = new Date().toISOString();
+  if (existing) {
+    existing.archivedAt = null;
+    existing.updatedAt = now;
+    existing.syncVersion = (existing.syncVersion ?? 0) + 1;
+    existing.isSynced = false;
+    existing.lastSaveReason = reason;
+  } else {
+    const item = resultToVocabularyItem(data);
+    item.lastSaveReason = reason;
+    vocabularyItems = [item, ...vocabularyItems];
+  }
+  vocabularyItems = vocabularyItems
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
+    .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
+  await persistVocabulary();
+  if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
+  return getVocabularyItem(data.term);
+}
+
+function scheduleAutosave(data) {
+  window.clearTimeout(autosaveHandle);
+  if (!autosaveEnabled || !data || data.status !== "found" || getVocabularyItem(data.term)) return;
+  autosaveHandle = window.setTimeout(() => {
+    if (currentResult && normalizeTerm(currentResult.term) === normalizeTerm(data.term)) {
+      void saveVocabularyItem(data, "autosave");
+    }
+  }, 2500);
+}
+
+async function editVocabularyItem(term) {
+  const item = getVocabularyItem(term);
+  if (!item) return;
+  const english = window.prompt("Edit English meaning. Use semicolons for multiple meanings.", summarizeLines(item.user.englishMeanings));
+  if (english === null) return;
+  const chinese = window.prompt("Edit Chinese meaning. Use semicolons for multiple meanings.", summarizeLines(item.user.chineseMeanings));
+  if (chinese === null) return;
+  const phonetic = window.prompt("Edit pronunciation / IPA.", item.user.phonetic ?? "");
+  if (phonetic === null) return;
+  item.user.englishMeanings = english.split(";").map((line) => line.trim()).filter(Boolean);
+  item.user.chineseMeanings = chinese.split(";").map((line) => line.trim()).filter(Boolean);
+  item.user.phonetic = phonetic.trim();
+  item.updatedAt = new Date().toISOString();
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  await persistVocabulary();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function setVocabularyArchived(term, archived) {
+  const item = getVocabularyItem(term);
+  if (!item) return;
+  item.archivedAt = archived ? new Date().toISOString() : null;
+  item.updatedAt = new Date().toISOString();
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  await persistVocabulary();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+function renderVocabulary() {
+  const active = vocabularyItems.filter((item) => !item.archivedAt);
+  const archived = vocabularyItems.filter((item) => item.archivedAt);
+  vocabularySummary.textContent = `${active.length} active, ${archived.length} archived`;
+  if (!vocabularyItems.length) {
+    vocabularyList.innerHTML = `<p class="muted">Search a word and save it here. Autosave can add valid searches after a short pause.</p>`;
+    return;
+  }
+  vocabularyList.innerHTML = vocabularyItems
+    .map((item) => {
+      const english = summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings);
+      const chinese = summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings);
+      const archivedClass = item.archivedAt ? " archived" : "";
+      return `
+        <article class="vocab-item${archivedClass}" data-term="${escapeHtml(item.term)}">
+          <h3>${escapeHtml(item.term)}</h3>
+          <p>${escapeHtml(chinese)}</p>
+          <p>${escapeHtml(english)}</p>
+          <p class="vocab-meta">
+            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} ·
+            source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} ·
+            saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())}
+            ${item.archivedAt ? " · archived" : ""}
+          </p>
+          <div class="vocab-actions">
+            <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Open</button>
+            <button class="secondary-button" type="button" data-action="edit" data-term="${escapeHtml(item.term)}">Edit</button>
+            <button class="secondary-button" type="button" data-action="${item.archivedAt ? "restore" : "archive"}" data-term="${escapeHtml(item.term)}">${item.archivedAt ? "Restore" : "Archive"}</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function suggestWordOfTheDay() {
   if (!dictionaryDb) return null;
   const searched = new Set(historyItems.map((item) => normalizeTerm(item.term)));
@@ -792,9 +967,14 @@ function runSuggestions() {
 
 async function init() {
   renderInstallContext();
+  await getDeviceId();
   historyItems = await loadValue("history", []);
+  vocabularyItems = await loadValue("vocabularyItems", []);
+  autosaveEnabled = await loadValue("autosaveEnabled", true);
+  autosaveToggle.checked = autosaveEnabled;
   lastMetrics = await loadValue("lastMetrics", null);
   renderHistory();
+  renderVocabulary();
   renderMetrics();
   const installed = await hasInstalledDictionary();
   if (installed && !lastMetrics) {
@@ -861,6 +1041,14 @@ suggestions.addEventListener("click", (event) => {
 });
 
 result.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm") {
+    void saveVocabularyItem(currentResult, "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "editCurrentTerm" && currentResult) {
+    void editVocabularyItem(currentResult.term);
+    return;
+  }
   const button = event.target instanceof Element ? event.target.closest("button[data-term]") : null;
   if (!(button instanceof HTMLButtonElement)) return;
   termInput.value = button.dataset.term ?? "";
@@ -868,11 +1056,35 @@ result.addEventListener("click", (event) => {
   void runLookup();
 });
 
+vocabularyList.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
+  if (!(button instanceof HTMLButtonElement)) return;
+  const term = button.dataset.term ?? "";
+  const action = button.dataset.action;
+  if (action === "open") {
+    termInput.value = term;
+    renderSuggestions([]);
+    void runLookup();
+  }
+  if (action === "edit") void editVocabularyItem(term);
+  if (action === "archive") void setVocabularyArchived(term, true);
+  if (action === "restore") void setVocabularyArchived(term, false);
+});
+
 clearSearchButton.addEventListener("click", () => {
   termInput.value = "";
   renderSuggestions([]);
+  currentResult = null;
+  scheduleAutosave(null);
   result.innerHTML = `<p class="muted">Type a term to search.</p>`;
   termInput.focus();
+});
+
+autosaveToggle.addEventListener("change", async () => {
+  autosaveEnabled = autosaveToggle.checked;
+  await saveValue("autosaveEnabled", autosaveEnabled);
+  if (!autosaveEnabled) scheduleAutosave(null);
+  if (currentResult) renderResult(currentResult);
 });
 
 exploreWordButton.addEventListener("click", () => {
@@ -887,6 +1099,8 @@ exportButton.addEventListener("click", () => {
     exportedAt: new Date().toISOString(),
     app: "wordlover-windows-pwa-poc",
     historyItems,
+    vocabularyItems,
+    autosaveEnabled,
     lastMetrics,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -903,11 +1117,20 @@ window.WordLoverApp = {
   lookupTerm,
   suggestTerms,
   lookupChineseTerm,
+  saveVocabularyItem,
+  getVocabulary: () => vocabularyItems,
+  setAutosaveEnabled: async (enabled) => {
+    autosaveEnabled = Boolean(enabled);
+    autosaveToggle.checked = autosaveEnabled;
+    await saveValue("autosaveEnabled", autosaveEnabled);
+  },
   runAutomatedSearchSmoke,
   getState: () => ({
     loaded,
     lastMetrics,
     historyItems,
+    vocabularyItems,
+    autosaveEnabled,
     encryptedUserStore: true,
     persistentIndexedDbConnection: Boolean(dbPromise),
   }),

@@ -43,6 +43,19 @@ Automated iPhone reports were received on 2026-05-24:
 - Dictionary open on iPhone after fetch: about `15 ms`.
 - URL search smoke for `take off`: pass, including phrase match and Chinese meanings.
 
+Additional iPhone Home Screen PWA reports after the v13 service-worker update:
+
+- Two full suite runs passed all current verdicts.
+- Display mode: `standalone`.
+- Persistent storage: granted before and after request.
+- Shell cache: `wordlover-poc-shell-v13`.
+- Dictionary fetch: about `7.31 s` in both suite runs.
+- SQLite init/open: about `8-10 ms` init and `14-17 ms` open.
+- Lookup benchmark: 100 lookups, p95 about `0.28 ms`, max under `0.8 ms`.
+- IndexedDB restore: about `94-138 ms`.
+- OPFS restore: about `277-297 ms`.
+- URL search smoke for `take off`: pass; fetch about `8.1-8.9 s`, lookup about `0.3-1.0 ms`.
+
 ## Result Summary
 
 | Check | Result |
@@ -59,6 +72,7 @@ Automated iPhone reports were received on 2026-05-24:
 | OPFS availability | Pass on iPhone report |
 | URL-driven dictionary search smoke | Pass for `take off` |
 | First-time full dictionary download | Needs improvement; current network fetch was about 7.5-7.8 seconds |
+| v13 Home Screen suite repeatability | Pass; two standalone runs had matching pass verdicts and p95 lookup about 0.28 ms |
 
 ## Measurements Still To Capture
 
