@@ -63,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.4.6-product.20260525-v25";
+const APP_VERSION = "0.4.8-product.20260525-v27";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v25";
+const SHELL_CACHE_VERSION = "wordlover-shell-v27";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -1668,6 +1668,12 @@ async function startDueReview() {
 function pickNewStudyEntry() {
   if (!dictionaryDb) return null;
   const saved = new Set(vocabularyItems.map((item) => item.normalizedTerm));
+  const alreadyKnown = new Set(
+    studyEvents
+      .filter((event) => event.type === "new-word-first-pass")
+      .map((event) => event.normalizedTerm)
+      .filter(Boolean),
+  );
   const statement = dictionaryDb.prepare(`
     SELECT word, normalized_word, definition, translation
     FROM dictionary_entries
@@ -1682,7 +1688,7 @@ function pickNewStudyEntry() {
   try {
     while (statement.step()) {
       const row = statement.getAsObject();
-      if (!saved.has(row.normalized_word)) {
+      if (!saved.has(row.normalized_word) && !alreadyKnown.has(row.normalized_word)) {
         candidates.push({
           term: row.word,
           normalizedTerm: row.normalized_word,
@@ -1694,7 +1700,7 @@ function pickNewStudyEntry() {
     statement.free();
   }
   if (!candidates.length) return null;
-  return candidates[Math.floor(Date.now() / 86400000) % candidates.length];
+  return candidates[0];
 }
 
 async function startNewWordStudy() {
@@ -2530,6 +2536,7 @@ window.WordLoverApp = {
   getStudyEvents: () => studyEvents,
   startDueReview,
   startNewWordStudy,
+  getActiveQuiz: () => activeQuiz,
   checkForAppUpdate,
   runReviewAutomation,
   setDebugMode,

@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v25";
+const SHELL_CACHE_NAME = "wordlover-shell-v27";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-7",
-  "/styles.css?v=20260525-7",
-  "/wordlover-config.js?v=20260525-7",
+  "/app.js?v=20260525-9",
+  "/styles.css?v=20260525-9",
+  "/wordlover-config.js?v=20260525-9",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260525-7",
+  "/poc-suite.js?v=20260525-9",
 ];
 
 let lastResults = null;
@@ -563,6 +563,121 @@ async function runMainAppDictionarySmoke() {
   };
 }
 
+async function runMainAppStudySmoke() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-study-smoke=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const frameWindow = frame.contentWindow;
+        const input = frame.contentDocument?.querySelector("#termInput");
+        const failedText = frame.contentDocument?.querySelector("#result")?.textContent ?? "";
+        if (/Dictionary is unavailable|Failed to fetch/i.test(failedText)) {
+          window.clearInterval(timer);
+          reject(new Error(`Main app study smoke could not load dictionary: ${failedText.slice(0, 500)}`));
+          return;
+        }
+        if (frameWindow?.WordLoverApp?.getState?.().loaded && input && !input.disabled) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Main app study smoke timed out waiting for dictionary load."));
+        }
+      }, 250);
+    });
+
+    const frameWindow = frame.contentWindow;
+    const frameDocument = frame.contentDocument;
+    const click = (selector) => {
+      const button = frameDocument.querySelector(selector);
+      if (!button) throw new Error(`Main app study smoke missing button: ${selector}`);
+      button.click();
+    };
+    const waitForQuizTerm = async (previousTerm = null) =>
+      new Promise((resolve, reject) => {
+        const startedAt = performance.now();
+        const timer = window.setInterval(() => {
+          const term = frameDocument.querySelector("#quizPanel .quiz-question strong")?.textContent?.trim();
+          if (term && term !== previousTerm) {
+            window.clearInterval(timer);
+            resolve(term);
+            return;
+          }
+          const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
+          if (/No unsaved TOEFL candidate/i.test(panelText)) {
+            window.clearInterval(timer);
+            reject(new Error(`Main app study smoke found no new candidate after ${previousTerm ?? "start"}.`));
+            return;
+          }
+          if (performance.now() - startedAt > 10000) {
+            window.clearInterval(timer);
+            reject(new Error(`Main app study smoke timed out waiting for next quiz. Panel: ${panelText.slice(0, 500)}`));
+          }
+        }, 100);
+      });
+
+    click("#studyNewWord");
+    const firstTerm = await waitForQuizTerm();
+    const firstQuiz = frameWindow.WordLoverApp.getActiveQuiz();
+    const firstCorrectIndex = firstQuiz.options.findIndex((option) => option.correct);
+    if (firstCorrectIndex < 0) throw new Error("Main app study smoke could not find first correct quiz option.");
+    click(`#quizPanel [data-quiz-option="${firstCorrectIndex}"]`);
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (frameDocument.querySelector("[data-study-next]")) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Main app study smoke did not show Study another after first answer."));
+        }
+      }, 100);
+    });
+    click("[data-study-next]");
+    const secondTerm = await waitForQuizTerm(firstTerm);
+    const secondQuiz = frameWindow.WordLoverApp.getActiveQuiz();
+    const wrongIndex = secondQuiz.options.findIndex((option) => !option.correct);
+    if (wrongIndex < 0) throw new Error("Main app study smoke could not find a wrong quiz option.");
+    click(`#quizPanel [data-quiz-option="${wrongIndex}"]`);
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
+        const saved = frameWindow.WordLoverApp
+          .getVocabulary()
+          .some((item) => item.normalizedTerm === secondQuiz.entry.normalizedTerm);
+        if (/Missed on the first try/i.test(panelText) && saved) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error(`Main app study smoke did not save missed new word "${secondTerm}". Panel: ${panelText.slice(0, 500)}`));
+        }
+      }, 100);
+    });
+
+    return {
+      passed: Boolean(firstTerm && secondTerm && firstTerm !== secondTerm),
+      firstTerm,
+      secondTerm,
+      missedSecondTermSaved: true,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
 async function collectDeviceDiagnostics() {
   const storageEstimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
   const persistedBefore = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
@@ -605,6 +720,9 @@ async function runAllPocs() {
 
   addProgress("Running real main-app dictionary search smoke.");
   const mainAppDictionarySearch = await runMainAppDictionarySmoke();
+
+  addProgress("Running real main-app new-word study smoke.");
+  const mainAppStudyFlow = await runMainAppStudySmoke();
 
   addProgress("Fetching current SQLite dictionary.");
   let dictionary = await fetchDictionary();
@@ -654,6 +772,7 @@ async function runAllPocs() {
       opfsDictionaryPersistence: opfs.supported ? (opfs.sampleChecksum === originalChecksum ? "pass" : "fail") : "not-supported",
       offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
       mainAppDictionarySearch: mainAppDictionarySearch.passed ? "pass" : "fail",
+      mainAppStudyFlow: mainAppStudyFlow.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
@@ -664,6 +783,7 @@ async function runAllPocs() {
     serviceWorker,
     offlineShell,
     mainAppDictionarySearch,
+    mainAppStudyFlow,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
     benchmark,

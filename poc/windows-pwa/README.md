@@ -32,7 +32,7 @@ Keep that PowerShell window open while using WordLover. If the server is closed,
 To run the broader automated suite, open:
 
 ```text
-http://127.0.0.1:4173/poc-suite.html?fresh=v25
+http://127.0.0.1:4173/poc-suite.html?fresh=v27
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
