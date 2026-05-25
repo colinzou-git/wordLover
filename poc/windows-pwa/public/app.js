@@ -60,9 +60,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.4.0-product.20260525-v19";
+const APP_VERSION = "0.4.1-product.20260525-v20";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v19";
+const SHELL_CACHE_VERSION = "wordlover-shell-v20";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -1074,6 +1074,17 @@ function getDueVocabularyItems() {
   });
 }
 
+function getPracticeVocabularyItems() {
+  return vocabularyItems
+    .filter((item) => !item.archivedAt)
+    .sort((left, right) => {
+      const leftReviewed = left.review?.lastReviewedAt ?? "";
+      const rightReviewed = right.review?.lastReviewedAt ?? "";
+      if (leftReviewed !== rightReviewed) return leftReviewed.localeCompare(rightReviewed);
+      return (left.savedAt ?? "").localeCompare(right.savedAt ?? "");
+    });
+}
+
 function ensureVocabularyReviewStates() {
   const now = nowIso();
   vocabularyItems = vocabularyItems.map((item) => ({
@@ -1093,7 +1104,7 @@ function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
   const mastered = studyEvents.filter((event) => event.type === "review" && event.rating === "easy" && isToday(event.occurredAt)).length;
-  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length };
+  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
 function renderStudyStats() {
@@ -1101,10 +1112,13 @@ function renderStudyStats() {
   statNewSaved.textContent = String(stats.newSaved);
   statReviewed.textContent = String(stats.reviewed);
   statMastered.textContent = String(stats.mastered);
-  startReviewButton.disabled = stats.dueCount === 0;
+  startReviewButton.disabled = stats.activeCount === 0;
+  startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
   studySummary.textContent = stats.dueCount
     ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
-    : "No saved terms are due right now.";
+    : stats.activeCount
+      ? "No words are due right now. You can still practice saved words."
+      : "No saved words to review yet.";
 }
 
 function scheduleFromFsrsRating(rating) {
@@ -1271,7 +1285,7 @@ function renderQuiz(entry, mode) {
   quizPanel.hidden = false;
   quizPanel.innerHTML = `
     <div class="quiz-question">
-      <span>${mode === "review" ? "Review" : "First check"}</span>
+      <span>${mode === "review" ? "Review" : mode === "practice" ? "Practice" : "First check"}</span>
       <strong>${escapeHtml(entry.term)}</strong>
       <p class="muted">Choose the closest meaning.</p>
     </div>
@@ -1290,13 +1304,18 @@ function renderQuiz(entry, mode) {
   quizPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function startDueReview() {
+async function startDueReview() {
+  if (!(await ensureDictionaryLoaded())) return;
   const [item] = getDueVocabularyItems();
-  if (!item) {
+  const [practiceItem] = item ? [] : getPracticeVocabularyItems();
+  const reviewItem = item ?? practiceItem;
+  if (!reviewItem) {
     renderStudyStats();
+    quizPanel.hidden = false;
+    quizPanel.innerHTML = `<p class="muted">No saved words are available for review yet.</p>`;
     return;
   }
-  renderQuiz(quizEntryFromVocabulary(item), "review");
+  renderQuiz(quizEntryFromVocabulary(reviewItem), item ? "review" : "practice");
 }
 
 function pickNewStudyEntry() {
@@ -1684,7 +1703,7 @@ async function runReviewAutomation() {
   item.review.dueAt = nowIso();
   item.review.masteredAt = null;
   await persistVocabulary();
-  startDueReview();
+  await startDueReview();
   const correctIndex = activeQuiz?.options.findIndex((option) => option.correct) ?? -1;
   if (correctIndex < 0) {
     debugStatus.textContent = "Automation failed: no correct quiz option.";
@@ -1695,7 +1714,7 @@ async function runReviewAutomation() {
   const firstRating = latestEvent?.rating;
   item.review.dueAt = nowIso();
   await persistVocabulary();
-  startDueReview();
+  await startDueReview();
   const wrongIndex = activeQuiz?.options.findIndex((option) => !option.correct) ?? -1;
   if (wrongIndex >= 0) await handleQuizAnswer(wrongIndex);
   const secondRating = studyEvents.at(-1)?.rating;
@@ -1873,7 +1892,7 @@ autosaveToggle.addEventListener("change", async () => {
 });
 
 startReviewButton.addEventListener("click", () => {
-  startDueReview();
+  void startDueReview();
 });
 
 studyNewWordButton.addEventListener("click", () => {
@@ -1897,7 +1916,7 @@ quizPanel.addEventListener("click", (event) => {
     return;
   }
   if (target.closest("[data-review-next]")) {
-    startDueReview();
+    void startDueReview();
   }
 });
 

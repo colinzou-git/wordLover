@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v19";
+const SHELL_CACHE_NAME = "wordlover-shell-v20";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-1",
-  "/styles.css?v=20260525-1",
-  "/wordlover-config.js?v=20260525-1",
+  "/app.js?v=20260525-2",
+  "/styles.css?v=20260525-2",
+  "/wordlover-config.js?v=20260525-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260525-1",
+  "/poc-suite.js?v=20260525-2",
 ];
 
 let lastResults = null;
