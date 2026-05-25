@@ -18,8 +18,7 @@ Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.
 ## Run
 
 ```powershell
-cd poc\windows-pwa\public
-python -m http.server 4173
+powershell -NoProfile -ExecutionPolicy Bypass -File poc\windows-pwa\start-windows-pwa.ps1 -Port 4173
 ```
 
 Then open:
@@ -28,21 +27,17 @@ Then open:
 http://127.0.0.1:4173
 ```
 
-To run the broader Phase 0 automated suite, open:
+Keep that PowerShell window open while using WordLover. If the server is closed, an already-open browser tab can still show the app shell from cache, but first-time dictionary install cannot fetch `dictionary.sqlite`.
+
+To run the broader automated suite, open:
 
 ```text
-http://127.0.0.1:4173/poc-suite.html
-```
-
-Or use the helper script from the repo root:
-
-```powershell
-poc\windows-pwa\start-windows-pwa.ps1 -Port 4173
+http://127.0.0.1:4173/poc-suite.html?fresh=v25
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
 
-Click **Run all automated POCs**. The suite covers dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
+Click **Run automated tests**. The suite now includes a real main-app smoke test that opens the WordLover app in an iframe and verifies actual dictionary searches for `abandon` and `take off`, then continues with dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
 
 For iPhone testing, use the HTTPS server instead:
 

@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v23";
+const SHELL_CACHE_NAME = "wordlover-shell-v25";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-5",
-  "/styles.css?v=20260525-5",
-  "/wordlover-config.js?v=20260525-5",
+  "/app.js?v=20260525-7",
+  "/styles.css?v=20260525-7",
+  "/wordlover-config.js?v=20260525-7",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260525-5",
+  "/poc-suite.js?v=20260525-7",
 ];
 
 let lastResults = null;
@@ -513,6 +513,56 @@ async function runMockGoogleDriveSyncPoc(exportImportResult) {
   };
 }
 
+async function runMainAppDictionarySmoke() {
+  const terms = ["abandon", "take off"];
+  const results = [];
+  for (const term of terms) {
+    const frame = document.createElement("iframe");
+    frame.hidden = true;
+    frame.src = `/?q=${encodeURIComponent(term)}&suite-main-smoke=${Date.now()}`;
+    document.body.append(frame);
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const startedAt = performance.now();
+        const timer = window.setInterval(() => {
+          const frameWindow = frame.contentWindow;
+          const frameDocument = frame.contentDocument;
+          const text = frameDocument?.querySelector("#result")?.textContent ?? "";
+          const input = frameDocument?.querySelector("#termInput");
+          const failed = /Dictionary is unavailable|Failed to fetch|No exact dictionary match|Invalid input/i.test(text);
+          const loaded = Boolean(frameWindow?.WordLoverApp?.getState?.().loaded);
+          if (failed) {
+            window.clearInterval(timer);
+            reject(new Error(`Main app search failed for "${term}": ${text.slice(0, 500)}`));
+            return;
+          }
+          if (loaded && input && !input.disabled && text.toLowerCase().includes(term.toLowerCase().split(" ")[0])) {
+            window.clearInterval(timer);
+            resolve({
+              term,
+              loaded,
+              textPreview: text.trim().slice(0, 500),
+              appVersion: frameWindow.WordLoverApp.getState().appVersion,
+            });
+            return;
+          }
+          if (performance.now() - startedAt > 60000) {
+            window.clearInterval(timer);
+            reject(new Error(`Main app search timed out for "${term}". Last result text: ${text.slice(0, 500)}`));
+          }
+        }, 250);
+      });
+      results.push(result);
+    } finally {
+      frame.remove();
+    }
+  }
+  return {
+    passed: results.length === terms.length,
+    results,
+  };
+}
+
 async function collectDeviceDiagnostics() {
   const storageEstimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
   const persistedBefore = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
@@ -552,6 +602,9 @@ async function runAllPocs() {
   addProgress("Registering service worker and checking app shell cache.");
   const serviceWorker = await registerServiceWorker();
   const offlineShell = await checkOfflineShellCache();
+
+  addProgress("Running real main-app dictionary search smoke.");
+  const mainAppDictionarySearch = await runMainAppDictionarySmoke();
 
   addProgress("Fetching current SQLite dictionary.");
   let dictionary = await fetchDictionary();
@@ -600,6 +653,7 @@ async function runAllPocs() {
       indexedDbDictionaryPersistence: indexedDbLookup.status === "found" ? "pass" : "fail",
       opfsDictionaryPersistence: opfs.supported ? (opfs.sampleChecksum === originalChecksum ? "pass" : "fail") : "not-supported",
       offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
+      mainAppDictionarySearch: mainAppDictionarySearch.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
@@ -609,6 +663,7 @@ async function runAllPocs() {
     diagnostics,
     serviceWorker,
     offlineShell,
+    mainAppDictionarySearch,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
     benchmark,
