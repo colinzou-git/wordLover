@@ -63,6 +63,56 @@ button:disabled {
   padding: 10px 0 28px;
 }
 
+.top-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.app-menu[hidden] {
+  display: none;
+}
+
+.app-menu {
+  margin-top: 0;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.menu-grid div {
+  border: 1px solid #d8e0de;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fbfdfc;
+  min-width: 0;
+}
+
+.menu-grid span {
+  display: block;
+  color: #607377;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.menu-grid strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
@@ -572,6 +622,7 @@ li button {
 
   .status-grid,
   .stats-grid,
+  .menu-grid,
   .metrics div,
   .meaning-grid {
     grid-template-columns: 1fr;

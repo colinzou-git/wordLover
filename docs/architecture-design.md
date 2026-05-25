@@ -67,6 +67,8 @@ PWA install documentation should include:
 - Windows: open app URL in Edge/Chrome, Install app.
 - Android, later: open app URL in Chrome/Edge, Install app or Add to Home Screen.
 
+Installing on an additional iPhone follows the same pattern: open the trusted HTTPS app URL in Safari, install to the Home Screen, launch once online, complete local dictionary installation, then verify that search works after Wi-Fi and cellular data are disabled. The app shell, dictionary package, user database, checkpoints, and export/recovery functions must live on that iPhone after setup. Only cloud sync and AI provider calls may require internet.
+
 ## Browser Capability Requirements
 
 Because the app is PWA-first, implementation must account for browser limitations:
@@ -194,6 +196,14 @@ Service worker caching strategy:
 - API/network requests: network-first where online, graceful offline fallback.
 - Dictionary package: do not rely only on HTTP cache; persist through app storage after first setup.
 
+App update UX:
+
+- The app exposes a compact menu/settings surface that displays app version, user-data format version, dictionary data version, dictionary engine, sync status, and offline readiness.
+- The user can tap **Check update** to ask the service worker to look for a newer app shell.
+- If a waiting service worker is available, the user can tap **Apply update**. The app switches to the new shell only after the user chooses to apply it.
+- Dictionary package updates use a separate side-by-side install and validation flow before switching active dictionary versions.
+- If update activation or dictionary validation fails, the app keeps the last-known-good app shell or dictionary package.
+
 ### Dictionary Data Pipeline
 
 Existing local scripts generate `data/dictionary.sqlite` from ECDICT and augment missing definitions from WordNet and OPTED/Webster. For PWA delivery, add a web packaging step.
@@ -238,6 +248,23 @@ Default recommendation:
 - Add a compact prefix index only if SQLite WASM cannot satisfy the 1-second search target on older phones.
 - The 2026-05-24 Windows and real iPhone 17 Pro POCs validated the SQLite WASM-first direction with the current generated SQLite dictionary. The iPhone POC was reported to start fast and load the dictionary fast.
 - Prefer evaluating `wa-sqlite` with OPFS VFS during Phase 0 because it is designed for browser persistence and read-heavy SQLite workloads. Compare it against the simpler `sql.js` approach before committing to the production persistence layer.
+
+### iPhone Memory Budget
+
+The production iPhone target is normal-use WordLover incremental memory at or below 50 MB after dictionary installation. Browser PWAs do not expose a reliable JavaScript API for per-app DRAM on iPhone, so this must be measured with Safari Web Inspector Timelines or Xcode Instruments from a Mac when available, and inferred only roughly from Windows browser automation.
+
+Current status:
+
+- The live POC uses `sql.js`, which reads the full 197-206 MB SQLite file into a `Uint8Array` and opens it in WASM memory.
+- This proves lookup functionality and latency, but it should be assumed to exceed the 50 MB iPhone DRAM target until measured otherwise.
+- The current `sql.js` path is therefore not production-accepted for iPhone memory.
+
+Production direction:
+
+- Prefer `wa-sqlite` with an OPFS VFS so SQLite page cache controls memory and the full dictionary is not loaded into JS heap.
+- Keep a sharded dictionary package as fallback if OPFS is unavailable or older iPhones still exceed the memory budget.
+- Isolate dictionary access behind a `DictionaryRepository` interface so the UI, vocabulary, and quiz code do not depend on `sql.js`.
+- Treat the memory benchmark as a blocking Phase 0/early Phase 1 gate before scaling the dictionary UI further.
 
 Fallback dictionary package:
 
@@ -505,6 +532,7 @@ PWA implementation options:
 - Provider selection must be abstracted so the UI calls `AiDetailProvider` and does not depend on one vendor.
 - AI must remain optional; local dictionary and learning flows continue without any AI provider.
 - Request structured JSON output from AI providers whenever possible and validate it before display or save.
+- Gemini integration requires an explicitly configured Google Cloud OAuth/client setup and whatever Google API consent or quota model is available for the chosen Gemini path. The app must not imply that offline dictionary/study features depend on Gemini.
 
 AI structured output shape:
 
@@ -579,9 +607,12 @@ Two-tier sync plan:
 PWA OAuth notes:
 
 - Use browser-based OAuth flow with PKCE.
+- On first install, prompt the user to sign in with Google after the local shell is ready. The prompt must allow Skip for offline-only use.
+- Request the minimum scopes needed for Drive sync first; request AI-related scopes only when the user opens an AI feature if separate consent is needed.
 - Store refresh/session material only according to Google OAuth rules and browser security limits.
 - Never log tokens.
 - Sync must tolerate token expiry and prompt re-authentication.
+- The OAuth implementation must support installing WordLover on a second iPhone: sign in, retrieve the encrypted Drive snapshot and optional Drive key-wrap, restore local user data, then continue with local-first operation.
 
 ### User Data Versioning
 
@@ -812,12 +843,14 @@ Required:
 
 - App startup to visible usable search input: under 1 second on supported devices after the PWA has been installed and initialized.
 - Normal local dictionary search response: under 1 second.
+- iPhone normal-use incremental memory: <= 50 MB after dictionary installation where measurable. The dictionary engine must avoid a persistent full-dictionary JS/WASM heap allocation.
 
 Design tactics:
 
 - Show home shell before loading optional network services.
 - Lazy-load AI, sync, export/import, and diagnostics modules.
 - Initialize dictionary search in a Web Worker.
+- Use page-cache or shard-based dictionary reads instead of loading the complete dictionary file into memory.
 - Keep exact/prefix search indexes compact.
 - Avoid network calls in core search path.
 - Cache today's stats and invalidate from study events.
@@ -858,7 +891,7 @@ Phase 0 must produce a written validation report before Phase 1 begins.
 | App shell visible on launch | <= 1 second | iPhone 12 or comparable device, iOS 17 Safari |
 | OPFS or IndexedDB persistence | Data survives app close and reopen | iPhone Safari Home Screen PWA |
 | Storage quota available | >= 400 MB grantable or documented alternative package size | iPhone Safari |
-| WASM memory behavior | Dictionary search works without out-of-memory failure | iPhone Safari |
+| Dictionary memory behavior | Normal-use app memory stays <= 50 MB where measurable; otherwise no full-dictionary JS/WASM heap load is allowed | iPhone Safari, measured with Safari Web Inspector or Xcode Instruments when available |
 | Offline launch | Installed app opens while offline after setup | iPhone Safari Home Screen PWA |
 | Export/import tar | User-data tar export and import works | iPhone Safari and Windows browser |
 
@@ -873,12 +906,15 @@ Current validation snapshot:
 | Phase 0 automated browser POC suite | Pass on Windows and iPhone Safari | IndexedDB dictionary persistence, OPFS dictionary persistence, offline shell cache readiness, encrypted export/import, mock Google Drive-style sync, and 100 lookup timing benchmark passed. Android is intentionally deferred. Real Google OAuth remains account-gated. |
 | Offline dictionary fallback POC | Pass on Windows fallback automation; partial iPhone pass | Main POC now saves the dictionary to IndexedDB after an online load. With the server stopped, the app shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. iPhone automated suite confirms IndexedDB persistence; true Wi-Fi-off Home Screen search still needs manual final confirmation. |
 | Chinese/fuzzy dictionary smoke | Pass on Windows fallback automation | `放弃` returns English candidates and `abanden` suggests `abandon`. Production should move this logic into FTS/trigram indexes rather than relying only on JavaScript candidates. |
+| App version/update menu POC | Implemented in current PWA | The compact app menu shows app version, user-data format version, dictionary engine, sync state, memory-target note, export state, and service-worker update controls. Real iPhone update activation still needs manual confirmation. |
+| iPhone DRAM target | Not yet passed | Current `sql.js` POC should be assumed above the <= 50 MB target because it loads the full dictionary into JS/WASM memory. Dedicated `wa-sqlite`+OPFS or sharded dictionary memory POC is required. |
 
 Validation report contents:
 
 - Device models and OS/browser versions tested.
 - SQLite WASM library version and persistence mode.
 - Startup and search latency, including median and p95 over at least 20 runs.
+- Peak and steady-state memory during dictionary install, open, lookup, background, and relaunch.
 - Storage quota available and granted.
 - Offline launch result.
 - Export/import result.
@@ -894,15 +930,15 @@ Validation report contents:
 | Search history and autosave | 32-42 |
 | Home screen and stats | 43-47, 58, 133 |
 | Review and proactive study | 48-59, 113-135, 147-148 |
-| Platform, local-first, offline, and no-fee personal install | 60-64, 67, 135, 157-159, 171-172 |
-| Sync and cloud storage | 65-69, 98-103, 145-146 |
-| AI-assisted details | 70-79, 134 |
+| Platform, local-first, offline, and no-fee personal install | 60-64, 67, 135, 157-159, 171-172, 180 |
+| Sync and cloud storage | 65-69, 98-103, 145-146, 175-176 |
+| AI-assisted details | 70-79, 134, 177 |
 | Diagnostics | 80-86 |
 | Backup, rollback, export, import | 87-97, 104-112 |
 | Security and privacy | 149-154 |
 | Accessibility | 155-156 |
-| Performance | 143-144 |
-| Setup, dictionary update, compatibility, and Phase 0 validation | 160-168 |
+| Performance | 143-144, 173-174 |
+| Setup, dictionary update, compatibility, and Phase 0 validation | 160-168, 178-179 |
 | Review grace and AI structured output | 169-170 |
 
 ## Implementation Phases
@@ -911,12 +947,14 @@ Detailed phase execution lives in `docs/development-plan.md`. The architecture p
 
 ### Phase 0: Technical Validation
 
-- Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro feasibility with `sql.js`.
+- Validate SQLite WASM on iPhone Safari with the generated dictionary package. Status: passed for iPhone 17 Pro functionality/latency feasibility with `sql.js`, but not accepted for the <= 50 MB DRAM target.
 - Compare `wa-sqlite` OPFS VFS against any simpler SQLite WASM option. Status: OPFS and IndexedDB package persistence passed with `sql.js` on Windows and iPhone Safari; `wa-sqlite` still needs a dedicated benchmark before final production decision because `sql.js` keeps the full dictionary in memory.
+- Measure iPhone memory during dictionary install/open/search/background/relaunch. Status: not yet measured; this is a blocking production-engine criterion.
 - Measure startup and lookup time on iPhone and Windows. Status: Windows measured; iPhone automated report measured lookup p95 far below 1 second after dictionary open. First full dictionary network fetch is still too large for production UX. Android timing is deferred until the end.
 - Validate storage quota and persistence behavior. Status: IndexedDB and OPFS passed on Windows browser and iPhone Safari automated suite. Android persistence is deferred.
 - Validate Add to Home Screen install flow. Status: iPhone PWA path validated at feasibility level; document exact iOS version in timed pass.
 - Validate offline launch after install. Status: Windows service-worker shell reload passed with the local server stopped; original iPhone test showed shell launch works but dictionary load/search fail until offline dictionary persistence is installed and retested.
+- Validate manual app update flow on iPhone. Status: PWA menu now exposes version and service-worker update controls; real iPhone update application still needs confirmation.
 - Validate export/import tar in browser. Status: encrypted tar-style export/import round trip passed in the automated browser POC; full product UI export/import still needs implementation.
 - Produce the Phase 0 validation report required by PRD Req 167.
 - Confirm or reject SQLite WASM. Current direction: continue with SQLite WASM first for iPhone and Windows; keep sharded package as fallback only if iPhone persistence, memory, or timed latency fails. Android must not block this decision.
@@ -1009,11 +1047,11 @@ Date: 2026-05-24
 
 Status: Accepted for Phase 1 direction, with persistence validation still required
 
-Context: The existing dictionary pipeline already produces SQLite. Windows and real iPhone 17 Pro POCs validated that the current SQLite dictionary can support fast PWA startup and dictionary loading in the feasibility prototype. The automated Windows POC also validated IndexedDB and OPFS package persistence. Durable mobile browser persistence and older-device behavior still need validation.
+Context: The existing dictionary pipeline already produces SQLite. Windows and real iPhone 17 Pro POCs validated that the current SQLite dictionary can support fast PWA startup and dictionary loading in the feasibility prototype. The automated Windows POC also validated IndexedDB and OPFS package persistence. Durable mobile browser persistence, older-device behavior, and the <= 50 MB iPhone DRAM target still need validation.
 
-Decision: Continue with SQLite WASM as the first implementation path. Evaluate the production persistence layer, preferably `wa-sqlite` with OPFS or IndexedDB VFS compared with the simpler `sql.js` approach. If persistence, older-device memory, or timed latency fails, switch to a sharded dictionary package.
+Decision: Continue with a SQLite-shaped dictionary interface as the first implementation path. The current `sql.js` implementation remains a POC fallback only because it loads the full dictionary into memory. Evaluate the production persistence layer, preferably `wa-sqlite` with OPFS or IndexedDB VFS compared with a sharded dictionary package. If persistence, older-device memory, or timed latency fails, switch to the sharded package.
 
-Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish iPhone persistence, iPhone offline dictionary search, iPhone timed benchmarks, and real Google OAuth validation before the architecture is considered fully proven. Android validation is intentionally deferred and should not block iPhone/Windows progress.
+Consequences: Phase 1 can proceed with SQLite-shaped dictionary interfaces, but Phase 0 must still finish iPhone persistence, iPhone offline dictionary search, iPhone timed benchmarks, iPhone memory measurement, and real Google OAuth validation before the architecture is considered fully proven. Android validation is intentionally deferred and should not block iPhone/Windows progress.
 
 ### ADR-003 - Local Generated Key With Recovery Export
 

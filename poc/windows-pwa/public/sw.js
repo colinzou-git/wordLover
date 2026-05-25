@@ -1,14 +1,14 @@
-const CACHE_NAME = "wordlover-poc-shell-v17";
+const CACHE_NAME = "wordlover-poc-shell-v18";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260524-7",
-  "/styles.css?v=20260524-7",
+  "/app.js?v=20260524-8",
+  "/styles.css?v=20260524-8",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260524-9",
+  "/poc-suite.js?v=20260524-10",
 ];
 
 self.addEventListener("install", (event) => {
@@ -23,6 +23,12 @@ self.addEventListener("activate", (event) => {
     ),
   );
   self.clients.claim();
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {

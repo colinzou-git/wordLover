@@ -6,6 +6,8 @@ For exact timed results on iPhone, open `/poc-suite.html` from Safari or the Hom
 
 Offline update: the first iPhone offline test showed that the app shell starts without Wi-Fi, but dictionary load/search did not work because the original POC fetched the dictionary from the Windows server each time. The POC now saves the dictionary to IndexedDB after an online load and falls back to that offline copy when network fetch fails.
 
+Memory update: the current POC does not prove the <= 50 MB iPhone DRAM target. It uses `sql.js`, which loads the full 206 MB SQLite file into JS/WASM memory. Treat this as a functionality and latency POC only. Production must validate `wa-sqlite`+OPFS or a sharded dictionary package with Safari Web Inspector or Xcode Instruments before accepting the dictionary engine.
+
 This POC tests the real iPhone Safari/Home Screen PWA risks:
 
 - HTTPS install path from a Windows PC.
@@ -165,6 +167,93 @@ Expected:
 
 - Diagnostics display mode should show `standalone` or `ios-standalone`.
 
+## 7B. Install On Another iPhone
+
+Use these steps for each additional personal iPhone while using the local Windows-hosted POC.
+
+1. Put the Windows PC and the new iPhone on the same Wi-Fi network.
+2. Confirm the Windows PC IP address. The examples below use `192.168.1.73`; replace it if your IP changed.
+3. If the IP changed, recreate the local certificate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File poc\iphone-pwa\create-local-ca-and-cert.ps1 -IpAddress 192.168.1.73
+```
+
+4. Send `poc\iphone-pwa\certs\wordlover-local-root-ca.cer` to the new iPhone.
+5. On the iPhone, open the `.cer` file and install the profile.
+6. Go to **Settings > General > VPN & Device Management** and finish installing the profile if iOS asks.
+7. Go to **Settings > General > About > Certificate Trust Settings** and enable full trust for **WordLover Local POC Root CA**.
+8. Start the HTTPS server on Windows:
+
+```powershell
+.\start-iphone-https.ps1
+```
+
+9. On the iPhone, open Safari and visit:
+
+```text
+https://192.168.1.73:8443
+```
+
+10. Wait for the page to load without a certificate warning.
+11. Tap Share, then **Add to Home Screen**.
+12. Open WordLover from the Home Screen icon.
+13. Keep the iPhone online and let the dictionary install/load once. The current local package is about `206606336` bytes.
+14. Search `abandon` and `take off` while online.
+15. Turn off Wi-Fi and cellular data.
+16. Reopen the Home Screen app and search `take off` again.
+
+Pass criteria:
+
+- The app opens from the Home Screen.
+- The local dictionary loads from `indexedDB offline copy` after first setup.
+- Search works without Wi-Fi/cellular data.
+- Vocabulary, quizzes, export, and local recovery are available offline after setup.
+- Only Google Drive sync and AI provider calls require internet.
+
+For a production hosted HTTPS site, the local certificate steps disappear. The user would open the production HTTPS URL in Safari, add it to the Home Screen, complete dictionary setup, and verify offline search.
+
+## 7C. Google Login, Drive Sync, And Gemini
+
+The current POC does not include real Google OAuth yet. The planned flow is:
+
+1. First launch shows the local app shell.
+2. The app prompts the user to **Sign in with Google** or **Skip for offline use**.
+3. If the user signs in, the PWA uses browser-safe Google OAuth with PKCE.
+4. The app requests the minimum Drive scope needed to store encrypted WordLover user data.
+5. Local user data remains encrypted before sync.
+6. Google Drive stores the encrypted snapshot, version metadata, checkpoints, and optional key-wrap file.
+7. Gemini-powered examples and follow-up questions reuse the signed-in Google account when feasible.
+8. If the user skips sign-in, dictionary search, vocabulary, quizzes, export, and local checkpoints still work offline. Sync and AI stay unavailable until sign-in.
+
+Implementation note: real Google login requires a configured Google Cloud OAuth client and consent configuration. It cannot be fully automated or silently tested without that account setup.
+
+## 7D. App Version And Upgrade Test
+
+The current PWA includes a compact menu for version and update controls.
+
+1. Open the Home Screen PWA.
+2. Tap **Menu**.
+3. Confirm the menu shows:
+   - app version
+   - user-data format version
+   - dictionary engine
+   - sync status
+   - memory-target note
+4. Tap **Check update**.
+5. If the app says an update is ready, tap **Apply update**.
+6. The app reloads into the new service-worker version.
+7. Open **Menu** again and confirm the version changed.
+
+If the iPhone keeps an old cached shell:
+
+1. Close the Home Screen app.
+2. Open the same URL in Safari once while online.
+3. Tap **Menu > Check update**.
+4. Reopen the Home Screen app.
+
+Dictionary data updates are separate from app-shell updates. A future dictionary update must download or import the new dictionary alongside the current package, validate it, and switch only after validation succeeds.
+
 ## 7A. Run The Automated iPhone Suite
 
 Open this URL on the iPhone while the Windows HTTPS server is running:
@@ -206,9 +295,9 @@ This loads the dictionary, searches `take off`, and sends a JSON result back to 
 
 In the POC app:
 
-1. Tap **Load local SQLite dictionary**.
-2. Wait for completion.
-3. Record the metrics shown in the Dictionary row:
+1. Search `abandon`, or tap **Install/load dictionary** if that button is visible.
+2. Wait for the local dictionary to open. The current compact UI may hide developer metrics, so use the automated suite for exact timing.
+3. In `/poc-suite.html`, record:
    - row count
    - size
    - fetch time
@@ -275,15 +364,15 @@ Use this test after updating to the latest POC files.
 1. Turn Wi-Fi and Cellular back on.
 2. Open the POC from the Home Screen while the Windows HTTPS server is running.
 3. Reload the page once while online so Safari picks up the latest service worker and JavaScript.
-4. Tap **Load local SQLite dictionary**.
-5. Confirm the Dictionary metric shows `source network`.
+4. Search `abandon`, or tap **Install/load dictionary** if that button is visible.
+5. Confirm the search result appears while online.
 6. Search `abandon`.
 7. Confirm a result appears.
 8. Turn off Wi-Fi and Cellular on the iPhone.
 9. Close the Home Screen PWA.
 10. Reopen the Home Screen PWA.
-11. Tap **Load local SQLite dictionary** again.
-12. Confirm the Dictionary metric shows `source indexedDB offline copy`.
+11. Search `take off`, or tap **Install/load dictionary** if that button is visible.
+12. Confirm the dictionary opens from the local offline copy by seeing a search result with Wi-Fi/cellular still disabled.
 13. Search `take off`.
 14. Confirm a phrase result appears.
 
@@ -291,7 +380,7 @@ Pass criteria:
 
 - The app shell opens without Wi-Fi.
 - Dictionary load completes without Wi-Fi.
-- The metric shows `source indexedDB offline copy`.
+- Search works while Wi-Fi/cellular is off, proving the local offline dictionary copy is usable.
 - Searching `take off` returns a phrase result without Wi-Fi.
 
 If dictionary load/search still fails offline:
@@ -299,7 +388,7 @@ If dictionary load/search still fails offline:
 - Reconnect Wi-Fi.
 - Open the POC.
 - Reload the page twice while online.
-- Tap **Load local SQLite dictionary** again and wait for completion.
+- Search `abandon` again and wait for completion.
 - Disconnect Wi-Fi and repeat the offline test.
 
 ## 13. Record Results

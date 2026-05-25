@@ -1,5 +1,17 @@
 ﻿const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
+const appMenuButton = document.querySelector("#appMenuButton");
+const appMenu = document.querySelector("#appMenu");
+const appVersion = document.querySelector("#appVersion");
+const dataFormatVersion = document.querySelector("#dataFormatVersion");
+const dictionaryEngine = document.querySelector("#dictionaryEngine");
+const syncStatus = document.querySelector("#syncStatus");
+const memoryNote = document.querySelector("#memoryNote");
+const googleStatus = document.querySelector("#googleStatus");
+const checkForUpdateButton = document.querySelector("#checkForUpdate");
+const applyUpdateButton = document.querySelector("#applyUpdate");
+const exportStateMenuButton = document.querySelector("#exportStateMenu");
+const updateStatus = document.querySelector("#updateStatus");
 const termInput = document.querySelector("#termInput");
 const clearSearchButton = document.querySelector("#clearSearch");
 const result = document.querySelector("#result");
@@ -38,6 +50,12 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
+const APP_VERSION = "0.3.0-poc.20260524-v18";
+const USER_DATA_FORMAT_VERSION = "0.3";
+const SHELL_CACHE_VERSION = "wordlover-poc-shell-v18";
+const DICTIONARY_ENGINE = "sql.js POC; production target is wa-sqlite + OPFS";
+const MEMORY_TARGET_NOTE =
+  "Memory target: iPhone normal-use DRAM <= 50 MB. Current sql.js POC loads the full dictionary into WASM memory, so it is a feasibility POC only.";
 const FSRS_RATING_LABELS = {
   again: "Again",
   hard: "Hard",
@@ -254,6 +272,16 @@ function renderMetrics() {
   `;
   dictionaryState.textContent = loaded ? "Ready" : lastMetrics ? "Installed" : "Not loaded";
   dictionarySource.textContent = lastMetrics?.source ?? "Online setup needed";
+}
+
+function renderAppMenu() {
+  appVersion.textContent = APP_VERSION;
+  dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
+  dictionaryEngine.textContent = DICTIONARY_ENGINE;
+  syncStatus.textContent = navigator.onLine ? "Pending Google setup" : "Offline/local";
+  memoryNote.textContent = MEMORY_TARGET_NOTE;
+  googleStatus.textContent =
+    "Google sign-in, Drive sync, and Gemini details require the Phase 5 OAuth setup. Offline dictionary and study data stay local until then.";
 }
 
 async function renderDiagnostics() {
@@ -1295,6 +1323,59 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
   }
 }
 
+function exportState() {
+  const payload = {
+    exportedAt: nowIso(),
+    app: "wordlover-windows-pwa-poc",
+    appVersion: APP_VERSION,
+    userDataFormatVersion: USER_DATA_FORMAT_VERSION,
+    historyItems,
+    vocabularyItems,
+    studyEvents,
+    autosaveEnabled,
+    lastMetrics,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "wordlover-poc-user-data.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function checkForAppUpdate() {
+  applyUpdateButton.disabled = true;
+  if (!("serviceWorker" in navigator)) {
+    updateStatus.textContent = "Service worker is unavailable on this device.";
+    return;
+  }
+  updateStatus.textContent = "Checking for an app update...";
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (!registration) {
+    updateStatus.textContent = "Offline shell is not registered yet. Reopen the app and try again.";
+    return;
+  }
+  await registration.update();
+  const waitingWorker = registration.waiting;
+  if (waitingWorker) {
+    applyUpdateButton.disabled = false;
+    updateStatus.textContent = "An update is ready. Tap Apply update to switch.";
+    return;
+  }
+  updateStatus.textContent = `No app-shell update found. Current version: ${APP_VERSION}.`;
+}
+
+async function applyAppUpdate() {
+  const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+  if (!registration?.waiting) {
+    updateStatus.textContent = "No waiting update is available yet. Check update first.";
+    return;
+  }
+  updateStatus.textContent = "Applying update...";
+  registration.waiting.postMessage({ type: "SKIP_WAITING" });
+}
+
 function runSuggestions() {
   if (!loaded || !termInput.value.trim()) {
     renderSuggestions([]);
@@ -1309,6 +1390,7 @@ function runSuggestions() {
 
 async function init() {
   renderInstallContext();
+  renderAppMenu();
   await getDeviceId();
   historyItems = await loadValue("history", []);
   vocabularyItems = await loadValue("vocabularyItems", []);
@@ -1336,6 +1418,9 @@ async function init() {
     try {
       await navigator.serviceWorker.register("/sw.js");
       pwaStatus.textContent = "Offline shell registered";
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        window.location.reload();
+      });
     } catch (error) {
       pwaStatus.textContent = `Service worker failed: ${error instanceof Error ? error.message : String(error)}`;
     }
@@ -1484,23 +1569,30 @@ exploreWordButton.addEventListener("click", () => {
 });
 
 exportButton.addEventListener("click", () => {
-  const payload = {
-    exportedAt: nowIso(),
-    app: "wordlover-windows-pwa-poc",
-    historyItems,
-    vocabularyItems,
-    studyEvents,
-    autosaveEnabled,
-    lastMetrics,
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "wordlover-poc-user-data.json";
-  anchor.click();
-  URL.revokeObjectURL(url);
+  exportState();
 });
+
+appMenuButton.addEventListener("click", () => {
+  const expanded = appMenu.hidden;
+  appMenu.hidden = !expanded;
+  appMenuButton.setAttribute("aria-expanded", String(expanded));
+  if (expanded) renderAppMenu();
+});
+
+checkForUpdateButton.addEventListener("click", () => {
+  void checkForAppUpdate();
+});
+
+applyUpdateButton.addEventListener("click", () => {
+  void applyAppUpdate();
+});
+
+exportStateMenuButton.addEventListener("click", () => {
+  exportState();
+});
+
+window.addEventListener("online", renderAppMenu);
+window.addEventListener("offline", renderAppMenu);
 
 window.WordLoverApp = {
   ensureDictionaryLoaded,
@@ -1512,6 +1604,7 @@ window.WordLoverApp = {
   getStudyEvents: () => studyEvents,
   startDueReview,
   startNewWordStudy,
+  checkForAppUpdate,
   getDueVocabularyItems,
   setAutosaveEnabled: async (enabled) => {
     autosaveEnabled = Boolean(enabled);
@@ -1526,6 +1619,9 @@ window.WordLoverApp = {
     vocabularyItems,
     studyEvents,
     autosaveEnabled,
+    appVersion: APP_VERSION,
+    userDataFormatVersion: USER_DATA_FORMAT_VERSION,
+    shellCacheVersion: SHELL_CACHE_VERSION,
     encryptedUserStore: true,
     persistentIndexedDbConnection: Boolean(dbPromise),
   }),

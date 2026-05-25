@@ -55,6 +55,8 @@ Additional iPhone Home Screen PWA reports after the v13 service-worker update:
 - IndexedDB restore: about `94-138 ms`.
 - OPFS restore: about `277-297 ms`.
 - URL search smoke for `take off`: pass; fetch about `8.1-8.9 s`, lookup about `0.3-1.0 ms`.
+- App version/update menu: implemented in the PWA after the v17 compact UI pass; real iPhone update activation still needs a manual check.
+- iPhone DRAM target: not passed yet. The current `sql.js` POC loads the full 206 MB SQLite dictionary into JS/WASM memory and should be assumed above the <= 50 MB production target until measured otherwise.
 
 ## Result Summary
 
@@ -67,7 +69,7 @@ Additional iPhone Home Screen PWA reports after the v13 service-worker update:
 | App shell starts without Wi-Fi | Pass, user reported shell starts |
 | Offline dictionary load/search in original POC | Fail, dictionary was not persisted locally |
 | Offline dictionary load/search after IndexedDB fallback update | IndexedDB persistence passed on iPhone suite; true Wi-Fi-off search still needs manual final confirmation |
-| SQLite WASM memory behavior | Pass for this device and current POC scope |
+| SQLite WASM memory behavior | Functional pass only; does not prove <= 50 MB DRAM |
 | No-fee iPhone personal-use path | Pass for PWA install approach |
 | OPFS availability | Pass on iPhone report |
 | URL-driven dictionary search smoke | Pass for `take off` |
@@ -82,16 +84,17 @@ The user-reported result is enough for feasibility direction, but a later timed 
 - Safari/Home Screen display mode.
 - Storage estimate and quota.
 - Service worker status.
-- Older-device memory behavior with the full dictionary package.
+- iPhone memory during dictionary install/open/search/background/relaunch, preferably with Safari Web Inspector or Xcode Instruments.
+- Older-device memory behavior with the production dictionary engine.
 - Whether search history survives app close/reopen.
 - Whether the updated IndexedDB offline dictionary fallback works after Wi-Fi is disconnected.
 - Whether the installed Home Screen shell and dictionary lookup work offline after app close/reopen.
 
 ## Feasibility Conclusion For iPhone
 
-The iPhone 17 Pro result supports continuing with the PWA-first architecture and SQLite WASM dictionary approach.
+The iPhone 17 Pro result supports continuing with the PWA-first architecture and a SQLite-shaped dictionary interface.
 
-Do not activate the sharded dictionary fallback now. Keep it as a contingency only if later timed tests show unacceptable memory, persistence, or latency on older supported phones.
+Do not accept the current `sql.js` full-buffer engine for production memory yet. Keep the sharded dictionary fallback as a contingency if `wa-sqlite`+OPFS cannot meet memory, persistence, or latency targets on supported phones.
 
 The next production-storage POC should compare the current `sql.js` full-buffer approach with `wa-sqlite` on OPFS. The current app works, but first-time download size and full-buffer memory use are still the largest risks for older iPhones.
 

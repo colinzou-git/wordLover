@@ -31,6 +31,8 @@ Environment:
 | Vocabulary save/edit/archive slice | Pass on Windows fallback | Browser smoke verified manual save, autosave dwell, duplicate saved-state, archive, restore, and iPhone-width layout without horizontal overflow. |
 | Learning loop slice | Pass on Windows fallback | Browser smoke verified daily stats, due-review quiz, app-inferred FSRS rating, proactive new-word quiz, encrypted study-event persistence, and iPhone-width layout without horizontal overflow. |
 | Compact UI and recent-search focus behavior | Pass on Windows fallback | Removed visible developer/status panels from the end-user home screen. Recent searches now appear when the search input receives focus and disappear after a recent term is selected. |
+| App version/update menu | Pass on Windows fallback | Compact menu shows app version, user-data format version, dictionary engine, sync status, memory-target note, export state, and service-worker update controls. |
+| iPhone DRAM <= 50 MB target | Not proven | Browser automation cannot reliably measure iPhone PWA DRAM. Current `sql.js` POC loads the full 206 MB dictionary into JS/WASM memory and should be assumed above target until replaced or measured. |
 
 ## Key Metrics
 
@@ -54,7 +56,7 @@ Environment:
 Latest iPhone Home Screen repeat runs:
 
 - Display mode: `standalone`
-- Shell cache: `wordlover-poc-shell-v13`
+- Shell cache: latest implemented app menu shell is `wordlover-poc-shell-v18`; latest received iPhone reports still show `wordlover-poc-shell-v13` until the real iPhone reruns the suite.
 - Persistent storage: granted
 - Dictionary fetch: about `7.31 s`
 - SQLite open: about `14-17 ms`
@@ -74,7 +76,7 @@ All benchmark terms were found in the local dictionary.
 
 ## Production Implications
 
-The SQLite WASM-first direction is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on Windows and iPhone Safari. OPFS was available in the iPhone automated report, but the current `sql.js` path still loads the full 206 MB SQLite file into memory. `wa-sqlite` plus OPFS remains the next storage-engine POC before locking the production dictionary engine. Android measurement is deferred until the end.
+The SQLite-shaped dictionary interface is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on Windows and iPhone Safari. OPFS was available in the iPhone automated report, but the current `sql.js` path still loads the full 206 MB SQLite file into memory and should not be accepted for the <= 50 MB iPhone DRAM target. `wa-sqlite` plus OPFS remains the next storage-engine POC before locking the production dictionary engine. Android measurement is deferred until the end.
 
 The first implementation slice should stay focused on the iPhone dictionary path: fast visible search UI, explicit dictionary install/load state, offline dictionary fallback, reliable service-worker asset updates, encrypted user records, and persistent IndexedDB access.
 

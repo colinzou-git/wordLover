@@ -5,12 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260524-7" />
+    <link rel="stylesheet" href="/styles.css?v=20260524-8" />
     <title>WordLover PWA POC</title>
   </head>
   <body>
     <main id="app">
       <div id="pwaStatus" hidden>Checking offline shell...</div>
+
+      <div class="top-actions">
+        <button id="appMenuButton" class="secondary-button" type="button" aria-expanded="false" aria-controls="appMenu">Menu</button>
+      </div>
+
+      <section id="appMenu" class="panel app-menu" hidden>
+        <div class="menu-grid">
+          <div>
+            <span>App version</span>
+            <strong id="appVersion">Loading</strong>
+          </div>
+          <div>
+            <span>Data format</span>
+            <strong id="dataFormatVersion">Loading</strong>
+          </div>
+          <div>
+            <span>Dictionary engine</span>
+            <strong id="dictionaryEngine">sql.js POC</strong>
+          </div>
+          <div>
+            <span>Sync</span>
+            <strong id="syncStatus">Offline/local</strong>
+          </div>
+        </div>
+        <p id="memoryNote" class="small"></p>
+        <p id="googleStatus" class="small"></p>
+        <div class="menu-actions">
+          <button id="checkForUpdate" type="button">Check update</button>
+          <button id="applyUpdate" class="secondary-button" type="button" disabled>Apply update</button>
+          <button id="exportStateMenu" class="secondary-button" type="button">Export state</button>
+        </div>
+        <p id="updateStatus" class="small" aria-live="polite"></p>
+      </section>
 
       <div id="installBanner" class="notice-banner" hidden></div>
 
@@ -82,6 +115,6 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js?v=20260524-7"></script>
+    <script type="module" src="/app.js?v=20260524-8"></script>
   </body>
 </html>
