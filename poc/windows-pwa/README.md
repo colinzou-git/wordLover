@@ -34,6 +34,14 @@ To run the broader Phase 0 automated suite, open:
 http://127.0.0.1:4173/poc-suite.html
 ```
 
+Or use the helper script from the repo root:
+
+```powershell
+poc\windows-pwa\start-windows-pwa.ps1 -Port 4173
+```
+
+If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
+
 Click **Run all automated POCs**. The suite covers dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, and timed lookup benchmarks.
 
 For iPhone testing, use the HTTPS server instead:

@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v22";
+const SHELL_CACHE_NAME = "wordlover-shell-v23";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-4",
-  "/styles.css?v=20260525-4",
-  "/wordlover-config.js?v=20260525-4",
+  "/app.js?v=20260525-5",
+  "/styles.css?v=20260525-5",
+  "/wordlover-config.js?v=20260525-5",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260525-4",
+  "/poc-suite.js?v=20260525-5",
 ];
 
 let lastResults = null;
@@ -223,7 +223,15 @@ function runReviewQuizRatingTests() {
 
 async function fetchDictionary() {
   const start = performance.now();
-  const response = await fetch("/dictionary.sqlite", { cache: "no-store" });
+  const dictionaryUrl = new URL("/dictionary.sqlite", window.location.href).toString();
+  let response;
+  try {
+    response = await fetch(dictionaryUrl, { cache: "no-store" });
+  } catch (error) {
+    throw new Error(
+      `Dictionary fetch failed before an HTTP response from ${dictionaryUrl}. Start the WordLover static server from poc/windows-pwa/public, reload this page, and run the suite again. Original error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   return {
