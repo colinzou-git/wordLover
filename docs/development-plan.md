@@ -20,7 +20,7 @@ This plan follows the current product priority:
 - iPhone automated suite reports now verify service worker readiness, IndexedDB dictionary persistence, OPFS persistence, encrypted export/import, mock sync, and p95 lookup time well under 1 second after open.
 - Latest iPhone Home Screen PWA suite runs reported standalone display mode, persistent storage granted, shell cache `wordlover-poc-shell-v13`, dictionary fetch about `7.31 s`, SQLite open about `14-17 ms`, and lookup p95 about `0.28 ms`.
 - The current `sql.js` POC still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but does not satisfy the production memory direction; assume it exceeds the <= 50 MB iPhone DRAM target until proven otherwise.
-- The live app now has encrypted user key-value records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, an iPhone install-context banner, a compact three-dot app menu, theme selection, Google/Gemini integration surfaces, and a debug review acceleration mode.
+- The live app now has passphrase-wrapped encrypted user records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, an iPhone install-context banner, a compact three-dot app menu, theme selection, Google/Gemini integration surfaces, and a debug review acceleration mode.
 
 ## Phase 0: Finish iPhone Feasibility
 
@@ -147,12 +147,12 @@ Current implementation started:
 - Home screen daily stats added for new saved terms, reviewed terms, and mastered terms.
 - Saved vocabulary terms now have review state with FSRS-compatible rating (`again`, `hard`, `good`, `easy`), due time, review count, and mastered timestamp.
 - Due-review button starts a multiple-choice review for saved due terms.
-- Review completion records an app-inferred FSRS rating. The user does not manually choose the rating; the quiz component infers it from correctness and response time.
+- Review completion reveals the answer first and then records the user's explicit FSRS rating: Again, Hard, Good, or Easy. Debug automation can still assign ratings automatically for repeat tests.
 - "Study one more" starts a first-attempt multiple-choice quiz from frequent unsaved TOEFL terms.
 - Passing the first-attempt new-word quiz does not add the term to the vocabulary list.
 - Missing the first-attempt quiz saves the word to the vocabulary list for future review.
-- Study events are encrypted in the local user store and include term, inferred rating/result, timestamp, and device id.
-- Browser smoke verified due review, app-inferred FSRS rating, proactive new-word quiz, stats updates, and iPhone-width layout.
+- Study events are encrypted as individual local records and include term, rating/result, timestamp, and device id.
+- Browser smoke verified due review, explicit FSRS rating capture, proactive new-word quiz, stats updates, and iPhone-width layout.
 - Diagnostics debug speed added: one review day elapses every 20 seconds and debug-created data is purged when disabled.
 - Automated review, quiz, and FSRS-rating checks added to the browser test suite.
 
@@ -188,7 +188,7 @@ Scope:
 - Google OAuth with PKCE.
 - First-install Google sign-in prompt with a clear Skip option for offline-only use.
 - Current implementation surface can load Google Identity Services and connect when `wordlover-config.js` contains a production OAuth client ID.
-- Encrypted full snapshot upload/download.
+- Encrypted full snapshot upload/download. The current app upserts one passphrase-encrypted Drive app-data snapshot and can restore the latest encrypted snapshot after confirmation.
 - Sync status: synced, pending, failed, offline.
 - Conflict-safe merge or restore prompt.
 - Cloud copy includes app version and user data format version.
@@ -207,7 +207,7 @@ Scope:
 - AI provider abstraction.
 - Gemini default no-additional-fee path if feasible.
 - Gemini access should reuse the signed-in Google account when feasible and remain optional/online-only.
-- Current implementation surface adds a Gemini details button to dictionary results and calls the configured Gemini model after Google auth succeeds.
+- Current implementation surface adds a Gemini details button to dictionary results, calls the configured Gemini model after Google auth succeeds, requests structured JSON, validates it, and renders learner cards instead of raw JSON.
 - Optional ChatGPT/OpenAI provider.
 - Structured examples, cloze sentences, common phrases, and follow-up prompts.
 - User can save AI-assisted content separately from dictionary/user-edited meanings.

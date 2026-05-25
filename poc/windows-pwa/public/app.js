@@ -12,6 +12,7 @@ const googleAccount = document.querySelector("#googleAccount");
 const googleAuthStatus = document.querySelector("#googleAuthStatus");
 const googleSignInButton = document.querySelector("#googleSignIn");
 const googleSyncNowButton = document.querySelector("#googleSyncNow");
+const googleRestoreButton = document.querySelector("#googleRestore");
 const googleSignOutButton = document.querySelector("#googleSignOut");
 const themeSelect = document.querySelector("#themeSelect");
 const checkForUpdateButton = document.querySelector("#checkForUpdate");
@@ -52,6 +53,8 @@ const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
 const FILE_STORE = "files";
 const KEY_STORE = "keys";
+const VOCABULARY_STORE = "vocabularyRecords";
+const STUDY_EVENT_STORE = "studyEventRecords";
 const DICTIONARY_KEY = "dictionary.sqlite";
 const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
 const DICTIONARY_CHUNK_PREFIX = "dictionary.sqlite.chunk.";
@@ -60,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.4.1-product.20260525-v20";
+const APP_VERSION = "0.4.3-product.20260525-v22";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v20";
+const SHELL_CACHE_VERSION = "wordlover-shell-v22";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -75,11 +78,33 @@ const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
+const FTS_TABLE = "dictionary_search_fts";
 const FSRS_RATING_LABELS = {
   again: "Again",
   hard: "Hard",
   good: "Good",
   easy: "Easy",
+};
+const GEMINI_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    meanings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          definition: { type: "string" },
+          examples: { type: "array", items: { type: "string" } },
+          commonPhrases: { type: "array", items: { type: "string" } },
+        },
+        required: ["definition", "examples"],
+      },
+    },
+    wordHistory: { type: "string" },
+    commonUsage: { type: "string" },
+    learnerNotes: { type: "string" },
+  },
+  required: ["meanings"],
 };
 
 let SQL = null;
@@ -92,6 +117,8 @@ let suggestionHandle = 0;
 let autosaveHandle = 0;
 let dbPromise = null;
 let encryptionKeyPromise = null;
+let encryptionPassphrase = null;
+let ftsSearchAvailable = null;
 let currentPromptTerm = null;
 let currentResult = null;
 let vocabularyItems = [];
@@ -177,12 +204,14 @@ function requestToPromise(request) {
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 3);
+    const request = indexedDB.open(DB_NAME, 4);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       if (!db.objectStoreNames.contains(FILE_STORE)) db.createObjectStore(FILE_STORE);
       if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE);
+      if (!db.objectStoreNames.contains(VOCABULARY_STORE)) db.createObjectStore(VOCABULARY_STORE);
+      if (!db.objectStoreNames.contains(STUDY_EVENT_STORE)) db.createObjectStore(STUDY_EVENT_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -221,8 +250,62 @@ async function deleteRawValue(storeName, key) {
   });
 }
 
+async function clearRawStore(storeName) {
+  const db = await getUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 function isEncryptedRecord(value) {
   return Boolean(value && value.__encrypted === true && value.iv && value.ciphertext);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+async function deriveKek(passphrase, salt) {
+  return derivePassphraseAesKey(passphrase, salt, ["wrapKey", "unwrapKey"]);
+}
+
+async function derivePassphraseAesKey(passphrase, salt, usages) {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    usages,
+  );
+}
+
+function getLocalDataPassphrase() {
+  if (encryptionPassphrase) return encryptionPassphrase;
+  const configured = String(CONFIG.localDevelopmentPassphrase ?? "").trim();
+  if (configured) {
+    encryptionPassphrase = configured;
+    return encryptionPassphrase;
+  }
+  const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  if (isLocalhost) {
+    encryptionPassphrase = "wordlover-localhost-development-passphrase";
+    return encryptionPassphrase;
+  }
+  const entered = window.prompt("Enter your WordLover local data passphrase. Keep it safe; it unlocks this device's encrypted study data.");
+  if (!entered) throw new Error("A local data passphrase is required to unlock encrypted WordLover data.");
+  encryptionPassphrase = entered;
+  return encryptionPassphrase;
 }
 
 async function getEncryptionKey() {
@@ -230,12 +313,32 @@ async function getEncryptionKey() {
     throw new Error("Web Crypto is required for encrypted local user data.");
   }
   encryptionKeyPromise ??= (async () => {
-    let rawKey = await loadRawValue(KEY_STORE, "localAesGcmKey");
-    if (!rawKey) {
-      rawKey = crypto.getRandomValues(new Uint8Array(32));
-      await saveRawValue(KEY_STORE, "localAesGcmKey", rawKey);
+    const passphrase = getLocalDataPassphrase();
+    const wrapped = await loadRawValue(KEY_STORE, "wrappedDek");
+    if (wrapped?.wrappedKey && wrapped?.salt && wrapped?.wrapIv) {
+      const kek = await deriveKek(passphrase, new Uint8Array(wrapped.salt));
+      return crypto.subtle.unwrapKey(
+        "raw",
+        wrapped.wrappedKey,
+        kek,
+        { name: "AES-GCM", iv: new Uint8Array(wrapped.wrapIv) },
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"],
+      );
     }
-    return crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+    const legacyRawKey = await loadRawValue(KEY_STORE, "localAesGcmKey");
+    const dek = legacyRawKey
+      ? await crypto.subtle.importKey("raw", new Uint8Array(legacyRawKey), { name: "AES-GCM" }, true, ["encrypt", "decrypt"])
+      : await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+    const kek = await deriveKek(passphrase, salt);
+    const wrappedKey = await crypto.subtle.wrapKey("raw", dek, kek, { name: "AES-GCM", iv: wrapIv });
+    await saveRawValue(KEY_STORE, "wrappedDek", { wrappedKey: new Uint8Array(wrappedKey), salt, wrapIv, kdf: "PBKDF2-SHA256", iterations: 200000 });
+    if (legacyRawKey) await deleteRawValue(KEY_STORE, "localAesGcmKey");
+    const raw = await crypto.subtle.exportKey("raw", dek);
+    return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
   })();
   return encryptionKeyPromise;
 }
@@ -276,6 +379,33 @@ async function loadValue(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+async function saveRecordValue(storeName, key, value) {
+  await saveRawValue(storeName, key, await encryptValue(value));
+}
+
+async function deleteRecordValue(storeName, key) {
+  await deleteRawValue(storeName, key);
+}
+
+async function loadAllRecordValues(storeName) {
+  const db = await getUserDb();
+  const tx = db.transaction(storeName, "readonly");
+  const values = await requestToPromise(tx.objectStore(storeName).getAll());
+  const records = [];
+  for (const value of values) {
+    if (!isEncryptedRecord(value)) {
+      records.push(value);
+      continue;
+    }
+    try {
+      records.push(await decryptValue(value));
+    } catch {
+      // Ignore records that cannot be decrypted with the current passphrase.
+    }
+  }
+  return records;
 }
 
 async function getDeviceId() {
@@ -353,6 +483,7 @@ function renderAppMenu() {
       : "Google OAuth client ID is not configured yet.";
   googleSignInButton.disabled = !getGoogleClientId();
   googleSyncNowButton.disabled = !googleAuth.accessToken;
+  googleRestoreButton.disabled = !googleAuth.accessToken;
   googleSignOutButton.disabled = !googleAuth.accessToken;
   themeSelect.value = theme;
 }
@@ -388,11 +519,15 @@ function markDebugRecord(record) {
 
 async function purgeDebugData() {
   const sessionId = debugMode.sessionId;
+  const removedVocabulary = vocabularyItems.filter((item) => item.debugSessionId === sessionId);
+  const removedEvents = studyEvents.filter((event) => event.debugSessionId === sessionId);
   vocabularyItems = vocabularyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
   studyEvents = studyEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
   historyItems = historyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
-  await saveValue("vocabularyItems", vocabularyItems);
-  await saveValue("studyEvents", studyEvents);
+  await Promise.all(removedVocabulary.map((item) => deleteVocabularyRecord(item)));
+  await Promise.all(removedEvents.map((event) => deleteRecordValue(STUDY_EVENT_STORE, event.id)));
+  await persistVocabulary();
+  await persistStudyEvents();
   await saveValue("history", historyItems);
   renderVocabulary();
   renderHistory();
@@ -669,6 +804,7 @@ async function loadDictionary() {
   const initialized = performance.now();
   dictionaryDb?.close();
   dictionaryDb = new SQL.Database(bytes);
+  ftsSearchAvailable = null;
   const opened = performance.now();
   const count = dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
   lastMetrics = {
@@ -682,6 +818,21 @@ async function loadDictionary() {
   await saveValue("lastMetrics", lastMetrics);
   await renderDiagnostics();
   return lastMetrics;
+}
+
+function hasFtsSearch() {
+  if (ftsSearchAvailable !== null) return ftsSearchAvailable;
+  try {
+    dictionaryDb.exec(`SELECT rowid FROM ${FTS_TABLE} LIMIT 1`);
+    ftsSearchAvailable = true;
+  } catch {
+    ftsSearchAvailable = false;
+  }
+  return ftsSearchAvailable;
+}
+
+function escapeFtsQuery(value) {
+  return String(value ?? "").replace(/"/g, '""').trim();
 }
 
 function setSearchLoading(isLoading) {
@@ -711,7 +862,7 @@ async function ensureDictionaryLoaded() {
     loadButton.textContent = "Install/load dictionary";
     loadButton.hidden = false;
     setSearchLoading(false);
-    result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
+    result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
     return false;
   }
 }
@@ -762,6 +913,41 @@ function lookupChineseTerm(input) {
   const term = input.trim();
   if (!term || !dictionaryDb) return { status: "invalid_input", term: input };
   const start = performance.now();
+  const matches = [];
+  if (hasFtsSearch()) {
+    try {
+      const ftsStatement = dictionaryDb.prepare(`
+        SELECT d.word, d.translation, d.definition, d.frq, d.bnc
+        FROM dictionary_search_fts fts
+        JOIN dictionary_entries d ON d.id = fts.rowid
+        WHERE fts.translation MATCH :term
+        ORDER BY
+          d.is_toefl DESC,
+          d.frq IS NULL,
+          d.frq,
+          d.bnc IS NULL,
+          d.bnc,
+          length(d.word),
+          d.word
+        LIMIT 10
+      `);
+      try {
+        ftsStatement.bind({ ":term": escapeFtsQuery(term) });
+        while (ftsStatement.step()) {
+          const row = ftsStatement.getAsObject();
+          matches.push({
+            word: row.word,
+            preview: topLines(row.translation, 1)[0] ?? topLines(row.definition, 1)[0] ?? "",
+          });
+        }
+      } finally {
+        ftsStatement.free();
+      }
+    } catch {
+      matches.length = 0;
+    }
+  }
+  if (matches.length) return { status: "chinese_results", term, matches, queryMs: performance.now() - start };
   const statement = dictionaryDb.prepare(`
     SELECT word, translation, definition, frq, bnc
     FROM dictionary_entries
@@ -776,7 +962,6 @@ function lookupChineseTerm(input) {
       word
     LIMIT 10
   `);
-  const matches = [];
   try {
     statement.bind({ ":term": `%${term}%` });
     while (statement.step()) {
@@ -791,6 +976,30 @@ function lookupChineseTerm(input) {
   }
   if (!matches.length) return { status: "not_found", term: input, queryMs: performance.now() - start, alternatives: [] };
   return { status: "chinese_results", term, matches, queryMs: performance.now() - start };
+}
+
+function fetchFtsFuzzyCandidates(normalized, limit = 350) {
+  if (!hasFtsSearch()) return [];
+  const prefix = `${escapeFtsQuery(normalized.slice(0, 2))}*`;
+  const statement = dictionaryDb.prepare(`
+    SELECT d.word, d.normalized_word, d.definition, d.translation, d.frq, d.bnc
+    FROM dictionary_search_fts fts
+    JOIN dictionary_entries d ON d.id = fts.rowid
+    WHERE fts.normalized_word MATCH :prefix
+      AND instr(d.normalized_word, ' ') = 0
+    ORDER BY d.frq IS NULL, d.frq, d.bnc IS NULL, d.bnc
+    LIMIT :limit
+  `);
+  const rows = [];
+  try {
+    statement.bind({ ":prefix": prefix, ":limit": limit });
+    while (statement.step()) rows.push(statement.getAsObject());
+  } catch {
+    return [];
+  } finally {
+    statement.free();
+  }
+  return rows;
 }
 
 function levenshteinWithin(a, b, maxDistance = 2) {
@@ -813,6 +1022,19 @@ function levenshteinWithin(a, b, maxDistance = 2) {
 
 function findFuzzySuggestions(normalized, limit = 6) {
   if (!dictionaryDb || normalized.length < 4 || normalized.includes(" ")) return [];
+  const ftsRows = fetchFtsFuzzyCandidates(normalized);
+  if (ftsRows.length) {
+    return ftsRows
+      .map((row) => ({
+        word: row.word,
+        kind: "fuzzy",
+        distance: levenshteinWithin(normalized, row.normalized_word, 2),
+        preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
+      }))
+      .filter((item) => item.distance <= 2)
+      .sort((left, right) => left.distance - right.distance || left.word.length - right.word.length)
+      .slice(0, limit);
+  }
   const first = normalized.slice(0, 1);
   const statement = dictionaryDb.prepare(`
     SELECT word, normalized_word, definition, translation, frq, bnc
@@ -852,6 +1074,36 @@ function findFuzzySuggestions(normalized, limit = 6) {
     statement.free();
   }
   return candidates.sort((left, right) => left.distance - right.distance || left.word.length - right.word.length).slice(0, limit);
+}
+
+function suggestTermsViaFts(normalized, limit = 5) {
+  if (!hasFtsSearch()) return [];
+  const query = normalized.includes(" ") ? `"${escapeFtsQuery(normalized)}"` : `${escapeFtsQuery(normalized)}*`;
+  const statement = dictionaryDb.prepare(`
+    SELECT d.word, d.definition, d.translation
+    FROM dictionary_search_fts fts
+    JOIN dictionary_entries d ON d.id = fts.rowid
+    WHERE fts.normalized_word MATCH :query
+    ORDER BY d.is_toefl DESC, d.frq IS NULL, d.frq, d.bnc IS NULL, d.bnc, d.word
+    LIMIT :limit
+  `);
+  const rows = [];
+  try {
+    statement.bind({ ":query": query, ":limit": limit });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      rows.push({
+        word: row.word,
+        kind: row.word?.includes(" ") ? "phrase" : "prefix",
+        preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
+      });
+    }
+  } catch {
+    return [];
+  } finally {
+    statement.free();
+  }
+  return rows;
 }
 
 function suggestTerms(input) {
@@ -897,6 +1149,10 @@ function suggestTerms(input) {
         preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
       });
     }
+    for (const item of suggestTermsViaFts(normalized, 5)) {
+      if (!items.some((existing) => existing.word === item.word)) items.push(item);
+      if (items.length >= 8) break;
+    }
     if (items.length < 3) {
       for (const item of findFuzzySuggestions(normalized, 3)) {
         if (!items.some((existing) => existing.word === item.word)) items.push(item);
@@ -917,9 +1173,53 @@ function summarizeLines(lines) {
   return Array.isArray(lines) && lines.length ? lines.join("; ") : "No meaning yet";
 }
 
+function createFsrsCard(now = nowIso()) {
+  return {
+    due: now,
+    stability: 0,
+    difficulty: 5,
+    elapsedDays: 0,
+    scheduledDays: 0,
+    reps: 0,
+    lapses: 0,
+    state: "new",
+  };
+}
+
+function normalizeReviewState(review = {}) {
+  const fsrsCard = {
+    ...createFsrsCard(review.dueAt ?? nowIso()),
+    ...(review.fsrsCard ?? {}),
+  };
+  return {
+    lastRating: review.lastRating ?? "again",
+    intervalDays: review.intervalDays ?? 0,
+    dueAt: review.dueAt ?? fsrsCard.due ?? nowIso(),
+    reviewCount: review.reviewCount ?? 0,
+    lastReviewedAt: review.lastReviewedAt ?? null,
+    masteredAt: review.masteredAt ?? null,
+    fsrsCard,
+  };
+}
+
 async function persistVocabulary() {
-  await saveValue("vocabularyItems", vocabularyItems);
+  await Promise.all(vocabularyItems.map((item) => saveRecordValue(VOCABULARY_STORE, item.normalizedTerm, item)));
   renderVocabulary();
+  renderStudyStats();
+}
+
+async function persistVocabularyItem(item) {
+  await saveRecordValue(VOCABULARY_STORE, item.normalizedTerm, item);
+  renderVocabulary();
+  renderStudyStats();
+}
+
+async function deleteVocabularyRecord(item) {
+  await deleteRecordValue(VOCABULARY_STORE, item.normalizedTerm);
+}
+
+async function persistStudyEvent(event) {
+  await saveRecordValue(STUDY_EVENT_STORE, event.id, event);
   renderStudyStats();
 }
 
@@ -956,6 +1256,7 @@ function resultToVocabularyItem(data) {
       reviewCount: 0,
       lastReviewedAt: null,
       masteredAt: null,
+      fsrsCard: createFsrsCard(now),
     },
   });
 }
@@ -972,14 +1273,7 @@ async function saveVocabularyItem(data, reason = "manual") {
     existing.syncVersion = (existing.syncVersion ?? 0) + 1;
     existing.isSynced = false;
     existing.lastSaveReason = reason;
-    existing.review ??= {
-      lastRating: "again",
-      intervalDays: 0,
-      dueAt: now,
-      reviewCount: 0,
-      lastReviewedAt: null,
-      masteredAt: null,
-    };
+    existing.review = normalizeReviewState(existing.review ?? { dueAt: now });
   } else {
     const item = resultToVocabularyItem(data);
     item.lastSaveReason = reason;
@@ -1019,7 +1313,7 @@ async function editVocabularyItem(term) {
   item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  await persistVocabulary();
+  await persistVocabularyItem(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
 }
 
@@ -1030,7 +1324,7 @@ async function setVocabularyArchived(term, archived) {
   item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  await persistVocabulary();
+  await persistVocabularyItem(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
 }
 
@@ -1089,21 +1383,21 @@ function ensureVocabularyReviewStates() {
   const now = nowIso();
   vocabularyItems = vocabularyItems.map((item) => ({
     ...item,
-    review: item.review ?? {
+    review: normalizeReviewState(item.review ?? {
       lastRating: "again",
       intervalDays: 0,
       dueAt: now,
       reviewCount: 0,
       lastReviewedAt: null,
       masteredAt: null,
-    },
+    }),
   }));
 }
 
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
-  const mastered = studyEvents.filter((event) => event.type === "review" && event.rating === "easy" && isToday(event.occurredAt)).length;
+  const mastered = vocabularyItems.filter((item) => isToday(item.review?.masteredAt)).length;
   return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
@@ -1121,11 +1415,60 @@ function renderStudyStats() {
       : "No saved words to review yet.";
 }
 
-function scheduleFromFsrsRating(rating) {
-  if (rating === "again") return { intervalDays: 0, dueAt: new Date(appNowMs() + 10 * 60 * 1000).toISOString(), masteredAt: null };
-  if (rating === "hard") return { intervalDays: 1, dueAt: new Date(appNowMs() + NORMAL_DAY_MS).toISOString(), masteredAt: null };
-  if (rating === "good") return { intervalDays: 3, dueAt: new Date(appNowMs() + 3 * NORMAL_DAY_MS).toISOString(), masteredAt: null };
-  return { intervalDays: null, dueAt: null, masteredAt: nowIso() };
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function daysBetween(fromIso, toMs = appNowMs()) {
+  const fromMs = Date.parse(fromIso);
+  if (!Number.isFinite(fromMs)) return 0;
+  return Math.max(0, (toMs - fromMs) / NORMAL_DAY_MS);
+}
+
+function scheduleFromFsrsRating(reviewState, rating) {
+  const review = normalizeReviewState(reviewState);
+  const previousCard = review.fsrsCard ?? createFsrsCard(review.dueAt ?? nowIso());
+  const elapsedDays = daysBetween(previousCard.lastReview ?? review.lastReviewedAt ?? previousCard.due ?? nowIso());
+  const previousStability = Number(previousCard.stability ?? 0);
+  const previousDifficulty = Number(previousCard.difficulty ?? 5);
+  const reps = Number(previousCard.reps ?? review.reviewCount ?? 0) + 1;
+  const lapses = Number(previousCard.lapses ?? 0) + (rating === "again" ? 1 : 0);
+
+  const difficultyDelta = { again: 1.2, hard: 0.6, good: -0.15, easy: -0.45 }[rating] ?? 0;
+  const difficulty = clamp(previousDifficulty + difficultyDelta, 1, 10);
+  let stability = previousStability;
+  let intervalDays = 0;
+
+  if (rating === "again") {
+    stability = clamp(previousStability * 0.35, 0.05, 1);
+    intervalDays = 0;
+  } else if (rating === "hard") {
+    stability = previousStability ? clamp(previousStability * (1.15 + Math.max(0, elapsedDays) * 0.02), 0.5, 3650) : 1;
+    intervalDays = Math.max(1, Math.round(stability));
+  } else if (rating === "good") {
+    stability = previousStability ? clamp(previousStability * (1.75 + (10 - difficulty) * 0.03), 2, 3650) : 3;
+    intervalDays = Math.max(1, Math.round(stability));
+  } else {
+    stability = previousStability ? clamp(previousStability * (2.5 + (10 - difficulty) * 0.05), 4, 3650) : 7;
+    intervalDays = Math.max(2, Math.round(stability));
+  }
+
+  const masteredAt = stability >= 90 && reps >= 3 && rating !== "again" ? nowIso() : null;
+  const dueAt = masteredAt ? null : new Date(appNowMs() + (intervalDays === 0 ? 10 * 60 * 1000 : intervalDays * NORMAL_DAY_MS)).toISOString();
+  const fsrsCard = {
+    ...previousCard,
+    due: dueAt,
+    stability,
+    difficulty,
+    elapsedDays,
+    scheduledDays: intervalDays,
+    reps,
+    lapses,
+    state: masteredAt ? "mastered" : reps <= 1 ? "learning" : "review",
+    lastReview: nowIso(),
+  };
+
+  return { fsrsCard, intervalDays, dueAt, masteredAt };
 }
 
 function inferFsrsRating(passed, responseMs) {
@@ -1136,25 +1479,27 @@ function inferFsrsRating(passed, responseMs) {
 }
 
 async function persistStudyEvents() {
-  await saveValue("studyEvents", studyEvents.slice(-500));
+  await Promise.all(studyEvents.map((event) => saveRecordValue(STUDY_EVENT_STORE, event.id, event)));
   renderStudyStats();
 }
 
 async function recordReviewRating(item, rating, quizResult, responseMs) {
-  const schedule = scheduleFromFsrsRating(rating);
+  const schedule = scheduleFromFsrsRating(item.review ?? {}, rating);
+  const reviewedAt = nowIso();
   item.review = {
     ...(item.review ?? {}),
     lastRating: rating,
     intervalDays: schedule.intervalDays,
     dueAt: schedule.dueAt,
     masteredAt: schedule.masteredAt,
-    lastReviewedAt: nowIso(),
+    lastReviewedAt: reviewedAt,
     reviewCount: (item.review?.reviewCount ?? 0) + 1,
+    fsrsCard: schedule.fsrsCard,
   };
-  item.updatedAt = nowIso();
+  item.updatedAt = reviewedAt;
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  studyEvents.push(markDebugRecord({
+  const event = markDebugRecord({
     id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     type: "review",
     term: item.term,
@@ -1162,11 +1507,13 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
     rating,
     responseMs,
     quizResult,
-    occurredAt: nowIso(),
+    mastered: Boolean(schedule.masteredAt),
+    occurredAt: reviewedAt,
     deviceId,
-  }));
-  await persistVocabulary();
-  await persistStudyEvents();
+  });
+  studyEvents.push(event);
+  await saveRecordValue(VOCABULARY_STORE, item.normalizedTerm, item);
+  await persistStudyEvent(event);
   hideQuiz();
 }
 
@@ -1361,6 +1708,24 @@ async function startNewWordStudy() {
   renderQuiz(entry, "new");
 }
 
+function renderFsrsRatingChoices(passed) {
+  const hint = passed ? "Choose how well you remembered it." : "Choose Again unless you still remembered part of it.";
+  quizPanel.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div class="fsrs-rating-panel">
+        <p class="muted">${escapeHtml(hint)}</p>
+        <div class="quiz-actions fsrs-ratings" aria-label="Review rating">
+          <button class="secondary-button" type="button" data-fsrs-rating="again">Again</button>
+          <button class="secondary-button" type="button" data-fsrs-rating="hard">Hard</button>
+          <button type="button" data-fsrs-rating="good">Good</button>
+          <button class="secondary-button" type="button" data-fsrs-rating="easy">Easy</button>
+        </div>
+      </div>
+    `,
+  );
+}
+
 async function handleQuizAnswer(index) {
   if (!activeQuiz || activeQuiz.answered) return;
   const selected = activeQuiz.options[index];
@@ -1379,7 +1744,15 @@ async function handleQuizAnswer(index) {
     await handleNewWordQuizResult(passed, rating, responseMs);
     return;
   }
-  await recordReviewRating(activeQuiz.entry.sourceItem, rating, passed ? "pass" : "miss", responseMs);
+  activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
+  renderFsrsRatingChoices(passed);
+}
+
+async function handleFsrsRating(rating) {
+  if (!activeQuiz?.pendingResult || !FSRS_RATING_LABELS[rating]) return;
+  const { sourceItem } = activeQuiz.entry;
+  const { quizResult, responseMs } = activeQuiz.pendingResult;
+  await recordReviewRating(sourceItem, rating, quizResult, responseMs);
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Review recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-review-next="1">Review next</button></div>`;
 }
@@ -1388,7 +1761,7 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
   if (!activeQuiz) return;
   const entry = activeQuiz.entry;
   if (passed) {
-    studyEvents.push(markDebugRecord({
+    const event = markDebugRecord({
       id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type: "new-word-first-pass",
       term: entry.term,
@@ -1397,8 +1770,9 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
       responseMs,
       occurredAt: nowIso(),
       deviceId,
-    }));
-    await persistStudyEvents();
+    });
+    studyEvents.push(event);
+    await persistStudyEvent(event);
     quizPanel.insertAdjacentHTML(
       "beforeend",
       `<p class="muted">You passed on the first try, so this word was not added to your vocabulary list.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-study-next="1">Study another</button></div>`,
@@ -1439,7 +1813,7 @@ async function runLookup() {
       await renderWordPrompt();
     }
   } catch (error) {
-    result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
+    result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
   }
 }
 
@@ -1535,15 +1909,73 @@ function buildUserDataSnapshot() {
   };
 }
 
+async function encryptSnapshotPayload(snapshot) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await derivePassphraseAesKey(getLocalDataPassphrase(), salt, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(snapshot));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
+  return {
+    app: "wordlover",
+    format: "wordlover-user-data-aes-gcm-v1",
+    appVersion: APP_VERSION,
+    userDataFormatVersion: USER_DATA_FORMAT_VERSION,
+    encryptedAt: nowIso(),
+    kdf: "PBKDF2-SHA256",
+    iterations: 200000,
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    data: bytesToBase64(ciphertext),
+  };
+}
+
+async function decryptSnapshotPayload(envelope) {
+  if (envelope?.format !== "wordlover-user-data-aes-gcm-v1") throw new Error("Cloud snapshot format is not supported.");
+  const salt = base64ToBytes(envelope.salt);
+  const key = await derivePassphraseAesKey(getLocalDataPassphrase(), salt, ["decrypt"]);
+  const iv = base64ToBytes(envelope.iv);
+  const ciphertext = base64ToBytes(envelope.data);
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+function driveNameQuery(fileName) {
+  return encodeURIComponent(`name = '${String(fileName).replace(/'/g, "\\'")}' and trashed = false`);
+}
+
+async function listGoogleDriveSnapshots() {
+  const fileName = CONFIG.googleDriveFileName ?? "wordlover-user-data.json";
+  const response = await googleFetch(
+    `${GOOGLE_DRIVE_FILES_URL}?spaces=appDataFolder&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&q=${driveNameQuery(fileName)}`,
+  );
+  if (!response.ok) throw new Error(`Google Drive list failed: ${response.status} ${await response.text()}`);
+  const data = await response.json();
+  return data.files ?? [];
+}
+
 async function syncToGoogleDrive() {
-  googleAuthStatus.textContent = "Syncing encrypted local snapshot metadata to Google Drive...";
+  googleAuthStatus.textContent = "Encrypting and syncing local snapshot to Google Drive...";
+  const fileName = CONFIG.googleDriveFileName ?? "wordlover-user-data.json";
+  const existing = (await listGoogleDriveSnapshots())[0] ?? null;
+  const encryptedSnapshot = await encryptSnapshotPayload(buildUserDataSnapshot());
+  if (existing?.id) {
+    const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(encryptedSnapshot),
+    });
+    if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
+    const resultData = await response.json();
+    googleAuthStatus.textContent = `Updated encrypted Drive backup: ${resultData.name ?? fileName}.`;
+    syncStatus.textContent = "Synced";
+    return resultData;
+  }
   const metadata = {
-    name: CONFIG.googleDriveFileName ?? "wordlover-user-data.json",
+    name: fileName,
     parents: ["appDataFolder"],
     mimeType: "application/json",
   };
   const boundary = `wordlover-${Date.now()}`;
-  const snapshot = buildUserDataSnapshot();
   const body = [
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
@@ -1552,7 +1984,7 @@ async function syncToGoogleDrive() {
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
     "",
-    JSON.stringify(snapshot, null, 2),
+    JSON.stringify(encryptedSnapshot),
     `--${boundary}--`,
   ].join("\r\n");
   const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime`, {
@@ -1562,9 +1994,59 @@ async function syncToGoogleDrive() {
   });
   if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
   const resultData = await response.json();
-  googleAuthStatus.textContent = `Synced to Google Drive: ${resultData.name ?? resultData.id}.`;
+  googleAuthStatus.textContent = `Created encrypted Drive backup: ${resultData.name ?? resultData.id}.`;
   syncStatus.textContent = "Synced";
   return resultData;
+}
+
+async function applyUserDataSnapshot(snapshot) {
+  if (snapshot?.app !== "wordlover") throw new Error("This backup is not a WordLover user-data snapshot.");
+  historyItems = Array.isArray(snapshot.historyItems) ? snapshot.historyItems : [];
+  vocabularyItems = Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [];
+  ensureVocabularyReviewStates();
+  studyEvents = Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents : [];
+  autosaveEnabled = Boolean(snapshot.autosaveEnabled ?? true);
+  theme = ["calm", "ink", "sunrise"].includes(snapshot.theme) ? snapshot.theme : DEFAULT_THEME;
+  lastMetrics = snapshot.lastMetrics ?? lastMetrics;
+
+  await clearRawStore(VOCABULARY_STORE);
+  await clearRawStore(STUDY_EVENT_STORE);
+  await persistVocabulary();
+  await persistStudyEvents();
+  await saveValue("history", historyItems);
+  await saveValue("autosaveEnabled", autosaveEnabled);
+  await saveValue("theme", theme);
+  await saveValue("lastMetrics", lastMetrics);
+
+  autosaveToggle.checked = autosaveEnabled;
+  applyTheme(theme);
+  renderHistory();
+  renderVocabulary();
+  renderStudyStats();
+  renderMetrics();
+  renderAppMenu();
+}
+
+async function restoreFromGoogleDrive() {
+  googleAuthStatus.textContent = "Looking for encrypted Drive backup...";
+  const [latest] = await listGoogleDriveSnapshots();
+  if (!latest?.id) {
+    googleAuthStatus.textContent = "No Drive backup found for this app.";
+    return null;
+  }
+  const confirmed = window.confirm(`Restore WordLover data from Google Drive backup modified ${latest.modifiedTime ?? "recently"}? This replaces local vocabulary and study progress.`);
+  if (!confirmed) {
+    googleAuthStatus.textContent = "Drive restore canceled.";
+    return null;
+  }
+  const response = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${latest.id}?alt=media`);
+  if (!response.ok) throw new Error(`Google Drive restore failed: ${response.status} ${await response.text()}`);
+  const envelope = await response.json();
+  const snapshot = await decryptSnapshotPayload(envelope);
+  await applyUserDataSnapshot(snapshot);
+  googleAuthStatus.textContent = `Restored encrypted Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
+  syncStatus.textContent = navigator.onLine ? "Synced" : "Offline";
+  return snapshot;
 }
 
 async function requestGeminiDetails(data) {
@@ -1582,13 +2064,39 @@ async function requestGeminiDetails(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json" },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: GEMINI_RESPONSE_SCHEMA,
+      },
     }),
   }, true);
   if (!response.ok) throw new Error(`Gemini request failed: ${response.status} ${await response.text()}`);
   const payload = await response.json();
-  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n") ?? JSON.stringify(payload, null, 2);
-  return { provider: "gemini", model, generatedAt: nowIso(), text };
+  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n") ?? "";
+  const structured = JSON.parse(text);
+  if (!Array.isArray(structured.meanings)) throw new Error("Gemini returned an invalid detail payload.");
+  return { provider: "gemini", model, generatedAt: nowIso(), structured };
+}
+
+function renderAiDetailCards(detail) {
+  const meanings = detail.structured.meanings
+    .map((meaning, index) => `
+      <article class="ai-meaning-card">
+        <h4>Meaning ${index + 1}</h4>
+        <p>${escapeHtml(meaning.definition)}</p>
+        ${(meaning.examples ?? []).slice(0, 2).map((example) => `<p class="example">${escapeHtml(example)}</p>`).join("")}
+        ${(meaning.commonPhrases ?? []).length ? `<p class="small">Phrases: ${escapeHtml(meaning.commonPhrases.join(", "))}</p>` : ""}
+      </article>
+    `)
+    .join("");
+  return `
+    <h3>Gemini details</h3>
+    <p class="small">${escapeHtml(detail.model)} - ${escapeHtml(detail.generatedAt)}</p>
+    <div class="ai-card-grid">${meanings}</div>
+    ${detail.structured.commonUsage ? `<h4>Common usage</h4><p>${escapeHtml(detail.structured.commonUsage)}</p>` : ""}
+    ${detail.structured.wordHistory ? `<h4>Word history</h4><p>${escapeHtml(detail.structured.wordHistory)}</p>` : ""}
+    ${detail.structured.learnerNotes ? `<h4>Learner notes</h4><p>${escapeHtml(detail.structured.learnerNotes)}</p>` : ""}
+  `;
 }
 
 async function showAiDetails(data) {
@@ -1596,11 +2104,7 @@ async function showAiDetails(data) {
   aiDetailPanel.innerHTML = `<p class="muted">Opening Gemini details...</p>`;
   try {
     const detail = await requestGeminiDetails(data);
-    aiDetailPanel.innerHTML = `
-      <h3>Gemini details</h3>
-      <p class="small">${escapeHtml(detail.model)} - ${escapeHtml(detail.generatedAt)}</p>
-      <pre>${escapeHtml(detail.text)}</pre>
-    `;
+    aiDetailPanel.innerHTML = renderAiDetailCards(detail);
   } catch (error) {
     aiDetailPanel.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
   }
@@ -1710,13 +2214,17 @@ async function runReviewAutomation() {
     return null;
   }
   await handleQuizAnswer(correctIndex);
+  await handleFsrsRating("easy");
   const latestEvent = studyEvents.at(-1);
   const firstRating = latestEvent?.rating;
   item.review.dueAt = nowIso();
   await persistVocabulary();
   await startDueReview();
   const wrongIndex = activeQuiz?.options.findIndex((option) => !option.correct) ?? -1;
-  if (wrongIndex >= 0) await handleQuizAnswer(wrongIndex);
+  if (wrongIndex >= 0) {
+    await handleQuizAnswer(wrongIndex);
+    await handleFsrsRating("again");
+  }
   const secondRating = studyEvents.at(-1)?.rating;
   const passed = firstRating === "easy" && secondRating === "again";
   debugStatus.textContent = passed
@@ -1748,9 +2256,15 @@ async function init() {
   renderDebugState();
   renderAppMenu();
   historyItems = await loadValue("history", []);
-  vocabularyItems = await loadValue("vocabularyItems", []);
+  const vocabularyRecords = await loadAllRecordValues(VOCABULARY_STORE);
+  const legacyVocabularyItems = await loadValue("vocabularyItems", []);
+  vocabularyItems = vocabularyRecords.length ? vocabularyRecords : legacyVocabularyItems;
   ensureVocabularyReviewStates();
-  studyEvents = await loadValue("studyEvents", []);
+  if (!vocabularyRecords.length && legacyVocabularyItems.length) await persistVocabulary();
+  const studyEventRecords = await loadAllRecordValues(STUDY_EVENT_STORE);
+  const legacyStudyEvents = await loadValue("studyEvents", []);
+  studyEvents = studyEventRecords.length ? studyEventRecords : legacyStudyEvents;
+  if (!studyEventRecords.length && legacyStudyEvents.length) await persistStudyEvents();
   autosaveEnabled = await loadValue("autosaveEnabled", true);
   autosaveToggle.checked = autosaveEnabled;
   lastMetrics = await loadValue("lastMetrics", null);
@@ -1907,6 +2421,11 @@ quizPanel.addEventListener("click", (event) => {
     void handleQuizAnswer(Number(optionButton.dataset.quizOption));
     return;
   }
+  const ratingButton = target.closest("[data-fsrs-rating]");
+  if (ratingButton instanceof HTMLButtonElement) {
+    void handleFsrsRating(ratingButton.dataset.fsrsRating);
+    return;
+  }
   if (target.closest("[data-quiz-close]")) {
     hideQuiz();
     return;
@@ -1969,6 +2488,15 @@ googleSignInButton.addEventListener("click", async () => {
 googleSyncNowButton.addEventListener("click", async () => {
   try {
     await syncToGoogleDrive();
+  } catch (error) {
+    googleAuthStatus.textContent = error instanceof Error ? error.message : String(error);
+  }
+  renderAppMenu();
+});
+
+googleRestoreButton.addEventListener("click", async () => {
+  try {
+    await restoreFromGoogleDrive();
   } catch (error) {
     googleAuthStatus.textContent = error instanceof Error ? error.message : String(error);
   }

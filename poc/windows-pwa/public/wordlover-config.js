@@ -8,4 +8,5 @@ window.WORDLOVER_CONFIG = {
   ],
   geminiScopes: ["https://www.googleapis.com/auth/generative-language"],
   geminiModel: "gemini-2.0-flash",
+  localDevelopmentPassphrase: "",
 };

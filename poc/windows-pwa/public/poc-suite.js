@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v20";
+const SHELL_CACHE_NAME = "wordlover-shell-v22";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-2",
-  "/styles.css?v=20260525-2",
-  "/wordlover-config.js?v=20260525-2",
+  "/app.js?v=20260525-4",
+  "/styles.css?v=20260525-4",
+  "/wordlover-config.js?v=20260525-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260525-2",
+  "/poc-suite.js?v=20260525-4",
 ];
 
 let lastResults = null;
@@ -182,14 +182,18 @@ function inferFsrsRatingForTest(passed, responseMs) {
   return "hard";
 }
 
-function scheduleFromFsrsRatingForTest(rating, nowMs, debugMode = false) {
+function scheduleFromFsrsRatingForTest(rating, nowMs, debugMode = false, reviewState = {}) {
   const normalDayMs = 24 * 60 * 60 * 1000;
   const debugDayMs = 20 * 1000;
   const realDelay = (virtualMs) => (debugMode ? virtualMs / (normalDayMs / debugDayMs) : virtualMs);
-  if (rating === "again") return { dueInMs: realDelay(10 * 60 * 1000), mastered: false };
-  if (rating === "hard") return { dueInMs: realDelay(normalDayMs), mastered: false };
-  if (rating === "good") return { dueInMs: realDelay(3 * normalDayMs), mastered: false };
-  return { dueInMs: null, mastered: true, masteredAt: new Date(nowMs).toISOString() };
+  const reps = (reviewState.reps ?? 0) + 1;
+  const previousStability = reviewState.stability ?? 0;
+  const nextStability = rating === "again" ? Math.max(0.05, previousStability * 0.35) : rating === "hard" ? previousStability || 1 : rating === "good" ? previousStability * 1.75 || 3 : previousStability * 2.5 || 7;
+  const mastered = nextStability >= 90 && reps >= 3 && rating !== "again";
+  if (mastered) return { dueInMs: null, mastered: true, stability: nextStability, reps };
+  if (rating === "again") return { dueInMs: realDelay(10 * 60 * 1000), mastered: false, stability: nextStability, reps };
+  const intervalDays = Math.max(rating === "easy" ? 2 : 1, Math.round(nextStability));
+  return { dueInMs: realDelay(intervalDays * normalDayMs), mastered: false, stability: nextStability, reps };
 }
 
 function runReviewQuizRatingTests() {
@@ -205,7 +209,8 @@ function runReviewQuizRatingTests() {
   const scheduleChecks = [
     { name: "debug hard due is about 20 seconds", pass: debugHard.dueInMs >= 19_000 && debugHard.dueInMs <= 21_000 },
     { name: "normal hard due is about one day", pass: normalHard.dueInMs === 24 * 60 * 60 * 1000 },
-    { name: "easy marks mastered", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true).mastered === true },
+    { name: "first easy does not immediately master", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true).mastered === false },
+    { name: "high-stability easy can master after repeated reviews", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true, { stability: 45, reps: 2 }).mastered === true },
   ];
   const ratingPass = ratings.every((item) => item.actual === item.expected);
   const schedulePass = scheduleChecks.every((item) => item.pass);

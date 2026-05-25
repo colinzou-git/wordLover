@@ -352,7 +352,7 @@ Suggested encryption:
 
 - AES-GCM for record/package encryption.
 - Per-user data encryption key.
-- Default key strategy: local generated data encryption key plus user-exported recovery key.
+- Default key strategy: local generated data encryption key wrapped by a passphrase-derived key-encryption key. The raw data encryption key must not be stored in IndexedDB.
 - Optional convenience strategy after Google sign-in: wrap the data encryption key and store the wrapped key in the user's Google Drive app folder.
 
 Key hierarchy:
@@ -373,9 +373,10 @@ Google KEK: account-linked wrapping key
 Storage locations:
 
 ```text
-DEK
-  stored in IndexedDB in the browser sandbox
-  known PWA limitation: not equivalent to native secure enclave/keychain
+Wrapped DEK
+  stored in IndexedDB only after AES-GCM wrapping
+  unwrap requires the local passphrase or another configured key-recovery path
+  known PWA limitation: browser storage is not equivalent to native secure enclave/keychain
 
 Recovery export
   user-downloaded encrypted recovery file
@@ -448,13 +449,13 @@ Responsibilities:
   - Hard
   - Good
   - Easy
-- These ratings are assigned by the quiz component from correctness, response time, quiz mode, and difficulty signals. The user must not manually pick a rating.
+- In normal review sessions, the app reveals the answer and then asks the user to choose Again, Hard, Good, or Easy explicitly. Debug automation may assign ratings from correctness/response time to keep repeat tests fast.
 - Mastery is an app-level state derived separately from scheduler stability and user performance.
 
 Review scheduling:
 
 - Initial schedule supports 10 minutes, same evening, 1 day, 3 days, 7 days, 14 days, and 30 days.
-- Adaptive scheduling updates from correctness, first-attempt result, app-inferred FSRS rating, response time, quiz mode, and difficult-word signals.
+- Adaptive scheduling updates from the explicit FSRS review rating, correctness, first-attempt result, response time, quiz mode, and difficult-word signals.
 - Mastered terms are excluded from normal due-review lists but remain available for optional review and can re-enter review if the user later fails or manually marks the term as not mastered.
 - Use a review backlog grace window for daily grouping. A term can be included in a review session when `now >= nextReviewAt - REVIEW_GRACE_WINDOW`, with an initial constant such as `REVIEW_GRACE_WINDOW_HOURS = 12`. This improves user ergonomics without changing the scheduler's stored due date.
 
@@ -537,7 +538,7 @@ PWA implementation options:
 - AI must remain optional; local dictionary and learning flows continue without any AI provider.
 - Request structured JSON output from AI providers whenever possible and validate it before display or save.
 - Gemini integration requires an explicitly configured Google Cloud OAuth/client setup and whatever Google API consent or quota model is available for the chosen Gemini path. The app must not imply that offline dictionary/study features depend on Gemini.
-- Current implementation surface: the app loads Google Identity Services when a `googleClientId` is configured, requests Drive/profile scopes for sign-in, can upload a user snapshot to Drive app data, and adds a Gemini details button to dictionary results. Without a configured OAuth client ID, the UI remains local-only and explains the missing setup.
+- Current implementation surface: the app loads Google Identity Services when a `googleClientId` is configured, requests Drive/profile scopes for sign-in, can upsert and restore a passphrase-encrypted AES-GCM user snapshot in Drive app data, and adds a Gemini details button to dictionary results. Gemini requests ask for structured JSON and validate it before rendering. Without a configured OAuth client ID, the UI remains local-only and explains the missing setup.
 
 AI structured output shape:
 
@@ -599,6 +600,7 @@ Sync strategy:
 - Local user data is authoritative while offline.
 - Each local write records an event with a monotonically increasing local sequence number.
 - Sync uploads a full encrypted snapshot and a manifest after successful local validation.
+- The current PWA implementation upserts one passphrase-encrypted snapshot file in Drive `appDataFolder` instead of creating duplicate files on every sync; restore downloads the latest matching file and replaces local user records after confirmation.
 - Sync downloads cloud manifest first, compares versions and device clocks, then merges or prompts when needed.
 - After sync merge, validate integrity and create/update checkpoint.
 

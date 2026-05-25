@@ -21,9 +21,9 @@ This file lists the remaining gaps between the current local-first web app and a
 ## Google Account, Drive, And Gemini
 
 - Create a Google Cloud OAuth client for the production HTTPS origin.
-- Complete Google Drive app-data sync with encrypted snapshots, conflict handling, and restore-on-new-device flow.
+- Validate Google Drive app-data sync with a real production OAuth client on iPhone. The current app passphrase-encrypts, upserts, and restores full snapshots, but still needs conflict resolution beyond confirmed replace and real multi-device testing.
 - Confirm the exact Gemini OAuth/API path and quota model for a user-account-based no-additional-fee flow.
-- Add graceful fallback text when Gemini is unavailable, over quota, blocked by consent, or offline.
+- Add graceful fallback text when Gemini is unavailable, over quota, blocked by consent, or offline. The current Gemini response path requests structured JSON and renders validated learner cards.
 
 ## Product Data Safety
 
@@ -35,7 +35,7 @@ This file lists the remaining gaps between the current local-first web app and a
 
 ## Learning Depth
 
-- Replace the simple scheduler with `ts-fsrs` or equivalent FSRS implementation.
+- Replace the in-app FSRS-compatible scheduler approximation with `ts-fsrs` or equivalent production FSRS implementation after bundling is introduced.
 - Add typed meaning, cloze, and sentence-creation quiz modes.
 - Add fast encoding mode with examples, cloze sentences, common phrases, and personal sentence input.
 - Add difficult-word mode.

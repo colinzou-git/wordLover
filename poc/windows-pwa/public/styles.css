@@ -464,6 +464,16 @@ input:focus {
   min-height: 38px;
 }
 
+.fsrs-rating-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.fsrs-ratings button {
+  min-width: 72px;
+}
+
 .result-option {
   display: block;
   width: 100%;
@@ -701,6 +711,27 @@ li button {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
+}
+
+.ai-card-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-meaning-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel-soft);
+}
+
+.ai-meaning-card h4 {
+  margin: 0 0 6px;
+}
+
+.ai-meaning-card .example {
+  margin: 6px 0;
+  color: var(--muted);
 }
 
 @media (max-width: 700px) {
