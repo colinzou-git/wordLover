@@ -10,19 +10,19 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-poc-shell-v16";
+const SHELL_CACHE_NAME = "wordlover-poc-shell-v17";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260524-6",
-  "/styles.css?v=20260524-6",
+  "/app.js?v=20260524-7",
+  "/styles.css?v=20260524-7",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260524-8",
+  "/poc-suite.js?v=20260524-9",
 ];
 
 let lastResults = null;
@@ -395,8 +395,8 @@ async function runExportImportPoc() {
     dataFormatVersion: "poc-1",
     exportedAt: new Date().toISOString(),
     vocabulary: [
-      { term: "abandon", grade: "Again", source: "ECDICT" },
-      { term: "take off", grade: "Hard", source: "ECDICT" },
+      { term: "abandon", rating: "Again", source: "ECDICT" },
+      { term: "take off", rating: "Hard", source: "ECDICT" },
     ],
     stats: { newSavedToday: 2, reviewedToday: 1, masteredToday: 0 },
   };

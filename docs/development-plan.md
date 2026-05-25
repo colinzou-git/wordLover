@@ -78,6 +78,8 @@ Current implementation started:
 - Frequency-ranked "Explore next" prompt added.
 - Versioned app assets added to avoid stale service worker JavaScript/CSS.
 - URL-based automated search smoke added, for example `/?q=take%20off&report=1`.
+- End-user home screen compacted by removing always-visible developer/status panels.
+- Recent searches now appear on search-input focus and disappear once a recent term is selected.
 
 Exit criteria:
 
@@ -92,7 +94,7 @@ Goal: connect dictionary search to the one-user vocabulary list.
 Scope:
 
 - Save current dictionary result to vocabulary list.
-- Autosave valid dictionary search after dwell period.
+- Autosave valid dictionary search after an at-least-5-second dwell period.
 - Disable autosave setting.
 - Recent valid search history.
 - Edit saved English/Chinese meaning and pronunciation.
@@ -105,7 +107,7 @@ Current implementation started:
 - Vocabulary panel added to the PWA home screen.
 - Manual save from the current dictionary result added.
 - Saved-state button prevents duplicate active entries.
-- Autosave setting added and persisted per user; valid dictionary results autosave after a short dwell.
+- Autosave setting added and persisted per user; valid dictionary results autosave only after an at-least-5-second dwell.
 - Saved vocabulary items preserve original dictionary meanings/source separately from editable user meanings.
 - Edit flow added for English meaning, Chinese meaning, and pronunciation.
 - Archive and restore controls added.
@@ -134,14 +136,14 @@ Scope:
 Current implementation started:
 
 - Home screen daily stats added for new saved terms, reviewed terms, and mastered terms.
-- Saved vocabulary terms now have review state with grade `1-5`, due time, review count, and mastered timestamp.
+- Saved vocabulary terms now have review state with FSRS-compatible rating (`again`, `hard`, `good`, `easy`), due time, review count, and mastered timestamp.
 - Due-review button starts a multiple-choice review for saved due terms.
-- Review completion records a grade from 1 to 5. Grade 1 schedules a short retry, grades 2-4 schedule later reviews, and grade 5 marks the term mastered with no further review due.
+- Review completion records an app-inferred FSRS rating. The user does not manually choose the rating; the quiz component infers it from correctness and response time.
 - "Study one more" starts a first-attempt multiple-choice quiz from frequent unsaved TOEFL terms.
 - Passing the first-attempt new-word quiz does not add the term to the vocabulary list.
 - Missing the first-attempt quiz saves the word to the vocabulary list for future review.
-- Study events are encrypted in the local user store and include term, grade/result, timestamp, and device id.
-- Browser smoke verified due review, grade 5 mastery, proactive new-word quiz, stats updates, and iPhone-width layout.
+- Study events are encrypted in the local user store and include term, inferred rating/result, timestamp, and device id.
+- Browser smoke verified due review, app-inferred FSRS rating, proactive new-word quiz, stats updates, and iPhone-width layout.
 
 Exit criteria:
 

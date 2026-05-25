@@ -5,42 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260524-6" />
+    <link rel="stylesheet" href="/styles.css?v=20260524-7" />
     <title>WordLover PWA POC</title>
   </head>
   <body>
     <main id="app">
-      <section class="hero">
-        <div class="brand-block">
-          <p class="eyebrow">WordLover</p>
-          <h1>Dictionary</h1>
-          <p class="hero-copy">Search English words and short phrases with local offline data.</p>
-        </div>
-        <div id="pwaStatus" class="status-pill">Checking offline shell...</div>
-      </section>
+      <div id="pwaStatus" hidden>Checking offline shell...</div>
 
       <div id="installBanner" class="notice-banner" hidden></div>
 
       <section class="search-surface">
-        <label for="termInput">Search</label>
         <div class="search-row">
           <input id="termInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abandon, take off, in terms of" />
           <button id="clearSearch" class="secondary-button" type="button" aria-label="Clear search">Clear</button>
         </div>
+        <div id="recentSearchPopover" class="recent-popover" hidden></div>
         <div id="suggestions" class="suggestions" aria-live="polite"></div>
         <div id="result" class="result" aria-live="polite"></div>
       </section>
 
-      <section class="status-grid">
-        <div class="status-card">
-          <span>Dictionary</span>
-          <strong id="dictionaryState">Not loaded</strong>
-        </div>
-        <div class="status-card">
-          <span>Mode</span>
-          <strong id="dictionarySource">Online setup needed</strong>
-        </div>
-      </section>
+      <div hidden>
+        <strong id="dictionaryState">Not loaded</strong>
+        <strong id="dictionarySource">Online setup needed</strong>
+      </div>
 
       <section class="panel study-panel">
         <div class="panel-head">
@@ -61,14 +48,9 @@
         <div id="quizPanel" class="quiz-panel" hidden></div>
       </section>
 
-      <section class="panel compact-panel">
-        <div class="toolbar">
-          <button id="loadDictionary" type="button">Install/load dictionary</button>
-          <button id="exportState" class="secondary-button" type="button">Export state</button>
-          <a class="button-link secondary-link" href="/poc-suite.html">POC suite</a>
-        </div>
-        <div id="metrics" class="metrics"></div>
-      </section>
+      <button id="loadDictionary" type="button" hidden>Install/load dictionary</button>
+      <button id="exportState" type="button" hidden>Export state</button>
+      <div id="metrics" hidden></div>
 
       <section class="panel vocabulary-panel">
         <div class="panel-head">
@@ -92,10 +74,7 @@
         <button id="exploreWord" class="secondary-button" type="button">Open</button>
       </section>
 
-      <section class="panel">
-        <h2>Recent searches</h2>
-        <ol id="history" class="history-list"></ol>
-      </section>
+      <ol id="history" class="history-list" hidden></ol>
 
       <details class="panel diagnostics-panel">
         <summary>Device and PWA diagnostics</summary>
@@ -103,6 +82,6 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js?v=20260524-6"></script>
+    <script type="module" src="/app.js?v=20260524-7"></script>
   </body>
 </html>

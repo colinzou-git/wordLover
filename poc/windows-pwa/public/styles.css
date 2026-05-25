@@ -21,12 +21,12 @@ input {
 
 button,
 .button-link {
-  min-height: 44px;
+  min-height: 40px;
   border: 0;
   border-radius: 8px;
   background: #146c73;
   color: #fff;
-  padding: 0 16px;
+  padding: 0 12px;
   cursor: pointer;
 }
 
@@ -60,7 +60,7 @@ button:disabled {
 #app {
   width: min(920px, calc(100% - 28px));
   margin: 0 auto;
-  padding: 18px 0 40px;
+  padding: 10px 0 28px;
 }
 
 .hero {
@@ -133,14 +133,14 @@ h1 {
 }
 
 .search-surface {
-  padding: 16px;
-  margin: 8px 0 12px;
+  padding: 10px;
+  margin: 0 0 8px;
 }
 
 .compact-panel,
 .panel {
-  padding: 16px;
-  margin: 12px 0;
+  padding: 12px;
+  margin: 8px 0;
 }
 
 .status-grid {
@@ -154,13 +154,13 @@ h1 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .stats-grid div {
   border: 1px solid #d8e0de;
   border-radius: 8px;
-  padding: 12px;
+  padding: 8px 10px;
   background: #fbfdfc;
 }
 
@@ -174,8 +174,8 @@ h1 {
 
 .stats-grid strong {
   display: block;
-  margin-top: 4px;
-  font-size: 1.5rem;
+  margin-top: 2px;
+  font-size: 1.25rem;
 }
 
 .status-card {
@@ -228,7 +228,7 @@ h1 {
 .panel-head {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   align-items: flex-start;
 }
 
@@ -260,11 +260,11 @@ label {
 
 input {
   width: 100%;
-  min-height: 52px;
+  min-height: 46px;
   border: 1px solid #9fb0ae;
   border-radius: 8px;
   padding: 0 14px;
-  font-size: 1.08rem;
+  font-size: 1rem;
   background: #fbfdfc;
 }
 
@@ -277,11 +277,11 @@ input:focus {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .suggestions button {
-  min-height: 36px;
+  min-height: 34px;
   background: #e6f2f1;
   color: #173c42;
   padding: 0 12px;
@@ -292,8 +292,25 @@ input:focus {
   color: #4b3616;
 }
 
+.recent-popover {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.recent-popover[hidden] {
+  display: none;
+}
+
+.recent-popover button {
+  min-height: 34px;
+  background: #dfeeed;
+  color: #1d2b2f;
+}
+
 .result {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .result-list {
@@ -304,8 +321,7 @@ input:focus {
 
 .result-actions,
 .vocab-actions,
-.quiz-actions,
-.grade-actions {
+.quiz-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -314,8 +330,7 @@ input:focus {
 
 .result-actions button,
 .vocab-actions button,
-.quiz-actions button,
-.grade-actions button {
+.quiz-actions button {
   min-height: 38px;
 }
 
@@ -347,13 +362,13 @@ input:focus {
   gap: 16px;
   align-items: flex-start;
   border-bottom: 1px solid #edf1ef;
-  padding-bottom: 12px;
-  margin-bottom: 14px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .result-head h2 {
   margin-bottom: 4px;
-  font-size: 1.55rem;
+  font-size: 1.35rem;
 }
 
 .result-head > span {
@@ -365,7 +380,7 @@ input:focus {
 .meaning-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .meaning-grid section {
@@ -461,8 +476,8 @@ li button {
 
 .quiz-panel {
   border-top: 1px solid #edf1ef;
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
 }
 
 .quiz-panel[hidden] {
@@ -505,14 +520,14 @@ li button {
 
 .vocabulary-list {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .vocab-item {
   border: 1px solid #d8e0de;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   background: #fbfdfc;
 }
 

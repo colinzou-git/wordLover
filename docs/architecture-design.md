@@ -395,8 +395,8 @@ Autosave timing:
 
 - Do not save every transient keystroke.
 - Autosave timing is defined by PRD Req 33.
-- Autosave only when a matched result is active, not already saved, not dismissed or replaced, and either remains active for the 2-3 second dwell period or the user navigates away while the valid result is displayed.
-- Implement the dwell as a named tested constant, for example `AUTOSAVE_DWELL_MS = 2500`, so it is easy to tune without changing business logic.
+- Autosave only when a matched result is active, not already saved, not dismissed or replaced, and remains active for at least the dwell period specified in PRD Req 33.
+- Initial dwell constant: `AUTOSAVE_DWELL_MS = 5000`. Navigating away before the dwell completes must not autosave.
 
 ### Learning and Review Engine
 
@@ -417,12 +417,13 @@ Responsibilities:
   - Hard
   - Good
   - Easy
+- These ratings are assigned by the quiz component from correctness, response time, quiz mode, and difficulty signals. The user must not manually pick a rating.
 - Mastery is an app-level state derived separately from scheduler stability and user performance.
 
 Review scheduling:
 
 - Initial schedule supports 10 minutes, same evening, 1 day, 3 days, 7 days, 14 days, and 30 days.
-- Adaptive scheduling updates from correctness, first-attempt result, FSRS rating, response time, quiz mode, and difficult-word signals.
+- Adaptive scheduling updates from correctness, first-attempt result, app-inferred FSRS rating, response time, quiz mode, and difficult-word signals.
 - Mastered terms are excluded from normal due-review lists but remain available for optional review and can re-enter review if the user later fails or manually marks the term as not mastered.
 - Use a review backlog grace window for daily grouping. A term can be included in a review session when `now >= nextReviewAt - REVIEW_GRACE_WINDOW`, with an initial constant such as `REVIEW_GRACE_WINDOW_HOURS = 12`. This improves user ergonomics without changing the scheduler's stored due date.
 

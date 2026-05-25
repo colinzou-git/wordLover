@@ -29,7 +29,8 @@ Environment:
 | Fuzzy misspelling smoke | Pass on Windows fallback | Query `abanden` returned `abandon` as the closest match. |
 | Resumable dictionary installer | Implemented in POC | Dictionary download now uses 4 MB range chunks with IndexedDB chunk checkpoints when the server supports `Range`; full-buffer `sql.js` opening remains a known production risk. |
 | Vocabulary save/edit/archive slice | Pass on Windows fallback | Browser smoke verified manual save, autosave dwell, duplicate saved-state, archive, restore, and iPhone-width layout without horizontal overflow. |
-| Learning loop slice | Pass on Windows fallback | Browser smoke verified daily stats, due-review quiz, grade 5 mastery, proactive new-word quiz, encrypted study-event persistence, and iPhone-width layout without horizontal overflow. |
+| Learning loop slice | Pass on Windows fallback | Browser smoke verified daily stats, due-review quiz, app-inferred FSRS rating, proactive new-word quiz, encrypted study-event persistence, and iPhone-width layout without horizontal overflow. |
+| Compact UI and recent-search focus behavior | Pass on Windows fallback | Removed visible developer/status panels from the end-user home screen. Recent searches now appear when the search input receives focus and disappear after a recent term is selected. |
 
 ## Key Metrics
 

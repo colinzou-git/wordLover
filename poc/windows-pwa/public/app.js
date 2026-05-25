@@ -6,6 +6,7 @@ const result = document.querySelector("#result");
 const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
 const historyList = document.querySelector("#history");
+const recentSearchPopover = document.querySelector("#recentSearchPopover");
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
 const dictionarySource = document.querySelector("#dictionarySource");
@@ -36,6 +37,13 @@ const DICTIONARY_CHUNK_SIZE = 4 * 1024 * 1024;
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
+const AUTOSAVE_DWELL_MS = 5000;
+const FSRS_RATING_LABELS = {
+  again: "Again",
+  hard: "Hard",
+  good: "Good",
+  easy: "Easy",
+};
 
 let SQL = null;
 let dictionaryDb = null;
@@ -300,6 +308,23 @@ function renderHistory() {
     : '<li class="muted">No successful searches yet.</li>';
 }
 
+function renderRecentSearchPopover() {
+  if (!historyItems.length) {
+    recentSearchPopover.hidden = true;
+    recentSearchPopover.innerHTML = "";
+    return;
+  }
+  recentSearchPopover.innerHTML = historyItems
+    .slice(0, 10)
+    .map((item) => `<button type="button" data-term="${escapeHtml(item.term)}">${escapeHtml(item.term)}</button>`)
+    .join("");
+  recentSearchPopover.hidden = false;
+}
+
+function hideRecentSearchPopover() {
+  recentSearchPopover.hidden = true;
+}
+
 function renderResult(data) {
   if (data.status === "invalid_input") {
     currentResult = null;
@@ -504,11 +529,12 @@ async function ensureDictionaryLoaded() {
   loadButton.textContent = "Loading dictionary...";
   dictionaryState.textContent = "Loading";
   setSearchLoading(true);
-  result.innerHTML = `<p class="muted">Opening local dictionary.</p>`;
+  if (termInput.value.trim()) result.innerHTML = `<p class="muted">Opening local dictionary.</p>`;
   try {
     await loadDictionary();
     loaded = true;
     loadButton.textContent = "Dictionary ready";
+    loadButton.hidden = true;
     setSearchLoading(false);
     renderMetrics();
     await renderWordPrompt();
@@ -516,6 +542,7 @@ async function ensureDictionaryLoaded() {
   } catch (error) {
     loadButton.disabled = false;
     loadButton.textContent = "Install/load dictionary";
+    loadButton.hidden = false;
     setSearchLoading(false);
     result.innerHTML = `<p class="error">${error instanceof Error ? error.message : String(error)}</p>`;
     return false;
@@ -756,7 +783,7 @@ function resultToVocabularyItem(data) {
     syncVersion: 1,
     isSynced: false,
     review: {
-      grade: 1,
+      lastRating: "again",
       intervalDays: 0,
       dueAt: now,
       reviewCount: 0,
@@ -779,7 +806,7 @@ async function saveVocabularyItem(data, reason = "manual") {
     existing.isSynced = false;
     existing.lastSaveReason = reason;
     existing.review ??= {
-      grade: 1,
+      lastRating: "again",
       intervalDays: 0,
       dueAt: now,
       reviewCount: 0,
@@ -807,7 +834,7 @@ function scheduleAutosave(data) {
     if (currentResult && normalizeTerm(currentResult.term) === normalizeTerm(data.term)) {
       void saveVocabularyItem(data, "autosave");
     }
-  }, 2500);
+  }, AUTOSAVE_DWELL_MS);
 }
 
 async function editVocabularyItem(term) {
@@ -859,7 +886,7 @@ function renderVocabulary() {
           <p>${escapeHtml(chinese)}</p>
           <p>${escapeHtml(english)}</p>
           <p class="vocab-meta">
-            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - grade ${escapeHtml(item.review?.grade ?? 1)}${item.archivedAt ? " - archived" : ""}
+            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - rating ${escapeHtml(FSRS_RATING_LABELS[item.review?.lastRating] ?? "Again")}${item.archivedAt ? " - archived" : ""}
           </p>
           <div class="vocab-actions">
             <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Open</button>
@@ -885,7 +912,7 @@ function ensureVocabularyReviewStates() {
   vocabularyItems = vocabularyItems.map((item) => ({
     ...item,
     review: item.review ?? {
-      grade: 1,
+      lastRating: "again",
       intervalDays: 0,
       dueAt: now,
       reviewCount: 0,
@@ -898,7 +925,7 @@ function ensureVocabularyReviewStates() {
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
-  const mastered = studyEvents.filter((event) => event.type === "review" && event.grade === 5 && isToday(event.occurredAt)).length;
+  const mastered = studyEvents.filter((event) => event.type === "review" && event.rating === "easy" && isToday(event.occurredAt)).length;
   return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length };
 }
 
@@ -913,12 +940,18 @@ function renderStudyStats() {
     : "No saved terms are due right now.";
 }
 
-function scheduleFromGrade(grade) {
-  if (grade <= 1) return { intervalDays: 0, dueAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), masteredAt: null };
-  if (grade === 2) return { intervalDays: 1, dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
-  if (grade === 3) return { intervalDays: 3, dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
-  if (grade === 4) return { intervalDays: 7, dueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+function scheduleFromFsrsRating(rating) {
+  if (rating === "again") return { intervalDays: 0, dueAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), masteredAt: null };
+  if (rating === "hard") return { intervalDays: 1, dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+  if (rating === "good") return { intervalDays: 3, dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
   return { intervalDays: null, dueAt: null, masteredAt: nowIso() };
+}
+
+function inferFsrsRating(passed, responseMs) {
+  if (!passed) return "again";
+  if (responseMs <= 5000) return "easy";
+  if (responseMs <= 15000) return "good";
+  return "hard";
 }
 
 async function persistStudyEvents() {
@@ -926,11 +959,11 @@ async function persistStudyEvents() {
   renderStudyStats();
 }
 
-async function recordReviewGrade(item, grade, quizResult) {
-  const schedule = scheduleFromGrade(grade);
+async function recordReviewRating(item, rating, quizResult, responseMs) {
+  const schedule = scheduleFromFsrsRating(rating);
   item.review = {
     ...(item.review ?? {}),
-    grade,
+    lastRating: rating,
     intervalDays: schedule.intervalDays,
     dueAt: schedule.dueAt,
     masteredAt: schedule.masteredAt,
@@ -945,7 +978,8 @@ async function recordReviewGrade(item, grade, quizResult) {
     type: "review",
     term: item.term,
     normalizedTerm: item.normalizedTerm,
-    grade,
+    rating,
+    responseMs,
     quizResult,
     occurredAt: nowIso(),
     deviceId,
@@ -1064,6 +1098,7 @@ function renderQuiz(entry, mode) {
     mode,
     entry,
     answered: false,
+    startedAt: performance.now(),
     options: buildQuizOptions(entry),
   };
   quizPanel.hidden = false;
@@ -1152,14 +1187,18 @@ async function handleQuizAnswer(index) {
     if (buttonIndex === index && !option.correct) button.classList.add("incorrect");
   });
   const passed = Boolean(selected.correct);
+  const responseMs = performance.now() - activeQuiz.startedAt;
+  const rating = inferFsrsRating(passed, responseMs);
   if (activeQuiz.mode === "new") {
-    await handleNewWordQuizResult(passed);
+    await handleNewWordQuizResult(passed, rating, responseMs);
     return;
   }
-  renderGradeActions(activeQuiz.entry.sourceItem, passed ? "pass" : "miss");
+  await recordReviewRating(activeQuiz.entry.sourceItem, rating, passed ? "pass" : "miss", responseMs);
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `<p class="muted">Review recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-review-next="1">Review next</button></div>`;
 }
 
-async function handleNewWordQuizResult(passed) {
+async function handleNewWordQuizResult(passed, rating, responseMs) {
   if (!activeQuiz) return;
   const entry = activeQuiz.entry;
   if (passed) {
@@ -1168,6 +1207,8 @@ async function handleNewWordQuizResult(passed) {
       type: "new-word-first-pass",
       term: entry.term,
       normalizedTerm: entry.normalizedTerm,
+      rating,
+      responseMs,
       occurredAt: nowIso(),
       deviceId,
     });
@@ -1183,18 +1224,6 @@ async function handleNewWordQuizResult(passed) {
   quizPanel.insertAdjacentHTML(
     "beforeend",
     `<p class="muted">Missed on the first try. This word is now in your vocabulary list for review.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-study-next="1">Study another</button></div>`,
-  );
-}
-
-function renderGradeActions(item, quizResult) {
-  quizPanel.insertAdjacentHTML(
-    "beforeend",
-    `
-      <p class="muted">Grade this review. 1 means very new; 5 means mastered.</p>
-      <div class="grade-actions">
-        ${[1, 2, 3, 4, 5].map((grade) => `<button type="button" data-review-grade="${grade}" data-quiz-result="${quizResult}">${grade}</button>`).join("")}
-      </div>
-    `,
   );
 }
 
@@ -1298,8 +1327,9 @@ async function init() {
     dictionarySource.textContent = "Opening local copy";
   }
   result.innerHTML = installed
-    ? `<p class="muted">Dictionary is installed. Opening the local copy now.</p>`
+    ? ""
     : `<p class="muted">Install the local dictionary once while online. After that, search can work from the local copy.</p>`;
+  loadButton.hidden = installed;
   if (installed) setSearchLoading(true);
 
   if ("serviceWorker" in navigator) {
@@ -1337,10 +1367,15 @@ loadButton.addEventListener("click", async () => {
 });
 
 termInput.addEventListener("input", () => {
+  hideRecentSearchPopover();
   window.clearTimeout(debounceHandle);
   window.clearTimeout(suggestionHandle);
   suggestionHandle = window.setTimeout(runSuggestions, 75);
   debounceHandle = window.setTimeout(() => void runLookup(), 150);
+});
+
+termInput.addEventListener("focus", () => {
+  if (!termInput.value.trim()) renderRecentSearchPopover();
 });
 
 historyList.addEventListener("click", (event) => {
@@ -1353,6 +1388,14 @@ suggestions.addEventListener("click", (event) => {
   if (!(event.target instanceof HTMLButtonElement)) return;
   termInput.value = event.target.dataset.term ?? "";
   renderSuggestions([]);
+  hideRecentSearchPopover();
+  void runLookup();
+});
+
+recentSearchPopover.addEventListener("click", (event) => {
+  if (!(event.target instanceof HTMLButtonElement)) return;
+  termInput.value = event.target.dataset.term ?? "";
+  hideRecentSearchPopover();
   void runLookup();
 });
 
@@ -1394,6 +1437,7 @@ clearSearchButton.addEventListener("click", () => {
   scheduleAutosave(null);
   result.innerHTML = `<p class="muted">Type a term to search.</p>`;
   termInput.focus();
+  renderRecentSearchPopover();
 });
 
 autosaveToggle.addEventListener("change", async () => {
@@ -1419,17 +1463,16 @@ quizPanel.addEventListener("click", (event) => {
     void handleQuizAnswer(Number(optionButton.dataset.quizOption));
     return;
   }
-  const gradeButton = target.closest("[data-review-grade]");
-  if (gradeButton instanceof HTMLButtonElement && activeQuiz?.entry?.sourceItem) {
-    void recordReviewGrade(activeQuiz.entry.sourceItem, Number(gradeButton.dataset.reviewGrade), gradeButton.dataset.quizResult ?? "unknown");
-    return;
-  }
   if (target.closest("[data-quiz-close]")) {
     hideQuiz();
     return;
   }
   if (target.closest("[data-study-next]")) {
     void startNewWordStudy();
+    return;
+  }
+  if (target.closest("[data-review-next]")) {
+    startDueReview();
   }
 });
 

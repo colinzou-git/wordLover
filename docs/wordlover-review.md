@@ -38,21 +38,21 @@ This removes the conflict by scoping each rule to its context.
 
 ### PRD-3 · Autosave trigger is underspecified (Req 33)
 
-**Issue:** Req 33 says "when a dictionary search matches a dictionary entry, the app automatically saves the searched term." It does not say *when* the save fires — on match, after a dwell period, on navigation away, or on some other trigger. The architecture adds a 2–3 second dwell, but user-visible behavior belongs in the PRD.
+**Issue:** Req 33 says "when a dictionary search matches a dictionary entry, the app automatically saves the searched term." It must also say *when* the save fires — on match, after a dwell period, on navigation away, or on some other trigger. Autosave timing is user-visible behavior and belongs in the PRD.
 
 **Suggestion:** Add a sub-clause to Req 33 that specifies the trigger. A recommended formulation:
 
-> "Autosave fires when all of the following are true: (a) autosave is enabled, (b) a dictionary match is active in the search result, (c) the matched term is not already in the user's vocabulary list, and (d) the user has not dismissed or replaced the result within a dwell period of 2–3 seconds, or the user navigates away from the search input while a valid match is displayed."
+> "Autosave fires when all of the following are true: (a) autosave is enabled, (b) a dictionary match is active in the search result, (c) the matched term is not already in the user's vocabulary list, and (d) the user has not dismissed or replaced the result within a dwell period of at least 5 seconds."
 
 This makes the dwell period a tracked PRD requirement rather than an undocumented implementation detail, and it gives the developer a clear checklist of all conditions.
 
 ---
 
-### PRD-4 · Grade 1–5 conflicts with FSRS rating (Req 126, Req 147)
+### PRD-4 · Manual ratings must not conflict with FSRS rating (Req 126, Req 147)
 
-**Issue:** Req 147 defines a 1–5 review grade scale. Req 126 says the app should use FSRS. FSRS natively accepts a 1–4 rating (`again`, `hard`, `good`, `easy`). Grade 5 meaning "mastered, no normal scheduled review" does not exist in FSRS — FSRS suppresses reviews naturally through its stability and retrievability model once stability is high enough. Conflating a UI grade with an FSRS input will cause implementation confusion.
+**Issue:** The product should not expose a separate manual review rating scale that conflicts with FSRS. FSRS natively accepts ratings (`again`, `hard`, `good`, `easy`). Conflating a user-picked rating with an FSRS input will cause implementation confusion.
 
-**Suggestion:** remove 1–5 review grade scale in the PRD and explicitly align with FSRS rating (`again`, `hard`, `good`, `easy`).
+**Suggestion:** align the PRD with FSRS ratings (`again`, `hard`, `good`, `easy`) and state that the quiz component infers the rating from correctness, response time, and quiz mode instead of asking the user to pick a rating.
 
 ---
 
@@ -187,17 +187,17 @@ Add a note in the architecture: "Full-snapshot sync is the Phase 4 baseline. Eve
 
 ### ARCH-5 · Autosave dwell period belongs in the PRD
 
-**Issue:** The architecture specifies a 2–3 second dwell period before autosaving, but autosave timing is user-visible behavior. If it lives only in the architecture, it is invisible to PRD-level review and can silently drift during implementation.
+**Issue:** The architecture specifies the dwell period before autosaving, but autosave timing is user-visible behavior. If it lives only in the architecture, it is invisible to PRD-level review and can silently drift during implementation.
 
-**Suggestion:** Move the dwell period definition to the PRD as a sub-requirement of Req 33 (see PRD-3 above), and in the architecture reference it: "Autosave dwell period is specified in PRD Req 33. The suggested initial value is 2–3 seconds; tune based on Phase 0 user feedback." This keeps the single source of truth in the PRD and the implementation detail in the architecture.
+**Suggestion:** Move the dwell period definition to the PRD as a sub-requirement of Req 33 (see PRD-3 above), and in the architecture reference it. The current requirement is at least 5 seconds. This keeps the single source of truth in the PRD and the implementation detail in the architecture.
 
-Additionally, consider making the dwell period a named constant in code (`AUTOSAVE_DWELL_MS = 2500`) rather than an anonymous magic number, so it is easy to change and test.
+Additionally, make the dwell period a named constant in code (`AUTOSAVE_DWELL_MS = 5000`) rather than an anonymous magic number, so it is easy to change and test.
 
 ---
 
 ### ARCH-6 · FSRS integration detail missing
 
-**Issue:** The architecture references FSRS but does not specify the TypeScript library, how FSRS's internal state fields (`stability`, `difficulty`, `elapsed_days`, `scheduled_days`, `reps`, `lapses`, `state`) map to the `ReviewState` schema, or how the grade 1–5 UI maps to FSRS's 1–4 input.
+**Issue:** The architecture references FSRS but does not specify the TypeScript library, how FSRS's internal state fields (`stability`, `difficulty`, `elapsed_days`, `scheduled_days`, `reps`, `lapses`, `state`) map to the `ReviewState` schema, or how the quiz component infers FSRS ratings.
 
 **Suggestion:** Add an FSRS integration spec section to the architecture:
 
@@ -208,25 +208,18 @@ Additionally, consider making the dwell period a named constant in code (`AUTOSA
 ```text
 ReviewState
   vocabularyItemId
-  grade: 1..5                  — user-visible grade (app concept)
-  fsrsRating: 1..4             — last rating passed to FSRS (Again/Hard/Good/Easy)
+  fsrsRating: again|hard|good|easy
   fsrsCard                     — serialized FSRS Card object (stability, difficulty,
                                   elapsed_days, scheduled_days, reps, lapses, state)
   nextReviewAt                 — derived from fsrsCard.due
   lastReviewedAt
   isMastered                   — true when stability > MASTERY_THRESHOLD
-  difficultMode                — true when grade ≤ 2 on last N attempts
+  difficultMode                — true when recent app-inferred ratings include Again/Hard
 ```
 
-**Grade mapping:**
+**Rating inference:**
 
-| User grade | FSRS rating       | Label                                   |
-| ---------- | ----------------- | --------------------------------------- |
-| 1          | 1 (Again)         | Very hard / forgot                      |
-| 2          | 2 (Hard)          | Hard                                    |
-| 3          | 3 (Good)          | Remembered with effort                  |
-| 4          | 4 (Easy)          | Remembered easily                       |
-| 5          | — (no FSRS input) | Mastered (app sets `isMastered = true`) |
+The user does not manually pick a rating. The quiz component infers Again, Hard, Good, or Easy from correctness, response time, quiz mode, and repeated misses.
 
 **Mastery threshold:** Set `isMastered = true` when FSRS-predicted retention at 90 days exceeds 0.90. Mastered terms are excluded from normal due-review lists but FSRS scheduling continues in background.
 
