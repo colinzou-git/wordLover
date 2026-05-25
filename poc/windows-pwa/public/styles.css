@@ -150,6 +150,34 @@ h1 {
   margin: 12px 0;
 }
 
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.stats-grid div {
+  border: 1px solid #d8e0de;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdfc;
+}
+
+.stats-grid span {
+  display: block;
+  color: #607377;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.stats-grid strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.5rem;
+}
+
 .status-card {
   padding: 12px;
 }
@@ -217,6 +245,13 @@ h1 {
   white-space: nowrap;
 }
 
+.study-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 label {
   display: block;
   font-weight: 800;
@@ -268,7 +303,9 @@ input:focus {
 }
 
 .result-actions,
-.vocab-actions {
+.vocab-actions,
+.quiz-actions,
+.grade-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -276,7 +313,9 @@ input:focus {
 }
 
 .result-actions button,
-.vocab-actions button {
+.vocab-actions button,
+.quiz-actions button,
+.grade-actions button {
   min-height: 38px;
 }
 
@@ -420,6 +459,50 @@ li button {
   margin-bottom: 4px;
 }
 
+.quiz-panel {
+  border-top: 1px solid #edf1ef;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.quiz-panel[hidden] {
+  display: none;
+}
+
+.quiz-question {
+  margin-bottom: 12px;
+}
+
+.quiz-question strong {
+  display: block;
+  font-size: 1.35rem;
+  margin-top: 4px;
+}
+
+.quiz-options {
+  display: grid;
+  gap: 10px;
+}
+
+.quiz-options button {
+  min-height: 0;
+  background: #fbfdfc;
+  border: 1px solid #d8e0de;
+  color: #172426;
+  padding: 12px;
+  text-align: left;
+}
+
+.quiz-options button.correct {
+  border-color: #2c8f6b;
+  background: #e7f6ef;
+}
+
+.quiz-options button.incorrect {
+  border-color: #bb6b54;
+  background: #fff0eb;
+}
+
 .vocabulary-list {
   display: grid;
   gap: 10px;
@@ -473,6 +556,7 @@ li button {
   }
 
   .status-grid,
+  .stats-grid,
   .metrics div,
   .meaning-grid {
     grid-template-columns: 1fr;
@@ -490,6 +574,12 @@ li button {
 
   .panel-head {
     display: grid;
+  }
+
+  .study-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 
   .word-prompt {

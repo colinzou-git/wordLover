@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260524-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260524-6" />
     <title>WordLover PWA POC</title>
   </head>
   <body>
@@ -40,6 +40,25 @@
           <span>Mode</span>
           <strong id="dictionarySource">Online setup needed</strong>
         </div>
+      </section>
+
+      <section class="panel study-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Today</h2>
+            <p id="studySummary" class="muted">No study activity yet.</p>
+          </div>
+          <div class="study-actions">
+            <button id="startReview" type="button" disabled>Review due</button>
+            <button id="studyNewWord" class="secondary-button" type="button">Study one more</button>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <div><span>New</span><strong id="statNewSaved">0</strong></div>
+          <div><span>Reviewed</span><strong id="statReviewed">0</strong></div>
+          <div><span>Mastered</span><strong id="statMastered">0</strong></div>
+        </div>
+        <div id="quizPanel" class="quiz-panel" hidden></div>
       </section>
 
       <section class="panel compact-panel">
@@ -84,6 +103,6 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js?v=20260524-4"></script>
+    <script type="module" src="/app.js?v=20260524-6"></script>
   </body>
 </html>

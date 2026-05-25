@@ -1,4 +1,4 @@
-const loadButton = document.querySelector("#loadDictionary");
+﻿const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
 const termInput = document.querySelector("#termInput");
 const clearSearchButton = document.querySelector("#clearSearch");
@@ -17,6 +17,13 @@ const exploreWordButton = document.querySelector("#exploreWord");
 const autosaveToggle = document.querySelector("#autosaveToggle");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
+const studySummary = document.querySelector("#studySummary");
+const statNewSaved = document.querySelector("#statNewSaved");
+const statReviewed = document.querySelector("#statReviewed");
+const statMastered = document.querySelector("#statMastered");
+const startReviewButton = document.querySelector("#startReview");
+const studyNewWordButton = document.querySelector("#studyNewWord");
+const quizPanel = document.querySelector("#quizPanel");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
@@ -43,8 +50,10 @@ let encryptionKeyPromise = null;
 let currentPromptTerm = null;
 let currentResult = null;
 let vocabularyItems = [];
+let studyEvents = [];
 let autosaveEnabled = true;
 let deviceId = null;
+let activeQuiz = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -65,6 +74,18 @@ function escapeHtml(value) {
 
 function isChineseInput(value) {
   return HAN_RE.test(value);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function todayPrefix() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isToday(value) {
+  return typeof value === "string" && value.startsWith(todayPrefix());
 }
 
 function topLines(value, limit = 3) {
@@ -705,10 +726,11 @@ function summarizeLines(lines) {
 async function persistVocabulary() {
   await saveValue("vocabularyItems", vocabularyItems);
   renderVocabulary();
+  renderStudyStats();
 }
 
 function resultToVocabularyItem(data) {
-  const now = new Date().toISOString();
+  const now = nowIso();
   const normalizedTerm = normalizeTerm(data.term);
   return {
     id: normalizedTerm,
@@ -733,6 +755,14 @@ function resultToVocabularyItem(data) {
     createdDeviceId: deviceId,
     syncVersion: 1,
     isSynced: false,
+    review: {
+      grade: 1,
+      intervalDays: 0,
+      dueAt: now,
+      reviewCount: 0,
+      lastReviewedAt: null,
+      masteredAt: null,
+    },
   };
 }
 
@@ -741,13 +771,21 @@ async function saveVocabularyItem(data, reason = "manual") {
   await getDeviceId();
   const normalizedTerm = normalizeTerm(data.term);
   const existing = getVocabularyItem(data.term);
-  const now = new Date().toISOString();
+  const now = nowIso();
   if (existing) {
     existing.archivedAt = null;
     existing.updatedAt = now;
     existing.syncVersion = (existing.syncVersion ?? 0) + 1;
     existing.isSynced = false;
     existing.lastSaveReason = reason;
+    existing.review ??= {
+      grade: 1,
+      intervalDays: 0,
+      dueAt: now,
+      reviewCount: 0,
+      lastReviewedAt: null,
+      masteredAt: null,
+    };
   } else {
     const item = resultToVocabularyItem(data);
     item.lastSaveReason = reason;
@@ -757,6 +795,7 @@ async function saveVocabularyItem(data, reason = "manual") {
     .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
     .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
   await persistVocabulary();
+  renderStudyStats();
   if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
   return getVocabularyItem(data.term);
 }
@@ -783,7 +822,7 @@ async function editVocabularyItem(term) {
   item.user.englishMeanings = english.split(";").map((line) => line.trim()).filter(Boolean);
   item.user.chineseMeanings = chinese.split(";").map((line) => line.trim()).filter(Boolean);
   item.user.phonetic = phonetic.trim();
-  item.updatedAt = new Date().toISOString();
+  item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
   await persistVocabulary();
@@ -793,8 +832,8 @@ async function editVocabularyItem(term) {
 async function setVocabularyArchived(term, archived) {
   const item = getVocabularyItem(term);
   if (!item) return;
-  item.archivedAt = archived ? new Date().toISOString() : null;
-  item.updatedAt = new Date().toISOString();
+  item.archivedAt = archived ? nowIso() : null;
+  item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
   await persistVocabulary();
@@ -820,10 +859,7 @@ function renderVocabulary() {
           <p>${escapeHtml(chinese)}</p>
           <p>${escapeHtml(english)}</p>
           <p class="vocab-meta">
-            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} ·
-            source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} ·
-            saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())}
-            ${item.archivedAt ? " · archived" : ""}
+            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - grade ${escapeHtml(item.review?.grade ?? 1)}${item.archivedAt ? " - archived" : ""}
           </p>
           <div class="vocab-actions">
             <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Open</button>
@@ -834,6 +870,95 @@ function renderVocabulary() {
       `;
     })
     .join("");
+}
+
+function getDueVocabularyItems() {
+  const now = Date.now();
+  return vocabularyItems.filter((item) => {
+    if (item.archivedAt || item.review?.masteredAt) return false;
+    return !item.review?.dueAt || Date.parse(item.review.dueAt) <= now;
+  });
+}
+
+function ensureVocabularyReviewStates() {
+  const now = nowIso();
+  vocabularyItems = vocabularyItems.map((item) => ({
+    ...item,
+    review: item.review ?? {
+      grade: 1,
+      intervalDays: 0,
+      dueAt: now,
+      reviewCount: 0,
+      lastReviewedAt: null,
+      masteredAt: null,
+    },
+  }));
+}
+
+function getTodayStats() {
+  const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
+  const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
+  const mastered = studyEvents.filter((event) => event.type === "review" && event.grade === 5 && isToday(event.occurredAt)).length;
+  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length };
+}
+
+function renderStudyStats() {
+  const stats = getTodayStats();
+  statNewSaved.textContent = String(stats.newSaved);
+  statReviewed.textContent = String(stats.reviewed);
+  statMastered.textContent = String(stats.mastered);
+  startReviewButton.disabled = stats.dueCount === 0;
+  studySummary.textContent = stats.dueCount
+    ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
+    : "No saved terms are due right now.";
+}
+
+function scheduleFromGrade(grade) {
+  if (grade <= 1) return { intervalDays: 0, dueAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), masteredAt: null };
+  if (grade === 2) return { intervalDays: 1, dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+  if (grade === 3) return { intervalDays: 3, dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+  if (grade === 4) return { intervalDays: 7, dueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+  return { intervalDays: null, dueAt: null, masteredAt: nowIso() };
+}
+
+async function persistStudyEvents() {
+  await saveValue("studyEvents", studyEvents.slice(-500));
+  renderStudyStats();
+}
+
+async function recordReviewGrade(item, grade, quizResult) {
+  const schedule = scheduleFromGrade(grade);
+  item.review = {
+    ...(item.review ?? {}),
+    grade,
+    intervalDays: schedule.intervalDays,
+    dueAt: schedule.dueAt,
+    masteredAt: schedule.masteredAt,
+    lastReviewedAt: nowIso(),
+    reviewCount: (item.review?.reviewCount ?? 0) + 1,
+  };
+  item.updatedAt = nowIso();
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  studyEvents.push({
+    id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type: "review",
+    term: item.term,
+    normalizedTerm: item.normalizedTerm,
+    grade,
+    quizResult,
+    occurredAt: nowIso(),
+    deviceId,
+  });
+  await persistVocabulary();
+  await persistStudyEvents();
+  hideQuiz();
+}
+
+function hideQuiz() {
+  activeQuiz = null;
+  quizPanel.hidden = true;
+  quizPanel.innerHTML = "";
 }
 
 function suggestWordOfTheDay() {
@@ -885,6 +1010,194 @@ async function renderWordPrompt() {
   wordPromptPanel.hidden = false;
 }
 
+function meaningPreviewFromEntry(entry) {
+  return topLines(entry.translation, 1)[0] ?? topLines(entry.definition, 1)[0] ?? "No meaning available";
+}
+
+function quizEntryFromVocabulary(item) {
+  return {
+    term: item.term,
+    normalizedTerm: item.normalizedTerm,
+    correct: summarizeLines(item.user?.chineseMeanings?.length ? item.user.chineseMeanings : item.original?.chineseMeanings),
+    sourceItem: item,
+  };
+}
+
+function randomize(items) {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+function getQuizDistractors(correctTerm, limit = 3) {
+  if (!dictionaryDb) return [];
+  const statement = dictionaryDb.prepare(`
+    SELECT word, definition, translation
+    FROM dictionary_entries
+    WHERE normalized_word != :term
+      AND translation IS NOT NULL
+      AND instr(normalized_word, ' ') = 0
+    ORDER BY is_toefl DESC, frq IS NULL, frq, bnc IS NULL, bnc, word
+    LIMIT 80
+  `);
+  const rows = [];
+  try {
+    statement.bind({ ":term": normalizeTerm(correctTerm) });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      const preview = meaningPreviewFromEntry(row);
+      if (preview && !rows.some((item) => item.text === preview)) rows.push({ text: preview, term: row.word });
+    }
+  } finally {
+    statement.free();
+  }
+  return randomize(rows).slice(0, limit);
+}
+
+function buildQuizOptions(entry) {
+  const correct = { text: entry.correct, correct: true, term: entry.term };
+  const distractors = getQuizDistractors(entry.term, 3).map((item) => ({ ...item, correct: false }));
+  return randomize([correct, ...distractors]).slice(0, 4);
+}
+
+function renderQuiz(entry, mode) {
+  activeQuiz = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `quiz-${Date.now()}`,
+    mode,
+    entry,
+    answered: false,
+    options: buildQuizOptions(entry),
+  };
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <div class="quiz-question">
+      <span>${mode === "review" ? "Review" : "First check"}</span>
+      <strong>${escapeHtml(entry.term)}</strong>
+      <p class="muted">Choose the closest meaning.</p>
+    </div>
+    <div class="quiz-options">
+      ${activeQuiz.options
+        .map(
+          (option, index) => `
+            <button type="button" data-quiz-option="${index}">
+              ${escapeHtml(option.text)}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  quizPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function startDueReview() {
+  const [item] = getDueVocabularyItems();
+  if (!item) {
+    renderStudyStats();
+    return;
+  }
+  renderQuiz(quizEntryFromVocabulary(item), "review");
+}
+
+function pickNewStudyEntry() {
+  if (!dictionaryDb) return null;
+  const saved = new Set(vocabularyItems.map((item) => item.normalizedTerm));
+  const statement = dictionaryDb.prepare(`
+    SELECT word, normalized_word, definition, translation
+    FROM dictionary_entries
+    WHERE is_toefl = 1
+      AND translation IS NOT NULL
+      AND definition IS NOT NULL
+      AND instr(normalized_word, ' ') = 0
+    ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, word
+    LIMIT 250
+  `);
+  const candidates = [];
+  try {
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      if (!saved.has(row.normalized_word)) {
+        candidates.push({
+          term: row.word,
+          normalizedTerm: row.normalized_word,
+          correct: meaningPreviewFromEntry(row),
+        });
+      }
+    }
+  } finally {
+    statement.free();
+  }
+  if (!candidates.length) return null;
+  return candidates[Math.floor(Date.now() / 86400000) % candidates.length];
+}
+
+async function startNewWordStudy() {
+  if (!(await ensureDictionaryLoaded())) return;
+  const entry = pickNewStudyEntry();
+  if (!entry) {
+    quizPanel.hidden = false;
+    quizPanel.innerHTML = `<p class="muted">No unsaved TOEFL candidate found right now.</p>`;
+    return;
+  }
+  renderQuiz(entry, "new");
+}
+
+async function handleQuizAnswer(index) {
+  if (!activeQuiz || activeQuiz.answered) return;
+  const selected = activeQuiz.options[index];
+  if (!selected) return;
+  activeQuiz.answered = true;
+  quizPanel.querySelectorAll("[data-quiz-option]").forEach((button, buttonIndex) => {
+    const option = activeQuiz.options[buttonIndex];
+    button.disabled = true;
+    if (option.correct) button.classList.add("correct");
+    if (buttonIndex === index && !option.correct) button.classList.add("incorrect");
+  });
+  const passed = Boolean(selected.correct);
+  if (activeQuiz.mode === "new") {
+    await handleNewWordQuizResult(passed);
+    return;
+  }
+  renderGradeActions(activeQuiz.entry.sourceItem, passed ? "pass" : "miss");
+}
+
+async function handleNewWordQuizResult(passed) {
+  if (!activeQuiz) return;
+  const entry = activeQuiz.entry;
+  if (passed) {
+    studyEvents.push({
+      id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      type: "new-word-first-pass",
+      term: entry.term,
+      normalizedTerm: entry.normalizedTerm,
+      occurredAt: nowIso(),
+      deviceId,
+    });
+    await persistStudyEvents();
+    quizPanel.insertAdjacentHTML(
+      "beforeend",
+      `<p class="muted">You passed on the first try, so this word was not added to your vocabulary list.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-study-next="1">Study another</button></div>`,
+    );
+    return;
+  }
+  const lookup = lookupTerm(entry.term);
+  if (lookup.status === "found") await saveVocabularyItem(lookup, "new-word-quiz-failed");
+  quizPanel.insertAdjacentHTML(
+    "beforeend",
+    `<p class="muted">Missed on the first try. This word is now in your vocabulary list for review.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button><button type="button" data-study-next="1">Study another</button></div>`,
+  );
+}
+
+function renderGradeActions(item, quizResult) {
+  quizPanel.insertAdjacentHTML(
+    "beforeend",
+    `
+      <p class="muted">Grade this review. 1 means very new; 5 means mastered.</p>
+      <div class="grade-actions">
+        ${[1, 2, 3, 4, 5].map((grade) => `<button type="button" data-review-grade="${grade}" data-quiz-result="${quizResult}">${grade}</button>`).join("")}
+      </div>
+    `,
+  );
+}
+
 async function addHistory(item) {
   historyItems = [item, ...historyItems.filter((entry) => entry.term !== item.term)].slice(0, 10);
   await saveValue("history", historyItems);
@@ -906,7 +1219,7 @@ async function runLookup() {
     const data = lookupTerm(value);
     renderResult(data);
     if (data.status === "found") {
-      await addHistory({ term: data.term, searchedAt: new Date().toISOString(), queryMs: data.queryMs ?? 0 });
+      await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
       await renderWordPrompt();
     }
   } catch (error) {
@@ -932,11 +1245,11 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
   const data = lookupTerm(term);
   renderResult(data);
   if (data.status === "found") {
-    await addHistory({ term: data.term, searchedAt: new Date().toISOString(), queryMs: data.queryMs ?? 0 });
+    await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
   }
   if (shouldReport) {
     await sendSmokeResult({
-      completedAt: new Date().toISOString(),
+      completedAt: nowIso(),
       kind: "dictionary-search-smoke",
       diagnostics: {
         userAgent: navigator.userAgent,
@@ -970,11 +1283,14 @@ async function init() {
   await getDeviceId();
   historyItems = await loadValue("history", []);
   vocabularyItems = await loadValue("vocabularyItems", []);
+  ensureVocabularyReviewStates();
+  studyEvents = await loadValue("studyEvents", []);
   autosaveEnabled = await loadValue("autosaveEnabled", true);
   autosaveToggle.checked = autosaveEnabled;
   lastMetrics = await loadValue("lastMetrics", null);
   renderHistory();
   renderVocabulary();
+  renderStudyStats();
   renderMetrics();
   const installed = await hasInstalledDictionary();
   if (installed && !lastMetrics) {
@@ -1087,6 +1403,36 @@ autosaveToggle.addEventListener("change", async () => {
   if (currentResult) renderResult(currentResult);
 });
 
+startReviewButton.addEventListener("click", () => {
+  startDueReview();
+});
+
+studyNewWordButton.addEventListener("click", () => {
+  void startNewWordStudy();
+});
+
+quizPanel.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  const optionButton = target.closest("[data-quiz-option]");
+  if (optionButton instanceof HTMLButtonElement) {
+    void handleQuizAnswer(Number(optionButton.dataset.quizOption));
+    return;
+  }
+  const gradeButton = target.closest("[data-review-grade]");
+  if (gradeButton instanceof HTMLButtonElement && activeQuiz?.entry?.sourceItem) {
+    void recordReviewGrade(activeQuiz.entry.sourceItem, Number(gradeButton.dataset.reviewGrade), gradeButton.dataset.quizResult ?? "unknown");
+    return;
+  }
+  if (target.closest("[data-quiz-close]")) {
+    hideQuiz();
+    return;
+  }
+  if (target.closest("[data-study-next]")) {
+    void startNewWordStudy();
+  }
+});
+
 exploreWordButton.addEventListener("click", () => {
   if (!currentPromptTerm) return;
   termInput.value = currentPromptTerm;
@@ -1096,10 +1442,11 @@ exploreWordButton.addEventListener("click", () => {
 
 exportButton.addEventListener("click", () => {
   const payload = {
-    exportedAt: new Date().toISOString(),
+    exportedAt: nowIso(),
     app: "wordlover-windows-pwa-poc",
     historyItems,
     vocabularyItems,
+    studyEvents,
     autosaveEnabled,
     lastMetrics,
   };
@@ -1119,6 +1466,10 @@ window.WordLoverApp = {
   lookupChineseTerm,
   saveVocabularyItem,
   getVocabulary: () => vocabularyItems,
+  getStudyEvents: () => studyEvents,
+  startDueReview,
+  startNewWordStudy,
+  getDueVocabularyItems,
   setAutosaveEnabled: async (enabled) => {
     autosaveEnabled = Boolean(enabled);
     autosaveToggle.checked = autosaveEnabled;
@@ -1130,6 +1481,7 @@ window.WordLoverApp = {
     lastMetrics,
     historyItems,
     vocabularyItems,
+    studyEvents,
     autosaveEnabled,
     encryptedUserStore: true,
     persistentIndexedDbConnection: Boolean(dbPromise),
