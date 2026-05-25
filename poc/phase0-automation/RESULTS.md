@@ -32,6 +32,8 @@ Environment:
 | Learning loop slice | Pass on Windows fallback | Browser smoke verified daily stats, due-review quiz, app-inferred FSRS rating, proactive new-word quiz, encrypted study-event persistence, and iPhone-width layout without horizontal overflow. |
 | Compact UI and recent-search focus behavior | Pass on Windows fallback | Removed visible developer/status panels from the end-user home screen. Recent searches now appear when the search input receives focus and disappear after a recent term is selected. |
 | App version/update menu | Pass on Windows fallback | Compact menu shows app version, user-data format version, dictionary engine, sync status, memory-target note, export state, and service-worker update controls. |
+| Product UI v19 | Pass on Windows fallback | Visible app title no longer says POC, menu is a compact three-dot control beside search clear, three themes are selectable, and Google/Gemini surfaces show a clear not-configured state until an OAuth client ID is provided. |
+| Review debug automation | Pass on Windows fallback | Diagnostics debug mode accelerates review time to 20 seconds per day. Browser automation passed correct-answer -> Easy and wrong-answer -> Again rating checks, and the suite reports `reviewQuizRating` pass. |
 | iPhone DRAM <= 50 MB target | Not proven | Browser automation cannot reliably measure iPhone PWA DRAM. Current `sql.js` POC loads the full 206 MB dictionary into JS/WASM memory and should be assumed above target until replaced or measured. |
 
 ## Key Metrics
@@ -56,7 +58,7 @@ Environment:
 Latest iPhone Home Screen repeat runs:
 
 - Display mode: `standalone`
-- Shell cache: latest implemented app menu shell is `wordlover-poc-shell-v18`; latest received iPhone reports still show `wordlover-poc-shell-v13` until the real iPhone reruns the suite.
+- Shell cache: latest implemented product shell is `wordlover-shell-v19`; latest received iPhone reports still show `wordlover-poc-shell-v13` until the real iPhone reruns the suite.
 - Persistent storage: granted
 - Dictionary fetch: about `7.31 s`
 - SQLite open: about `14-17 ms`
@@ -76,7 +78,7 @@ All benchmark terms were found in the local dictionary.
 
 ## Production Implications
 
-The SQLite-shaped dictionary interface is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on Windows and iPhone Safari. OPFS was available in the iPhone automated report, but the current `sql.js` path still loads the full 206 MB SQLite file into memory and should not be accepted for the <= 50 MB iPhone DRAM target. `wa-sqlite` plus OPFS remains the next storage-engine POC before locking the production dictionary engine. Android measurement is deferred until the end.
+The SQLite-shaped dictionary interface is still supported. IndexedDB and OPFS both look feasible for storing the dictionary package on Windows and iPhone Safari. OPFS was available in the iPhone automated report, and the app now attempts OPFS package storage before falling back to IndexedDB. The current `sql.js` query path still loads the full 206 MB SQLite file into memory and should not be accepted for the <= 50 MB iPhone DRAM target. `wa-sqlite` plus OPFS remains the next storage-engine implementation before locking the production dictionary engine. Android measurement is deferred until the end.
 
 The first implementation slice should stay focused on the iPhone dictionary path: fast visible search UI, explicit dictionary install/load state, offline dictionary fallback, reliable service-worker asset updates, encrypted user records, and persistent IndexedDB access.
 

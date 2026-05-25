@@ -1,6 +1,6 @@
 {
-  "name": "WordLover PWA POC",
-  "short_name": "WordLover POC",
+  "name": "WordLover",
+  "short_name": "WordLover",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f4ec",

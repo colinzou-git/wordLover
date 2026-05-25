@@ -20,7 +20,7 @@ This plan follows the current product priority:
 - iPhone automated suite reports now verify service worker readiness, IndexedDB dictionary persistence, OPFS persistence, encrypted export/import, mock sync, and p95 lookup time well under 1 second after open.
 - Latest iPhone Home Screen PWA suite runs reported standalone display mode, persistent storage granted, shell cache `wordlover-poc-shell-v13`, dictionary fetch about `7.31 s`, SQLite open about `14-17 ms`, and lookup p95 about `0.28 ms`.
 - The current `sql.js` POC still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but does not satisfy the production memory direction; assume it exceeds the <= 50 MB iPhone DRAM target until proven otherwise.
-- The live POC now has encrypted user key-value records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, an iPhone install-context banner, and a compact app version/update menu.
+- The live app now has encrypted user key-value records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, an iPhone install-context banner, a compact three-dot app menu, theme selection, Google/Gemini integration surfaces, and a debug review acceleration mode.
 
 ## Phase 0: Finish iPhone Feasibility
 
@@ -33,6 +33,7 @@ Scope:
 - Verify iPhone result upload into `poc/iphone-pwa/received-results`. Status: passed.
 - Test iPhone close/reopen and iPhone restart persistence.
 - POC `wa-sqlite` + OPFS on iPhone and compare with `sql.js` memory/startup behavior before choosing the production dictionary engine.
+- Replace the current `sql.js` dictionary query runtime with a real `wa-sqlite`+OPFS query engine or sharded package before claiming the 50 MB iPhone memory target.
 - Measure peak and steady-state iPhone memory during dictionary install, open, lookup, background, and relaunch. Production target is <= 50 MB normal-use incremental memory.
 - Confirm the app version/update menu can activate a new service worker on the real iPhone Home Screen PWA.
 - Add Vite + TypeScript + Workbox before Phase 1 grows beyond the current single-page POC.
@@ -67,6 +68,8 @@ Scope:
 - Lightweight frequency-ranked "Explore next" word prompt.
 - Diagnostics hidden behind an advanced panel.
 - PWA install/update behavior that reliably refreshes service worker assets.
+- Three built-in color schemes and saved theme selection.
+- Compact three-dot menu beside the search controls.
 
 Current implementation started:
 
@@ -81,6 +84,8 @@ Current implementation started:
 - Frequency-ranked "Explore next" prompt added.
 - Versioned app assets added to avoid stale service worker JavaScript/CSS.
 - Compact app menu added with app version, user-data format version, dictionary engine, sync status, memory-target note, export state, and update controls.
+- Three color schemes added: Calm teal, Ink focus, and Sunrise.
+- Menu moved beside the clear search button as a compact three-dot control.
 - URL-based automated search smoke added, for example `/?q=take%20off&report=1`.
 - End-user home screen compacted by removing always-visible developer/status panels.
 - Recent searches now appear on search-input focus and disappear once a recent term is selected.
@@ -148,6 +153,8 @@ Current implementation started:
 - Missing the first-attempt quiz saves the word to the vocabulary list for future review.
 - Study events are encrypted in the local user store and include term, inferred rating/result, timestamp, and device id.
 - Browser smoke verified due review, app-inferred FSRS rating, proactive new-word quiz, stats updates, and iPhone-width layout.
+- Diagnostics debug speed added: one review day elapses every 20 seconds and debug-created data is purged when disabled.
+- Automated review, quiz, and FSRS-rating checks added to the browser test suite.
 
 Exit criteria:
 
@@ -180,6 +187,7 @@ Scope:
 
 - Google OAuth with PKCE.
 - First-install Google sign-in prompt with a clear Skip option for offline-only use.
+- Current implementation surface can load Google Identity Services and connect when `wordlover-config.js` contains a production OAuth client ID.
 - Encrypted full snapshot upload/download.
 - Sync status: synced, pending, failed, offline.
 - Conflict-safe merge or restore prompt.
@@ -199,6 +207,7 @@ Scope:
 - AI provider abstraction.
 - Gemini default no-additional-fee path if feasible.
 - Gemini access should reuse the signed-in Google account when feasible and remain optional/online-only.
+- Current implementation surface adds a Gemini details button to dictionary results and calls the configured Gemini model after Google auth succeeds.
 - Optional ChatGPT/OpenAI provider.
 - Structured examples, cloze sentences, common phrases, and follow-up prompts.
 - User can save AI-assisted content separately from dictionary/user-edited meanings.

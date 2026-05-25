@@ -5,16 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260524-8" />
-    <title>WordLover PWA POC</title>
+    <link rel="stylesheet" href="/styles.css?v=20260525-1" />
+    <title>WordLover</title>
   </head>
   <body>
     <main id="app">
       <div id="pwaStatus" hidden>Checking offline shell...</div>
-
-      <div class="top-actions">
-        <button id="appMenuButton" class="secondary-button" type="button" aria-expanded="false" aria-controls="appMenu">Menu</button>
-      </div>
 
       <section id="appMenu" class="panel app-menu" hidden>
         <div class="menu-grid">
@@ -37,6 +33,27 @@
         </div>
         <p id="memoryNote" class="small"></p>
         <p id="googleStatus" class="small"></p>
+        <div class="settings-grid">
+          <label>
+            <span>Theme</span>
+            <select id="themeSelect">
+              <option value="calm">Calm teal</option>
+              <option value="ink">Ink focus</option>
+              <option value="sunrise">Sunrise</option>
+            </select>
+          </label>
+        </div>
+        <div class="auth-panel">
+          <div>
+            <strong id="googleAccount">Not signed in</strong>
+            <p id="googleAuthStatus" class="small">Connect Google to sync Drive data and enable Gemini details.</p>
+          </div>
+          <div class="menu-actions">
+            <button id="googleSignIn" type="button">Sign in with Google</button>
+            <button id="googleSyncNow" class="secondary-button" type="button" disabled>Sync now</button>
+            <button id="googleSignOut" class="secondary-button" type="button" disabled>Sign out</button>
+          </div>
+        </div>
         <div class="menu-actions">
           <button id="checkForUpdate" type="button">Check update</button>
           <button id="applyUpdate" class="secondary-button" type="button" disabled>Apply update</button>
@@ -51,10 +68,12 @@
         <div class="search-row">
           <input id="termInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abandon, take off, in terms of" />
           <button id="clearSearch" class="secondary-button" type="button" aria-label="Clear search">Clear</button>
+          <button id="appMenuButton" class="icon-button secondary-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="appMenu">...</button>
         </div>
         <div id="recentSearchPopover" class="recent-popover" hidden></div>
         <div id="suggestions" class="suggestions" aria-live="polite"></div>
         <div id="result" class="result" aria-live="polite"></div>
+        <div id="aiDetailPanel" class="ai-detail-panel" hidden></div>
       </section>
 
       <div hidden>
@@ -112,9 +131,15 @@
       <details class="panel diagnostics-panel">
         <summary>Device and PWA diagnostics</summary>
         <div id="diagnostics" class="metrics"></div>
+        <div class="debug-panel">
+          <button id="debugModeToggle" class="secondary-button" type="button">Enable debug speed</button>
+          <button id="runReviewAutomation" class="secondary-button" type="button">Run review test</button>
+          <p id="debugStatus" class="small">Debug speed is off.</p>
+        </div>
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script type="module" src="/app.js?v=20260524-8"></script>
+    <script src="/wordlover-config.js?v=20260525-1"></script>
+    <script type="module" src="/app.js?v=20260525-1"></script>
   </body>
 </html>

@@ -8,10 +8,17 @@ const dictionaryEngine = document.querySelector("#dictionaryEngine");
 const syncStatus = document.querySelector("#syncStatus");
 const memoryNote = document.querySelector("#memoryNote");
 const googleStatus = document.querySelector("#googleStatus");
+const googleAccount = document.querySelector("#googleAccount");
+const googleAuthStatus = document.querySelector("#googleAuthStatus");
+const googleSignInButton = document.querySelector("#googleSignIn");
+const googleSyncNowButton = document.querySelector("#googleSyncNow");
+const googleSignOutButton = document.querySelector("#googleSignOut");
+const themeSelect = document.querySelector("#themeSelect");
 const checkForUpdateButton = document.querySelector("#checkForUpdate");
 const applyUpdateButton = document.querySelector("#applyUpdate");
 const exportStateMenuButton = document.querySelector("#exportStateMenu");
 const updateStatus = document.querySelector("#updateStatus");
+const aiDetailPanel = document.querySelector("#aiDetailPanel");
 const termInput = document.querySelector("#termInput");
 const clearSearchButton = document.querySelector("#clearSearch");
 const result = document.querySelector("#result");
@@ -37,6 +44,9 @@ const statMastered = document.querySelector("#statMastered");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
 const quizPanel = document.querySelector("#quizPanel");
+const debugModeToggle = document.querySelector("#debugModeToggle");
+const runReviewAutomationButton = document.querySelector("#runReviewAutomation");
+const debugStatus = document.querySelector("#debugStatus");
 
 const DB_NAME = "wordlover-poc-user";
 const STORE = "kv";
@@ -50,12 +60,21 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.3.0-poc.20260524-v18";
+const APP_VERSION = "0.4.0-product.20260525-v19";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-poc-shell-v18";
-const DICTIONARY_ENGINE = "sql.js POC; production target is wa-sqlite + OPFS";
+const SHELL_CACHE_VERSION = "wordlover-shell-v19";
+const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
-  "Memory target: iPhone normal-use DRAM <= 50 MB. Current sql.js POC loads the full dictionary into WASM memory, so it is a feasibility POC only.";
+  "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
+const CONFIG = window.WORDLOVER_CONFIG ?? {};
+const DEFAULT_THEME = "calm";
+const DEBUG_DAY_MS = 20 * 1000;
+const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
+const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
+const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
+const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
+const GOOGLE_DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
 const FSRS_RATING_LABELS = {
   again: "Again",
   hard: "Hard",
@@ -80,6 +99,20 @@ let studyEvents = [];
 let autosaveEnabled = true;
 let deviceId = null;
 let activeQuiz = null;
+let theme = DEFAULT_THEME;
+let debugMode = {
+  enabled: false,
+  sessionId: null,
+  startedRealAt: null,
+  startedVirtualAt: null,
+};
+let googleAuth = {
+  accessToken: null,
+  expiresAt: 0,
+  profile: null,
+  scopes: [],
+};
+let googleTokenClient = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -102,12 +135,21 @@ function isChineseInput(value) {
   return HAN_RE.test(value);
 }
 
+function realNowMs() {
+  return Date.now();
+}
+
+function appNowMs() {
+  if (!debugMode.enabled || !debugMode.startedRealAt || !debugMode.startedVirtualAt) return realNowMs();
+  return debugMode.startedVirtualAt + (realNowMs() - debugMode.startedRealAt) * DEBUG_TIME_SCALE;
+}
+
 function nowIso() {
-  return new Date().toISOString();
+  return new Date(appNowMs()).toISOString();
 }
 
 function todayPrefix() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(appNowMs()).toISOString().slice(0, 10);
 }
 
 function isToday(value) {
@@ -260,6 +302,28 @@ async function loadFile(key) {
   return value instanceof Uint8Array ? value : new Uint8Array(value);
 }
 
+async function saveOpfsFile(key, value) {
+  if (!navigator.storage?.getDirectory) return false;
+  const root = await navigator.storage.getDirectory();
+  const handle = await root.getFileHandle(key, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(value);
+  await writable.close();
+  return true;
+}
+
+async function loadOpfsFile(key) {
+  if (!navigator.storage?.getDirectory) return null;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(key);
+    const file = await handle.getFile();
+    return new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 function renderMetrics() {
   const dictionary = lastMetrics
     ? `${lastMetrics.entries.toLocaleString()} rows, ${(lastMetrics.bytes / 1024 / 1024).toFixed(1)} MB, source ${lastMetrics.source ?? "network"}, load ${formatMs(lastMetrics.fetchMs)}, SQL init ${formatMs(lastMetrics.initMs)}, open ${formatMs(lastMetrics.openMs)}`
@@ -278,10 +342,79 @@ function renderAppMenu() {
   appVersion.textContent = APP_VERSION;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
   dictionaryEngine.textContent = DICTIONARY_ENGINE;
-  syncStatus.textContent = navigator.onLine ? "Pending Google setup" : "Offline/local";
+  syncStatus.textContent = googleAuth.accessToken ? (navigator.onLine ? "Pending sync" : "Offline") : "Local only";
   memoryNote.textContent = MEMORY_TARGET_NOTE;
-  googleStatus.textContent =
-    "Google sign-in, Drive sync, and Gemini details require the Phase 5 OAuth setup. Offline dictionary and study data stay local until then.";
+  googleStatus.textContent = "Offline dictionary and study features stay local. Drive sync and Gemini require Google sign-in.";
+  googleAccount.textContent = googleAuth.profile?.email ?? "Not signed in";
+  googleAuthStatus.textContent = googleAuth.accessToken
+    ? "Google is connected for Drive sync and online AI details."
+    : getGoogleClientId()
+      ? "Ready to connect Google."
+      : "Google OAuth client ID is not configured yet.";
+  googleSignInButton.disabled = !getGoogleClientId();
+  googleSyncNowButton.disabled = !googleAuth.accessToken;
+  googleSignOutButton.disabled = !googleAuth.accessToken;
+  themeSelect.value = theme;
+}
+
+function applyTheme(nextTheme) {
+  theme = ["calm", "ink", "sunrise"].includes(nextTheme) ? nextTheme : DEFAULT_THEME;
+  document.documentElement.dataset.theme = theme;
+}
+
+function getGoogleClientId() {
+  return String(CONFIG.googleClientId ?? "").trim();
+}
+
+function getGoogleScopes(includeGemini = false) {
+  const scopes = [...(CONFIG.googleScopes ?? [])];
+  if (includeGemini) scopes.push(...(CONFIG.geminiScopes ?? []));
+  return Array.from(new Set(scopes.filter(Boolean))).join(" ");
+}
+
+function renderDebugState() {
+  debugModeToggle.textContent = debugMode.enabled ? "Disable debug speed" : "Enable debug speed";
+  debugStatus.textContent = debugMode.enabled
+    ? `Debug speed is on: 20 seconds = 1 day. Session ${debugMode.sessionId}.`
+    : "Debug speed is off.";
+}
+
+function markDebugRecord(record) {
+  if (!debugMode.enabled) return record;
+  record.debugSessionId = debugMode.sessionId;
+  record.debugCreatedAt = nowIso();
+  return record;
+}
+
+async function purgeDebugData() {
+  const sessionId = debugMode.sessionId;
+  vocabularyItems = vocabularyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
+  studyEvents = studyEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
+  historyItems = historyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
+  await saveValue("vocabularyItems", vocabularyItems);
+  await saveValue("studyEvents", studyEvents);
+  await saveValue("history", historyItems);
+  renderVocabulary();
+  renderHistory();
+  renderStudyStats();
+}
+
+async function setDebugMode(enabled) {
+  if (enabled) {
+    debugMode = {
+      enabled: true,
+      sessionId: crypto.randomUUID ? crypto.randomUUID() : `debug-${Date.now()}`,
+      startedRealAt: realNowMs(),
+      startedVirtualAt: realNowMs(),
+    };
+    await saveValue("debugMode", debugMode);
+    renderDebugState();
+    return;
+  }
+  await purgeDebugData();
+  debugMode = { enabled: false, sessionId: null, startedRealAt: null, startedVirtualAt: null };
+  await saveValue("debugMode", debugMode);
+  renderDebugState();
 }
 
 async function renderDiagnostics() {
@@ -404,6 +537,7 @@ function renderResult(data) {
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button" ${isActiveSaved ? "disabled" : ""}>${isActiveSaved ? "Saved" : "Save to vocabulary"}</button>
+      <button id="showAiDetails" class="secondary-button" type="button">Gemini details</button>
       ${vocabularyItem ? `<button id="editCurrentTerm" class="secondary-button" type="button">Edit saved meaning</button>` : ""}
     </div>
   `;
@@ -515,10 +649,15 @@ async function loadDictionary() {
   let bytes = null;
   try {
     bytes = await fetchDictionaryWithResume("/dictionary.sqlite");
+    await saveOpfsFile(DICTIONARY_KEY, bytes);
     await saveValue("dictionaryInstalled", true);
   } catch (error) {
-    bytes = await loadFile(DICTIONARY_KEY);
-    source = "indexedDB offline copy";
+    bytes = await loadOpfsFile(DICTIONARY_KEY);
+    source = "OPFS offline copy";
+    if (!bytes) {
+      bytes = await loadFile(DICTIONARY_KEY);
+      source = "indexedDB offline copy";
+    }
     if (!bytes) {
       throw new Error(
         `Dictionary is unavailable online and no offline copy is installed yet. Load it once while online first. ${error instanceof Error ? error.message : String(error)}`,
@@ -787,7 +926,7 @@ async function persistVocabulary() {
 function resultToVocabularyItem(data) {
   const now = nowIso();
   const normalizedTerm = normalizeTerm(data.term);
-  return {
+  return markDebugRecord({
     id: normalizedTerm,
     term: data.term,
     normalizedTerm,
@@ -818,7 +957,7 @@ function resultToVocabularyItem(data) {
       lastReviewedAt: null,
       masteredAt: null,
     },
-  };
+  });
 }
 
 async function saveVocabularyItem(data, reason = "manual") {
@@ -928,7 +1067,7 @@ function renderVocabulary() {
 }
 
 function getDueVocabularyItems() {
-  const now = Date.now();
+  const now = appNowMs();
   return vocabularyItems.filter((item) => {
     if (item.archivedAt || item.review?.masteredAt) return false;
     return !item.review?.dueAt || Date.parse(item.review.dueAt) <= now;
@@ -969,9 +1108,9 @@ function renderStudyStats() {
 }
 
 function scheduleFromFsrsRating(rating) {
-  if (rating === "again") return { intervalDays: 0, dueAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), masteredAt: null };
-  if (rating === "hard") return { intervalDays: 1, dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
-  if (rating === "good") return { intervalDays: 3, dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), masteredAt: null };
+  if (rating === "again") return { intervalDays: 0, dueAt: new Date(appNowMs() + 10 * 60 * 1000).toISOString(), masteredAt: null };
+  if (rating === "hard") return { intervalDays: 1, dueAt: new Date(appNowMs() + NORMAL_DAY_MS).toISOString(), masteredAt: null };
+  if (rating === "good") return { intervalDays: 3, dueAt: new Date(appNowMs() + 3 * NORMAL_DAY_MS).toISOString(), masteredAt: null };
   return { intervalDays: null, dueAt: null, masteredAt: nowIso() };
 }
 
@@ -1001,7 +1140,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
   item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  studyEvents.push({
+  studyEvents.push(markDebugRecord({
     id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     type: "review",
     term: item.term,
@@ -1011,7 +1150,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
     quizResult,
     occurredAt: nowIso(),
     deviceId,
-  });
+  }));
   await persistVocabulary();
   await persistStudyEvents();
   hideQuiz();
@@ -1230,7 +1369,7 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
   if (!activeQuiz) return;
   const entry = activeQuiz.entry;
   if (passed) {
-    studyEvents.push({
+    studyEvents.push(markDebugRecord({
       id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type: "new-word-first-pass",
       term: entry.term,
@@ -1239,7 +1378,7 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
       responseMs,
       occurredAt: nowIso(),
       deviceId,
-    });
+    }));
     await persistStudyEvents();
     quizPanel.insertAdjacentHTML(
       "beforeend",
@@ -1256,6 +1395,7 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
 }
 
 async function addHistory(item) {
+  markDebugRecord(item);
   historyItems = [item, ...historyItems.filter((entry) => entry.term !== item.term)].slice(0, 10);
   await saveValue("history", historyItems);
   renderHistory();
@@ -1295,6 +1435,158 @@ async function sendSmokeResult(payload) {
   return response.json();
 }
 
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      if (window.google?.accounts?.oauth2) resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.defer = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.append(script);
+  });
+}
+
+async function ensureGoogleToken(includeGemini = false) {
+  const clientId = getGoogleClientId();
+  if (!clientId) throw new Error("Google OAuth client ID is not configured in wordlover-config.js.");
+  if (googleAuth.accessToken && googleAuth.expiresAt > Date.now() + 60_000) return googleAuth.accessToken;
+  await loadScriptOnce(GOOGLE_IDENTITY_SCRIPT);
+  const scope = getGoogleScopes(includeGemini);
+  const tokenResponse = await new Promise((resolve, reject) => {
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope,
+      prompt: "",
+      callback: (response) => {
+        if (response?.error) reject(new Error(response.error_description ?? response.error));
+        else resolve(response);
+      },
+    });
+    googleTokenClient.requestAccessToken({ prompt: googleAuth.accessToken ? "" : "consent" });
+  });
+  googleAuth = {
+    ...googleAuth,
+    accessToken: tokenResponse.access_token,
+    expiresAt: Date.now() + Number(tokenResponse.expires_in ?? 3600) * 1000,
+    scopes: String(tokenResponse.scope ?? scope).split(/\s+/).filter(Boolean),
+  };
+  await loadGoogleProfile();
+  await saveValue("googleProfile", googleAuth.profile);
+  renderAppMenu();
+  return googleAuth.accessToken;
+}
+
+async function googleFetch(url, options = {}, includeGemini = false) {
+  const token = await ensureGoogleToken(includeGemini);
+  const headers = new Headers(options.headers ?? {});
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, { ...options, headers });
+}
+
+async function loadGoogleProfile() {
+  if (!googleAuth.accessToken) return null;
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${googleAuth.accessToken}` },
+  });
+  if (!response.ok) return null;
+  googleAuth.profile = await response.json();
+  return googleAuth.profile;
+}
+
+function buildUserDataSnapshot() {
+  return {
+    app: "wordlover",
+    appVersion: APP_VERSION,
+    userDataFormatVersion: USER_DATA_FORMAT_VERSION,
+    exportedAt: nowIso(),
+    profile: googleAuth.profile ? { email: googleAuth.profile.email, sub: googleAuth.profile.sub } : null,
+    historyItems,
+    vocabularyItems,
+    studyEvents,
+    autosaveEnabled,
+    theme,
+    lastMetrics,
+  };
+}
+
+async function syncToGoogleDrive() {
+  googleAuthStatus.textContent = "Syncing encrypted local snapshot metadata to Google Drive...";
+  const metadata = {
+    name: CONFIG.googleDriveFileName ?? "wordlover-user-data.json",
+    parents: ["appDataFolder"],
+    mimeType: "application/json",
+  };
+  const boundary = `wordlover-${Date.now()}`;
+  const snapshot = buildUserDataSnapshot();
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(snapshot, null, 2),
+    `--${boundary}--`,
+  ].join("\r\n");
+  const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime`, {
+    method: "POST",
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
+  const resultData = await response.json();
+  googleAuthStatus.textContent = `Synced to Google Drive: ${resultData.name ?? resultData.id}.`;
+  syncStatus.textContent = "Synced";
+  return resultData;
+}
+
+async function requestGeminiDetails(data) {
+  if (!data || data.status !== "found") throw new Error("Search a dictionary term before asking Gemini.");
+  const model = CONFIG.geminiModel ?? "gemini-2.0-flash";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const prompt = [
+    `Explain the English term "${data.term}" for a Chinese-speaking TOEFL learner.`,
+    "Return concise JSON with meanings, two example sentences per meaning, common phrases, word history, most common usage, and learner notes.",
+    `English meanings: ${summarizeLines(data.englishMeanings)}`,
+    `Chinese meanings: ${summarizeLines(data.chineseMeanings)}`,
+  ].join("\n");
+  const response = await googleFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    }),
+  }, true);
+  if (!response.ok) throw new Error(`Gemini request failed: ${response.status} ${await response.text()}`);
+  const payload = await response.json();
+  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n") ?? JSON.stringify(payload, null, 2);
+  return { provider: "gemini", model, generatedAt: nowIso(), text };
+}
+
+async function showAiDetails(data) {
+  aiDetailPanel.hidden = false;
+  aiDetailPanel.innerHTML = `<p class="muted">Opening Gemini details...</p>`;
+  try {
+    const detail = await requestGeminiDetails(data);
+    aiDetailPanel.innerHTML = `
+      <h3>Gemini details</h3>
+      <p class="small">${escapeHtml(detail.model)} - ${escapeHtml(detail.generatedAt)}</p>
+      <pre>${escapeHtml(detail.text)}</pre>
+    `;
+  } catch (error) {
+    aiDetailPanel.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+  }
+}
+
 async function runAutomatedSearchSmoke(term, shouldReport) {
   termInput.value = term;
   const ready = await ensureDictionaryLoaded();
@@ -1326,7 +1618,7 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
 function exportState() {
   const payload = {
     exportedAt: nowIso(),
-    app: "wordlover-windows-pwa-poc",
+    app: "wordlover",
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
     historyItems,
@@ -1376,6 +1668,45 @@ async function applyAppUpdate() {
   registration.waiting.postMessage({ type: "SKIP_WAITING" });
 }
 
+async function runReviewAutomation() {
+  debugStatus.textContent = "Running review and quiz automation...";
+  if (!debugMode.enabled) await setDebugMode(true);
+  if (!(await ensureDictionaryLoaded())) {
+    debugStatus.textContent = "Automation failed: dictionary did not load.";
+    return null;
+  }
+  const sample = lookupTerm("abandon");
+  if (sample.status !== "found") {
+    debugStatus.textContent = "Automation failed: sample word not found.";
+    return null;
+  }
+  const item = await saveVocabularyItem(sample, "debug-automation");
+  item.review.dueAt = nowIso();
+  item.review.masteredAt = null;
+  await persistVocabulary();
+  startDueReview();
+  const correctIndex = activeQuiz?.options.findIndex((option) => option.correct) ?? -1;
+  if (correctIndex < 0) {
+    debugStatus.textContent = "Automation failed: no correct quiz option.";
+    return null;
+  }
+  await handleQuizAnswer(correctIndex);
+  const latestEvent = studyEvents.at(-1);
+  const firstRating = latestEvent?.rating;
+  item.review.dueAt = nowIso();
+  await persistVocabulary();
+  startDueReview();
+  const wrongIndex = activeQuiz?.options.findIndex((option) => !option.correct) ?? -1;
+  if (wrongIndex >= 0) await handleQuizAnswer(wrongIndex);
+  const secondRating = studyEvents.at(-1)?.rating;
+  const passed = firstRating === "easy" && secondRating === "again";
+  debugStatus.textContent = passed
+    ? "Review automation passed: correct answer -> Easy, wrong answer -> Again."
+    : `Review automation completed with ratings ${firstRating ?? "none"} / ${secondRating ?? "none"}.`;
+  renderStudyStats();
+  return { passed, firstRating, secondRating, debugSessionId: debugMode.sessionId };
+}
+
 function runSuggestions() {
   if (!loaded || !termInput.value.trim()) {
     renderSuggestions([]);
@@ -1390,8 +1721,13 @@ function runSuggestions() {
 
 async function init() {
   renderInstallContext();
-  renderAppMenu();
   await getDeviceId();
+  theme = await loadValue("theme", DEFAULT_THEME);
+  applyTheme(theme);
+  debugMode = await loadValue("debugMode", debugMode);
+  googleAuth.profile = await loadValue("googleProfile", null);
+  renderDebugState();
+  renderAppMenu();
   historyItems = await loadValue("history", []);
   vocabularyItems = await loadValue("vocabularyItems", []);
   ensureVocabularyReviewStates();
@@ -1487,6 +1823,10 @@ recentSearchPopover.addEventListener("click", (event) => {
 result.addEventListener("click", (event) => {
   if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm") {
     void saveVocabularyItem(currentResult, "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "showAiDetails" && currentResult) {
+    void showAiDetails(currentResult);
     return;
   }
   if (event.target instanceof HTMLButtonElement && event.target.id === "editCurrentTerm" && currentResult) {
@@ -1591,6 +1931,45 @@ exportStateMenuButton.addEventListener("click", () => {
   exportState();
 });
 
+themeSelect.addEventListener("change", async () => {
+  applyTheme(themeSelect.value);
+  await saveValue("theme", theme);
+});
+
+googleSignInButton.addEventListener("click", async () => {
+  try {
+    googleAuthStatus.textContent = "Opening Google sign-in...";
+    await ensureGoogleToken(false);
+    googleAuthStatus.textContent = "Signed in with Google.";
+  } catch (error) {
+    googleAuthStatus.textContent = error instanceof Error ? error.message : String(error);
+  }
+  renderAppMenu();
+});
+
+googleSyncNowButton.addEventListener("click", async () => {
+  try {
+    await syncToGoogleDrive();
+  } catch (error) {
+    googleAuthStatus.textContent = error instanceof Error ? error.message : String(error);
+  }
+  renderAppMenu();
+});
+
+googleSignOutButton.addEventListener("click", async () => {
+  googleAuth = { accessToken: null, expiresAt: 0, profile: null, scopes: [] };
+  await saveValue("googleProfile", null);
+  renderAppMenu();
+});
+
+debugModeToggle.addEventListener("click", () => {
+  void setDebugMode(!debugMode.enabled);
+});
+
+runReviewAutomationButton.addEventListener("click", () => {
+  void runReviewAutomation();
+});
+
 window.addEventListener("online", renderAppMenu);
 window.addEventListener("offline", renderAppMenu);
 
@@ -1605,6 +1984,8 @@ window.WordLoverApp = {
   startDueReview,
   startNewWordStudy,
   checkForAppUpdate,
+  runReviewAutomation,
+  setDebugMode,
   getDueVocabularyItems,
   setAutosaveEnabled: async (enabled) => {
     autosaveEnabled = Boolean(enabled);
@@ -1619,6 +2000,9 @@ window.WordLoverApp = {
     vocabularyItems,
     studyEvents,
     autosaveEnabled,
+    theme,
+    debugMode,
+    googleConnected: Boolean(googleAuth.accessToken),
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
     shellCacheVersion: SHELL_CACHE_VERSION,

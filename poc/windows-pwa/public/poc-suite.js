@@ -10,19 +10,20 @@ const AUTOMATION_DB = "wordlover-phase0-poc";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-poc-shell-v18";
+const SHELL_CACHE_NAME = "wordlover-shell-v19";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260524-8",
-  "/styles.css?v=20260524-8",
+  "/app.js?v=20260525-1",
+  "/styles.css?v=20260525-1",
+  "/wordlover-config.js?v=20260525-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/poc-suite.html",
-  "/poc-suite.js?v=20260524-10",
+  "/poc-suite.js?v=20260525-1",
 ];
 
 let lastResults = null;
@@ -171,6 +172,47 @@ function summarizeTiming(values) {
     medianMs: percentile(values, 50),
     p95Ms: percentile(values, 95),
     maxMs: Math.max(...values),
+  };
+}
+
+function inferFsrsRatingForTest(passed, responseMs) {
+  if (!passed) return "again";
+  if (responseMs <= 5000) return "easy";
+  if (responseMs <= 15000) return "good";
+  return "hard";
+}
+
+function scheduleFromFsrsRatingForTest(rating, nowMs, debugMode = false) {
+  const normalDayMs = 24 * 60 * 60 * 1000;
+  const debugDayMs = 20 * 1000;
+  const realDelay = (virtualMs) => (debugMode ? virtualMs / (normalDayMs / debugDayMs) : virtualMs);
+  if (rating === "again") return { dueInMs: realDelay(10 * 60 * 1000), mastered: false };
+  if (rating === "hard") return { dueInMs: realDelay(normalDayMs), mastered: false };
+  if (rating === "good") return { dueInMs: realDelay(3 * normalDayMs), mastered: false };
+  return { dueInMs: null, mastered: true, masteredAt: new Date(nowMs).toISOString() };
+}
+
+function runReviewQuizRatingTests() {
+  const ratings = [
+    { name: "wrong answer maps to Again", actual: inferFsrsRatingForTest(false, 700), expected: "again" },
+    { name: "fast correct answer maps to Easy", actual: inferFsrsRatingForTest(true, 2500), expected: "easy" },
+    { name: "medium correct answer maps to Good", actual: inferFsrsRatingForTest(true, 9000), expected: "good" },
+    { name: "slow correct answer maps to Hard", actual: inferFsrsRatingForTest(true, 20000), expected: "hard" },
+  ];
+  const nowMs = Date.now();
+  const debugHard = scheduleFromFsrsRatingForTest("hard", nowMs, true);
+  const normalHard = scheduleFromFsrsRatingForTest("hard", nowMs, false);
+  const scheduleChecks = [
+    { name: "debug hard due is about 20 seconds", pass: debugHard.dueInMs >= 19_000 && debugHard.dueInMs <= 21_000 },
+    { name: "normal hard due is about one day", pass: normalHard.dueInMs === 24 * 60 * 60 * 1000 },
+    { name: "easy marks mastered", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true).mastered === true },
+  ];
+  const ratingPass = ratings.every((item) => item.actual === item.expected);
+  const schedulePass = scheduleChecks.every((item) => item.pass);
+  return {
+    passed: ratingPass && schedulePass,
+    ratings,
+    scheduleChecks,
   };
 }
 
@@ -527,6 +569,9 @@ async function runAllPocs() {
   addProgress("Running mock Google Drive encrypted snapshot sync POC.");
   const mockSync = await runMockGoogleDriveSyncPoc(exportImport);
 
+  addProgress("Running review, quiz, and FSRS-rating automation tests.");
+  const reviewQuizRating = runReviewQuizRatingTests();
+
   addProgress("Recording iPhone and Windows device coverage status.");
   const deviceCoverage = {
     windowsPoc: diagnostics.platform?.startsWith("Win") ? "executed-on-windows-browser" : "not-windows-browser",
@@ -544,6 +589,7 @@ async function runAllPocs() {
       offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
+      reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
       androidDeferred: "deferred-until-end",
       timedBenchmark: benchmark.timing.p95Ms < 1000 ? "pass" : "fail",
     },
@@ -564,6 +610,7 @@ async function runAllPocs() {
     opfsPersistence: opfs,
     exportImport,
     mockGoogleDriveSync: mockSync,
+    reviewQuizRating,
     deviceCoverage,
   };
   await saveStoreValue(KV_STORE, "lastResults", results);

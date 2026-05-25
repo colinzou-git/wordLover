@@ -69,6 +69,8 @@ PWA install documentation should include:
 
 Installing on an additional iPhone follows the same pattern: open the trusted HTTPS app URL in Safari, install to the Home Screen, launch once online, complete local dictionary installation, then verify that search works after Wi-Fi and cellular data are disabled. The app shell, dictionary package, user database, checkpoints, and export/recovery functions must live on that iPhone after setup. Only cloud sync and AI provider calls may require internet.
 
+Product install target: local development may require a certificate profile, but the product must not. The production path should be one user-visible step where possible and at most two: open the trusted HTTPS WordLover URL, then add/open the Home Screen app.
+
 ## Browser Capability Requirements
 
 Because the app is PWA-first, implementation must account for browser limitations:
@@ -262,6 +264,8 @@ Current status:
 Production direction:
 
 - Prefer `wa-sqlite` with an OPFS VFS so SQLite page cache controls memory and the full dictionary is not loaded into JS heap.
+- Treat "WA/SingleNAND plus OPFS" as the product direction of WebAssembly SQLite backed by the iPhone's local storage through OPFS, with dictionary reads paged from local persistent storage instead of copied into a giant JavaScript buffer.
+- The current app shell now exposes an OPFS-aware dictionary-engine status and stores dictionary packages durably, but the actual production `wa-sqlite` OPFS query engine still needs to replace the `sql.js` full-buffer runtime before the 50 MB memory requirement can be closed.
 - Keep a sharded dictionary package as fallback if OPFS is unavailable or older iPhones still exceed the memory budget.
 - Isolate dictionary access behind a `DictionaryRepository` interface so the UI, vocabulary, and quiz code do not depend on `sql.js`.
 - Treat the memory benchmark as a blocking Phase 0/early Phase 1 gate before scaling the dictionary UI further.
@@ -533,6 +537,7 @@ PWA implementation options:
 - AI must remain optional; local dictionary and learning flows continue without any AI provider.
 - Request structured JSON output from AI providers whenever possible and validate it before display or save.
 - Gemini integration requires an explicitly configured Google Cloud OAuth/client setup and whatever Google API consent or quota model is available for the chosen Gemini path. The app must not imply that offline dictionary/study features depend on Gemini.
+- Current implementation surface: the app loads Google Identity Services when a `googleClientId` is configured, requests Drive/profile scopes for sign-in, can upload a user snapshot to Drive app data, and adds a Gemini details button to dictionary results. Without a configured OAuth client ID, the UI remains local-only and explains the missing setup.
 
 AI structured output shape:
 
@@ -857,6 +862,23 @@ Design tactics:
 - Keep encrypted user data repository separate from dictionary package.
 - Run compression, encryption, import/export, and sync packaging in Web Workers where possible.
 
+## Themes And Debug Test Mode
+
+The app supports at least three local themes:
+
+- Calm teal.
+- Ink focus.
+- Sunrise.
+
+Theme selection is stored in encrypted local user settings and should later sync as part of user settings.
+
+Debug review mode:
+
+- Lives under diagnostics, not in the primary study UI.
+- Speeds review time so one day elapses every 20 seconds.
+- Tags debug-created vocabulary, history, and study events with a debug session ID.
+- On disable, purges records from that debug session so test data does not pollute real study progress.
+
 ## Offline Behavior
 
 Works offline:
@@ -938,7 +960,8 @@ Validation report contents:
 | Security and privacy | 149-154 |
 | Accessibility | 155-156 |
 | Performance | 143-144, 173-174 |
-| Setup, dictionary update, compatibility, and Phase 0 validation | 160-168, 178-179 |
+| Setup, dictionary update, compatibility, and Phase 0 validation | 160-168, 178-181 |
+| Theme, compact UI, diagnostics debug mode, and test automation | 182-186 |
 | Review grace and AI structured output | 169-170 |
 
 ## Implementation Phases

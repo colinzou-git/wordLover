@@ -6,7 +6,9 @@ For exact timed results on iPhone, open `/poc-suite.html` from Safari or the Hom
 
 Offline update: the first iPhone offline test showed that the app shell starts without Wi-Fi, but dictionary load/search did not work because the original POC fetched the dictionary from the Windows server each time. The POC now saves the dictionary to IndexedDB after an online load and falls back to that offline copy when network fetch fails.
 
-Memory update: the current POC does not prove the <= 50 MB iPhone DRAM target. It uses `sql.js`, which loads the full 206 MB SQLite file into JS/WASM memory. Treat this as a functionality and latency POC only. Production must validate `wa-sqlite`+OPFS or a sharded dictionary package with Safari Web Inspector or Xcode Instruments before accepting the dictionary engine.
+Memory update: the current local app does not prove the <= 50 MB iPhone DRAM target. It still uses `sql.js`, which loads the full 206 MB SQLite file into JS/WASM memory. The app now stores the dictionary package in OPFS when available before falling back to IndexedDB, but production must replace the query engine with `wa-sqlite`+OPFS or a sharded dictionary package and validate memory with Safari Web Inspector or Xcode Instruments before accepting the dictionary engine.
+
+Product install target: the production iPhone install must not use the local certificate workflow. It should be one step where possible and at most two steps: open the trusted HTTPS WordLover URL, then Add to Home Screen/open the app. The certificate steps below are only for local Windows-hosted development.
 
 This POC tests the real iPhone Safari/Home Screen PWA risks:
 
