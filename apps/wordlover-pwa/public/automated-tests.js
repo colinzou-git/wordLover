@@ -10,20 +10,20 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v28";
+const SHELL_CACHE_NAME = "wordlover-shell-v29";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-10",
-  "/styles.css?v=20260525-10",
-  "/wordlover-config.js?v=20260525-10",
+  "/app.js?v=20260525-11",
+  "/styles.css?v=20260525-11",
+  "/wordlover-config.js?v=20260525-11",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260525-10",
+  "/automated-tests.js?v=20260525-11",
 ];
 
 let lastResults = null;
@@ -667,11 +667,34 @@ async function runMainAppStudySmoke() {
       }, 100);
     });
 
+    const statsButtons = [...frameDocument.querySelectorAll(".vocab-stat")];
+    const againButton = frameDocument.querySelector('[data-action="vocab-filter"][data-filter="again"]');
+    if (!statsButtons.length || !againButton) throw new Error("Main app study smoke did not render vocabulary status stats.");
+    const againCount = Number(againButton.querySelector("strong")?.textContent ?? 0);
+    if (againCount < 1) throw new Error(`Main app study smoke expected at least one Again word, found ${againCount}.`);
+    const listTextBefore = frameDocument.querySelector("#vocabularyList")?.textContent ?? "";
+    if (listTextBefore.includes("Missed on the first try")) {
+      throw new Error("Vocabulary summary should not expose quiz or meaning details before browsing.");
+    }
+    againButton.click();
+    const wordButtons = [...frameDocument.querySelectorAll('.vocab-word-list [data-action="vocab-select"]')];
+    if (!wordButtons.length) throw new Error("Main app study smoke did not list Again words after clicking the Again count.");
+    if (wordButtons.length > 10) throw new Error(`Vocabulary page listed ${wordButtons.length} words; expected at most 10.`);
+    const detailBefore = frameDocument.querySelector(".vocab-detail");
+    if (detailBefore) throw new Error("Vocabulary word details should stay hidden until a word is clicked.");
+    wordButtons[0].click();
+    const detailAfter = frameDocument.querySelector(".vocab-detail")?.textContent ?? "";
+    if (!detailAfter.trim()) throw new Error("Vocabulary word detail did not appear after clicking a word.");
+
     return {
       passed: Boolean(firstTerm && secondTerm && firstTerm !== secondTerm),
       firstTerm,
       secondTerm,
       missedSecondTermSaved: true,
+      vocabularyStatsRendered: true,
+      againCount,
+      pageWordCount: wordButtons.length,
+      detailRevealedAfterClick: true,
     };
   } finally {
     frame.remove();

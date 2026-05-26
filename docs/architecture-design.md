@@ -169,7 +169,7 @@ Responsibilities:
 - Versioned update flow that can safely migrate user data.
 - Home screen with top search input, daily stats, due-review button, and proactive new-word button.
 - Dictionary result detail view.
-- Vocabulary list, term detail, edit, archive, restore, and search/filter UI.
+- Vocabulary status dashboard, paged term browser, term detail, edit, archive, restore, and search/filter UI.
 - Review and quiz flows.
 - Fast Encoding Mode.
 - AI-assisted detail entry point wherever a term is displayed.

@@ -114,6 +114,8 @@ Scope:
 Current implementation started:
 
 - Vocabulary panel added to the PWA home screen.
+- Vocabulary panel now shows stats first instead of a full meaning list: total active words plus clickable Again, Hard, Good, and Easy counts.
+- Vocabulary browsing is paged at 10 words per screen; status-count browsing shows term text only until a word is clicked.
 - Manual save from the current dictionary result added.
 - Saved-state button prevents duplicate active entries.
 - Autosave setting added and persisted per user; valid dictionary results autosave only after an at-least-5-second dwell.

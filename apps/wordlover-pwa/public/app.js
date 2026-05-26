@@ -63,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.5.0-product.20260525-v28";
+const APP_VERSION = "0.5.1-product.20260525-v29";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v28";
+const SHELL_CACHE_VERSION = "wordlover-shell-v29";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -85,6 +85,8 @@ const FSRS_RATING_LABELS = {
   good: "Good",
   easy: "Easy",
 };
+const FSRS_RATINGS = Object.keys(FSRS_RATING_LABELS);
+const VOCABULARY_PAGE_SIZE = 10;
 const GEMINI_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -127,6 +129,11 @@ let autosaveEnabled = true;
 let deviceId = null;
 let activeQuiz = null;
 let theme = DEFAULT_THEME;
+let vocabularyView = {
+  filter: "summary",
+  page: 0,
+  selectedTerm: null,
+};
 let debugMode = {
   enabled: false,
   sessionId: null,
@@ -1328,36 +1335,143 @@ async function setVocabularyArchived(term, archived) {
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
 }
 
-function renderVocabulary() {
+function getVocabularyRating(item) {
+  const rating = item.review?.lastRating ?? "again";
+  return FSRS_RATING_LABELS[rating] ? rating : "again";
+}
+
+function getVocabularyRatingChangedAt(item) {
+  return item.review?.lastReviewedAt ?? item.updatedAt ?? item.savedAt ?? "";
+}
+
+function getVocabularyStats() {
   const active = vocabularyItems.filter((item) => !item.archivedAt);
   const archived = vocabularyItems.filter((item) => item.archivedAt);
-  vocabularySummary.textContent = `${active.length} active, ${archived.length} archived`;
-  if (!vocabularyItems.length) {
+  const counts = Object.fromEntries(FSRS_RATINGS.map((rating) => [rating, 0]));
+  active.forEach((item) => {
+    counts[getVocabularyRating(item)] += 1;
+  });
+  return { active, archived, counts };
+}
+
+function getVocabularyViewTitle(filter) {
+  if (filter === "all") return "All vocabulary";
+  if (FSRS_RATING_LABELS[filter]) return `${FSRS_RATING_LABELS[filter]} words`;
+  return "Vocabulary";
+}
+
+function getVocabularyViewItems(filter, active) {
+  const items = filter === "all" ? active : active.filter((item) => getVocabularyRating(item) === filter);
+  return [...items].sort((left, right) => {
+    if (filter !== "all") {
+      const rightChanged = getVocabularyRatingChangedAt(right);
+      const leftChanged = getVocabularyRatingChangedAt(left);
+      if (rightChanged !== leftChanged) return rightChanged.localeCompare(leftChanged);
+    }
+    return (right.savedAt ?? "").localeCompare(left.savedAt ?? "");
+  });
+}
+
+function renderVocabularyStats(stats) {
+  const total = stats.active.length;
+  const archivedText = stats.archived.length ? `, ${stats.archived.length} archived` : "";
+  vocabularySummary.textContent = `${total} saved${archivedText}`;
+  return `
+    <div class="vocab-stats" aria-label="Vocabulary status counts">
+      <button class="vocab-stat total" type="button" data-action="vocab-filter" data-filter="all">
+        <span>Total</span>
+        <strong>${total}</strong>
+      </button>
+      ${FSRS_RATINGS.map((rating) => `
+        <button class="vocab-stat" type="button" data-action="vocab-filter" data-filter="${rating}">
+          <span>${escapeHtml(FSRS_RATING_LABELS[rating])}</span>
+          <strong>${stats.counts[rating]}</strong>
+        </button>
+      `).join("")}
+    </div>
+    <div class="vocab-toolbar">
+      <button type="button" data-action="vocab-filter" data-filter="all">Browse other words</button>
+    </div>
+  `;
+}
+
+function renderVocabularyDetail(item) {
+  const english = summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings);
+  const chinese = summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings);
+  return `
+    <div class="vocab-detail">
+      <p>${escapeHtml(chinese)}</p>
+      <p>${escapeHtml(english)}</p>
+      <p class="vocab-meta">
+        ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - rating ${escapeHtml(FSRS_RATING_LABELS[getVocabularyRating(item)])}
+      </p>
+      <div class="vocab-actions">
+        <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Search</button>
+        <button class="secondary-button" type="button" data-action="edit" data-term="${escapeHtml(item.term)}">Edit</button>
+        <button class="secondary-button" type="button" data-action="archive" data-term="${escapeHtml(item.term)}">Archive</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderVocabularyBrowser(stats) {
+  const filter = vocabularyView.filter === "summary" ? "all" : vocabularyView.filter;
+  const items = getVocabularyViewItems(filter, stats.active);
+  const maxPage = Math.max(0, Math.ceil(items.length / VOCABULARY_PAGE_SIZE) - 1);
+  if (vocabularyView.page > maxPage) vocabularyView.page = maxPage;
+  if (vocabularyView.page < 0) vocabularyView.page = 0;
+  const start = vocabularyView.page * VOCABULARY_PAGE_SIZE;
+  const pageItems = items.slice(start, start + VOCABULARY_PAGE_SIZE);
+  const selectedItem = vocabularyView.selectedTerm ? getVocabularyItem(vocabularyView.selectedTerm) : null;
+  const rangeStart = items.length ? start + 1 : 0;
+  const rangeEnd = Math.min(start + VOCABULARY_PAGE_SIZE, items.length);
+
+  return `
+    <div class="vocab-browser">
+      <div class="vocab-browser-head">
+        <div>
+          <strong>${escapeHtml(getVocabularyViewTitle(filter))}</strong>
+          <p class="muted">${rangeStart}-${rangeEnd} of ${items.length}</p>
+        </div>
+        <button class="secondary-button" type="button" data-action="vocab-summary">Stats</button>
+      </div>
+      ${pageItems.length ? `
+        <ol class="vocab-word-list" start="${start + 1}">
+          ${pageItems.map((item) => {
+            const selected = selectedItem?.normalizedTerm === item.normalizedTerm;
+            return `
+              <li class="${selected ? "selected" : ""}">
+                <button type="button" data-action="vocab-select" data-term="${escapeHtml(item.term)}">${escapeHtml(item.term)}</button>
+                ${selected ? renderVocabularyDetail(item) : ""}
+              </li>
+            `;
+          }).join("")}
+        </ol>
+      ` : `<p class="muted">No words in this status yet.</p>`}
+      <div class="vocab-pager">
+        <button class="secondary-button" type="button" data-action="vocab-page" data-page="${vocabularyView.page - 1}" ${vocabularyView.page <= 0 ? "disabled" : ""}>Previous</button>
+        <span>Page ${vocabularyView.page + 1} of ${maxPage + 1}</span>
+        <button class="secondary-button" type="button" data-action="vocab-page" data-page="${vocabularyView.page + 1}" ${vocabularyView.page >= maxPage ? "disabled" : ""}>Next</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderVocabulary() {
+  const stats = getVocabularyStats();
+  if (!stats.active.length && !stats.archived.length) {
+    vocabularySummary.textContent = "No saved terms yet.";
     vocabularyList.innerHTML = `<p class="muted">Search a word and save it here. Autosave can add valid searches after a short pause.</p>`;
     return;
   }
-  vocabularyList.innerHTML = vocabularyItems
-    .map((item) => {
-      const english = summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings);
-      const chinese = summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings);
-      const archivedClass = item.archivedAt ? " archived" : "";
-      return `
-        <article class="vocab-item${archivedClass}" data-term="${escapeHtml(item.term)}">
-          <h3>${escapeHtml(item.term)}</h3>
-          <p>${escapeHtml(chinese)}</p>
-          <p>${escapeHtml(english)}</p>
-          <p class="vocab-meta">
-            ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - rating ${escapeHtml(FSRS_RATING_LABELS[item.review?.lastRating] ?? "Again")}${item.archivedAt ? " - archived" : ""}
-          </p>
-          <div class="vocab-actions">
-            <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Open</button>
-            <button class="secondary-button" type="button" data-action="edit" data-term="${escapeHtml(item.term)}">Edit</button>
-            <button class="secondary-button" type="button" data-action="${item.archivedAt ? "restore" : "archive"}" data-term="${escapeHtml(item.term)}">${item.archivedAt ? "Restore" : "Archive"}</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+  if (vocabularyView.filter !== "summary" && vocabularyView.selectedTerm) {
+    const selected = getVocabularyItem(vocabularyView.selectedTerm);
+    if (!selected || selected.archivedAt) vocabularyView.selectedTerm = null;
+  }
+  const statsHtml = renderVocabularyStats(stats);
+  vocabularyList.innerHTML = vocabularyView.filter === "summary"
+    ? statsHtml
+    : `${statsHtml}${renderVocabularyBrowser(stats)}`;
 }
 
 function getDueVocabularyItems() {
@@ -2384,13 +2498,41 @@ vocabularyList.addEventListener("click", (event) => {
   if (!(button instanceof HTMLButtonElement)) return;
   const term = button.dataset.term ?? "";
   const action = button.dataset.action;
+  if (action === "vocab-filter") {
+    vocabularyView = {
+      filter: button.dataset.filter ?? "all",
+      page: 0,
+      selectedTerm: null,
+    };
+    renderVocabulary();
+    return;
+  }
+  if (action === "vocab-summary") {
+    vocabularyView = { filter: "summary", page: 0, selectedTerm: null };
+    renderVocabulary();
+    return;
+  }
+  if (action === "vocab-page") {
+    vocabularyView.page = Number(button.dataset.page ?? 0);
+    vocabularyView.selectedTerm = null;
+    renderVocabulary();
+    return;
+  }
+  if (action === "vocab-select") {
+    vocabularyView.selectedTerm = vocabularyView.selectedTerm && normalizeTerm(vocabularyView.selectedTerm) === normalizeTerm(term) ? null : term;
+    renderVocabulary();
+    return;
+  }
   if (action === "open") {
     termInput.value = term;
     renderSuggestions([]);
     void runLookup();
   }
   if (action === "edit") void editVocabularyItem(term);
-  if (action === "archive") void setVocabularyArchived(term, true);
+  if (action === "archive") {
+    vocabularyView.selectedTerm = null;
+    void setVocabularyArchived(term, true);
+  }
   if (action === "restore") void setVocabularyArchived(term, false);
 });
 

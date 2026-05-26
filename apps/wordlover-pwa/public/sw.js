@@ -1,15 +1,15 @@
-const CACHE_NAME = "wordlover-shell-v28";
+const CACHE_NAME = "wordlover-shell-v29";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-10",
-  "/styles.css?v=20260525-10",
-  "/wordlover-config.js?v=20260525-10",
+  "/app.js?v=20260525-11",
+  "/styles.css?v=20260525-11",
+  "/wordlover-config.js?v=20260525-11",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260525-10",
+  "/automated-tests.js?v=20260525-11",
 ];
 
 self.addEventListener("install", (event) => {
