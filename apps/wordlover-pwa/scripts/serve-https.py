@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-class PocHandler(http.server.SimpleHTTPRequestHandler):
+class WordLoverHandler(http.server.SimpleHTTPRequestHandler):
     extensions_map = {
         **http.server.SimpleHTTPRequestHandler.extensions_map,
         ".wasm": "application/wasm",
@@ -22,16 +22,16 @@ class PocHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/__poc_results":
+        if parsed.path == "/__test_results":
             self._send_result_index()
             return
-        if parsed.path == "/__poc_results/latest":
+        if parsed.path == "/__test_results/latest":
             self._send_latest_result()
             return
         super().do_GET()
 
     def _results_dir(self):
-        return Path(__file__).resolve().parent / "received-results"
+        return Path(__file__).resolve().parents[1] / "received-results"
 
     def _send_json(self, payload, status=200):
         response = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
@@ -66,7 +66,7 @@ class PocHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/__poc_results":
+        if parsed.path != "/__test_results":
             self.send_error(404, "Not Found")
             return
 
@@ -87,22 +87,22 @@ class PocHandler(http.server.SimpleHTTPRequestHandler):
         device = "iphone" if "iPhone" in user_agent else "ipad" if "iPad" in user_agent else "browser"
         results_dir = self._results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
-        output_path = results_dir / f"{timestamp}-{device}-poc-results.json"
+        output_path = results_dir / f"{timestamp}-{device}-test-results.json"
         output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
         self._send_json({"ok": True, "path": str(output_path)})
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Serve the WordLover PWA POC over HTTPS.")
+    parser = argparse.ArgumentParser(description="Serve the WordLover PWA product app over HTTPS.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8443)
     parser.add_argument(
         "--public",
-        default=str(Path(__file__).resolve().parents[1] / "windows-pwa" / "public"),
+        default=str(Path(__file__).resolve().parents[1] / "public"),
     )
-    parser.add_argument("--cert", default=str(Path(__file__).resolve().parent / "certs" / "server-cert.pem"))
-    parser.add_argument("--key", default=str(Path(__file__).resolve().parent / "certs" / "server-key.pem"))
+    parser.add_argument("--cert", default=str(Path(__file__).resolve().parents[1] / "certs" / "server-cert.pem"))
+    parser.add_argument("--key", default=str(Path(__file__).resolve().parents[1] / "certs" / "server-key.pem"))
     args = parser.parse_args()
 
     public = Path(args.public).resolve()
@@ -113,7 +113,7 @@ def main():
     if not cert.exists() or not key.exists():
         raise SystemExit("HTTPS cert/key not found. Run create-local-ca-and-cert.ps1 first.")
 
-    handler = lambda *handler_args, **handler_kwargs: PocHandler(
+    handler = lambda *handler_args, **handler_kwargs: WordLoverHandler(
         *handler_args,
         directory=str(public),
         **handler_kwargs,

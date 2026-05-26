@@ -1,4 +1,4 @@
-# Windows PWA POC Results
+# Windows PWA validation Results
 
 Date: 2026-05-24
 
@@ -10,7 +10,7 @@ Environment:
 - Dictionary package: current generated `data/dictionary.sqlite`
 - SQLite runtime: vendored `sql.js` 1.13.0
 
-## What This POC Tests
+## What This validation Tests
 
 - Static PWA shell can load in a browser.
 - Service worker can register.
@@ -52,7 +52,7 @@ Fix:
 
 ## Feasibility Conclusion For Windows
 
-The Windows browser POC is promising as an automation and stress-test fallback for the iPhone-first product path:
+The Windows browser validation is promising as an automation and stress-test fallback for the iPhone-first product path:
 
 - The full current SQLite dictionary can be loaded in the browser.
 - Once loaded, exact local lookups are far below the 1-second requirement.
@@ -62,25 +62,25 @@ The Windows browser POC is promising as an automation and stress-test fallback f
 
 Follow-up iPhone validation:
 
-- The next POC on a real iPhone 17 Pro was reported successful on 2026-05-24.
+- The next validation on a real iPhone 17 Pro was reported successful on 2026-05-24.
 - The web app starts fast and loads the dictionary fast on iPhone.
 - This reduces the biggest SQLite WASM feasibility risk.
 
 The main remaining feasibility risks are now persistence and production hardening:
 
-- `sql.js` loads the full database into memory; this worked in the POCs, but older phones still need timed validation.
-- Production must persist the dictionary package in IndexedDB or OPFS, not rely on HTTP cache. The POC now validates IndexedDB fallback on Windows and needs the same iPhone retest.
+- `sql.js` loads the full database into memory; this worked in the validations, but older phones still need timed validation.
+- Production must persist the dictionary package in IndexedDB or OPFS, not rely on HTTP cache. The validation now validates IndexedDB fallback on Windows and needs the same iPhone retest.
 - The production architecture should still evaluate `wa-sqlite` with OPFS VFS only after the iPhone IndexedDB path is measured, because iPhone is the primary target.
 - Keep the sharded fallback described in `docs/architecture-design.md`, but do not activate it unless persistence, memory, or older-device performance fails.
 
 ## How To Run
 
 ```powershell
-Copy-Item data\dictionary.sqlite poc\windows-pwa\public\dictionary.sqlite -Force
-New-Item -ItemType Directory -Force poc\windows-pwa\public\vendor
-Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.js -OutFile poc\windows-pwa\public\vendor\sql-wasm.js
-Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.wasm -OutFile poc\windows-pwa\public\vendor\sql-wasm.wasm
-cd poc\windows-pwa\public
+Copy-Item data\dictionary.sqlite apps\wordlover-pwa\public\dictionary.sqlite -Force
+New-Item -ItemType Directory -Force apps\wordlover-pwa\public\vendor
+Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.js -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.js
+Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.wasm -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.wasm
+cd apps\wordlover-pwa\public
 python -m http.server 4173
 ```
 

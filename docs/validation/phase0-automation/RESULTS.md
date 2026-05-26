@@ -1,4 +1,4 @@
-# Phase 0 Automated POC Results
+# Phase 0 Automated Validation Results
 
 Date: 2026-05-24
 
@@ -6,35 +6,35 @@ Environment:
 
 - Windows PC
 - Browser surface: Codex in-app browser, Chromium/Electron
-- URL: `http://127.0.0.1:4173/poc-suite.html`
+- URL: `http://127.0.0.1:4173/automated-tests.html`
 - Dictionary package: current generated `dictionary.sqlite`
 - SQLite runtime: vendored `sql.js` 1.13.0
-- Result JSON: `poc/phase0-automation/windows-browser-results-2026-05-24.json`
+- Result JSON: `docs/validation/phase0-automation/windows-browser-results-2026-05-24.json`
 
 ## Summary
 
-| POC | Result | Notes |
+| validation | Result | Notes |
 | --- | --- | --- |
 | Durable dictionary persistence - IndexedDB | Pass | Stored and restored the 197.0 MB dictionary package, reopened SQLite, verified 770,611 rows, and looked up `abandon`. |
 | Durable dictionary persistence - OPFS | Pass | Browser supported OPFS. Stored and restored 197.0 MB with matching sample checksum. |
-| Offline launch | Pass on Windows shell | Service worker shell cache had all required assets. The HTTP server was stopped and the POC suite page still reloaded from the cached shell. |
+| Offline launch | Pass on Windows shell | Service worker shell cache had all required assets. The HTTP server was stopped and the test suite page still reloaded from the cached shell. |
 | Export/import + encryption recovery | Pass | Created an encrypted tar-style archive, parsed it, decrypted it with the recovery passphrase, and verified round-trip user data. |
 | Google Drive sync | Mock pass, real OAuth not run | Mock encrypted full-snapshot sync moved through `pending` to `synced`. Real Google OAuth/upload requires user account authorization. |
 | Android PWA | Deferred | Android work is lowest priority and intentionally deferred until iPhone and Windows are stable. |
 | Timed benchmark | Pass | 100 local lookups across 5 terms had p95 below 1 second. |
-| Offline persisted dictionary fallback | Pass on Windows fallback | After the main POC stored the dictionary in IndexedDB, the server was stopped, the shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. |
+| Offline persisted dictionary fallback | Pass on Windows fallback | After the main validation stored the dictionary in IndexedDB, the server was stopped, the shell reloaded, the dictionary opened from `indexedDB offline copy`, and phrase search worked. |
 | iPhone-friendly dictionary UI smoke | Pass on Windows fallback | Search-first UI, dictionary status cards, versioned assets, URL search smoke, and local lookup were verified through browser automation. |
 | iPhone automated suite upload | Pass | iPhone Safari reported service worker readiness, IndexedDB persistence, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmark passing. |
 | Chinese-to-English lookup smoke | Pass on Windows fallback | Query `放弃` returned ranked English candidates such as `release`, `abandon`, `desert`, `yield`, `surrender`, and `relinquish`. |
 | Fuzzy misspelling smoke | Pass on Windows fallback | Query `abanden` returned `abandon` as the closest match. |
-| Resumable dictionary installer | Implemented in POC | Dictionary download now uses 4 MB range chunks with IndexedDB chunk checkpoints when the server supports `Range`; full-buffer `sql.js` opening remains a known production risk. |
+| Resumable dictionary installer | Implemented in validation | Dictionary download now uses 4 MB range chunks with IndexedDB chunk checkpoints when the server supports `Range`; full-buffer `sql.js` opening remains a known production risk. |
 | Vocabulary save/edit/archive slice | Pass on Windows fallback | Browser smoke verified manual save, autosave dwell, duplicate saved-state, archive, restore, and iPhone-width layout without horizontal overflow. |
 | Learning loop slice | Pass on Windows fallback | Browser smoke verified daily stats, due-review quiz, app-inferred FSRS rating, proactive new-word quiz, encrypted study-event persistence, and iPhone-width layout without horizontal overflow. |
 | Compact UI and recent-search focus behavior | Pass on Windows fallback | Removed visible developer/status panels from the end-user home screen. Recent searches now appear when the search input receives focus and disappear after a recent term is selected. |
 | App version/update menu | Pass on Windows fallback | Compact menu shows app version, user-data format version, dictionary engine, sync status, memory-target note, export state, and service-worker update controls. |
-| Product UI v19 | Pass on Windows fallback | Visible app title no longer says POC, menu is a compact three-dot control beside search clear, three themes are selectable, and Google/Gemini surfaces show a clear not-configured state until an OAuth client ID is provided. |
+| Product UI v19 | Pass on Windows fallback | Visible app title is `WordLover`, menu is a compact three-dot control beside search clear, three themes are selectable, and Google/Gemini surfaces show a clear not-configured state until an OAuth client ID is provided. |
 | Review debug automation | Pass on Windows fallback | Diagnostics debug mode accelerates review time to 20 seconds per day. Browser automation passed correct-answer -> Easy and wrong-answer -> Again rating checks, and the suite reports `reviewQuizRating` pass. |
-| iPhone DRAM <= 50 MB target | Not proven | Browser automation cannot reliably measure iPhone PWA DRAM. Current `sql.js` POC loads the full 206 MB dictionary into JS/WASM memory and should be assumed above target until replaced or measured. |
+| iPhone DRAM <= 50 MB target | Not proven | Browser automation cannot reliably measure iPhone PWA DRAM. Current `sql.js` validation loads the full 206 MB dictionary into JS/WASM memory and should be assumed above target until replaced or measured. |
 
 ## Key Metrics
 
@@ -58,7 +58,7 @@ Environment:
 Latest iPhone Home Screen repeat runs:
 
 - Display mode: `standalone`
-- Shell cache: latest implemented product shell is `wordlover-shell-v19`; latest received iPhone reports still show `wordlover-poc-shell-v13` until the real iPhone reruns the suite.
+- Shell cache: latest implemented product shell is `wordlover-shell-v28`; latest received iPhone reports were from the pre-migration `wordlover-shell-v13` build until the real iPhone reruns the suite.
 - Persistent storage: granted
 - Dictionary fetch: about `7.31 s`
 - SQLite open: about `14-17 ms`
@@ -88,4 +88,4 @@ The sharded dictionary fallback should remain a contingency, not the default pat
 
 - Run the updated offline dictionary test on iPhone Safari/Home Screen PWA to confirm dictionary load/search works after Wi-Fi is disconnected.
 - Run this same suite page on iPhone Safari/Home Screen PWA to capture exact p50/p95 and persistence numbers from the iPhone 17 Pro.
-- Run a real Google Drive OAuth upload/download POC after OAuth client configuration exists.
+- Run a real Google Drive OAuth upload/download validation after OAuth client configuration exists.

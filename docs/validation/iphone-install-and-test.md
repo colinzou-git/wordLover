@@ -1,16 +1,16 @@
-# WordLover iPhone 17 Pro PWA POC
+# WordLover iPhone 17 Pro PWA validation
 
-Current result: pass. On 2026-05-24, the real iPhone 17 Pro POC was reported to work well: the web app starts fast and loads the dictionary fast. See `RESULTS.md` for the recorded outcome and remaining measurements to capture later.
+Current result: pass. On 2026-05-24, the real iPhone 17 Pro validation was reported to work well: the web app starts fast and loads the dictionary fast. See `RESULTS.md` for the recorded outcome and remaining measurements to capture later.
 
-For exact timed results on iPhone, open `/poc-suite.html` from Safari or the Home Screen PWA and tap **Run all automated POCs**. The same suite used on Windows will record dictionary persistence, lookup timing, service worker cache readiness, export/import, and device diagnostics on the phone.
+For exact timed results on iPhone, open `/automated-tests.html` from Safari or the Home Screen PWA and tap **Run automated tests**. The same suite used on Windows will record dictionary persistence, lookup timing, service worker cache readiness, export/import, and device diagnostics on the phone.
 
-Offline update: the first iPhone offline test showed that the app shell starts without Wi-Fi, but dictionary load/search did not work because the original POC fetched the dictionary from the Windows server each time. The POC now saves the dictionary to IndexedDB after an online load and falls back to that offline copy when network fetch fails.
+Offline update: the first iPhone offline test showed that the app shell starts without Wi-Fi, but dictionary load/search did not work because the original validation fetched the dictionary from the Windows server each time. The validation now saves the dictionary to IndexedDB after an online load and falls back to that offline copy when network fetch fails.
 
 Memory update: the current local app does not prove the <= 50 MB iPhone DRAM target. It still uses `sql.js`, which loads the full 206 MB SQLite file into JS/WASM memory. The app now stores the dictionary package in OPFS when available before falling back to IndexedDB, but production must replace the query engine with `wa-sqlite`+OPFS or a sharded dictionary package and validate memory with Safari Web Inspector or Xcode Instruments before accepting the dictionary engine.
 
 Product install target: the production iPhone install must not use the local certificate workflow. It should be one step where possible and at most two steps: open the trusted HTTPS WordLover URL, then Add to Home Screen/open the app. The certificate steps below are only for local Windows-hosted development.
 
-This POC tests the real iPhone Safari/Home Screen PWA risks:
+This validation tests the real iPhone Safari/Home Screen PWA risks:
 
 - HTTPS install path from a Windows PC.
 - Service worker registration.
@@ -27,19 +27,19 @@ There is no official iPhone simulator on Windows. Use the real iPhone 17 Pro for
 
 - Windows PC and iPhone 17 Pro on the same Wi-Fi network.
 - The generated dictionary at `data\dictionary.sqlite`.
-- Vendored SQL.js files in `poc\windows-pwa\public\vendor`.
+- Vendored SQL.js files in `apps\wordlover-pwa\public\vendor`.
 
-If you already ran the Windows PWA POC, the dictionary and SQL.js files may already be prepared.
+If you already ran the Windows PWA validation, the dictionary and SQL.js files may already be prepared.
 
-## 1. Prepare The POC Files
+## 1. Prepare The Product Files
 
 From the repo root in PowerShell:
 
 ```powershell
-Copy-Item data\dictionary.sqlite poc\windows-pwa\public\dictionary.sqlite -Force
-New-Item -ItemType Directory -Force poc\windows-pwa\public\vendor
-Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.js -OutFile poc\windows-pwa\public\vendor\sql-wasm.js
-Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.wasm -OutFile poc\windows-pwa\public\vendor\sql-wasm.wasm
+Copy-Item data\dictionary.sqlite apps\wordlover-pwa\public\dictionary.sqlite -Force
+New-Item -ItemType Directory -Force apps\wordlover-pwa\public\vendor
+Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.js -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.js
+Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.wasm -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.wasm
 ```
 
 ## 2. Find Your Windows PC IP Address
@@ -63,16 +63,16 @@ If your IP changes, use the new IP in the commands below.
 iPhone Safari needs HTTPS for real service worker/PWA testing. Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File poc\iphone-pwa\create-local-ca-and-cert.ps1 -IpAddress 192.168.1.73
+powershell -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\create-local-ca-and-cert.ps1 -IpAddress 192.168.1.73
 ```
 
 This creates:
 
 ```text
-poc\iphone-pwa\certs\wordlover-local-root-ca.cer
-poc\iphone-pwa\certs\wordlover-local-root-ca.pem
-poc\iphone-pwa\certs\server-cert.pem
-poc\iphone-pwa\certs\server-key.pem
+apps\wordlover-pwa\certs\wordlover-local-root-ca.cer
+apps\wordlover-pwa\certs\wordlover-local-root-ca.pem
+apps\wordlover-pwa\certs\server-cert.pem
+apps\wordlover-pwa\certs\server-key.pem
 ```
 
 The `.cer` file is the one to install on the iPhone. The `.pem` copy is only for debugging.
@@ -82,7 +82,7 @@ The `.cer` file is the one to install on the iPhone. The `.pem` copy is only for
 Send this file to the iPhone:
 
 ```text
-poc\iphone-pwa\certs\wordlover-local-root-ca.cer
+apps\wordlover-pwa\certs\wordlover-local-root-ca.cer
 ```
 
 Easy options:
@@ -97,9 +97,9 @@ On iPhone:
 2. Install the profile when prompted.
 3. Go to **Settings > General > VPN & Device Management** and install the profile if needed.
 4. Go to **Settings > General > About > Certificate Trust Settings**.
-5. Enable full trust for **WordLover Local POC Root CA**.
+5. Enable full trust for **WordLover Local Root CA**.
 
-This trust is only for your local POC certificate. Remove it after testing if you want.
+This trust is only for your local validation certificate. Remove it after testing if you want.
 
 ## 5. Start The HTTPS Server On Windows
 
@@ -109,7 +109,7 @@ Recommended from the repo root:
 .\start-iphone-https.ps1
 ```
 
-If you are currently in `poc\windows-pwa\public`, run:
+If you are currently in `apps\wordlover-pwa\public`, run:
 
 ```powershell
 .\start-iphone-https.ps1
@@ -118,10 +118,10 @@ If you are currently in `poc\windows-pwa\public`, run:
 You can also run the Python server directly from the repo root:
 
 ```powershell
-python poc\iphone-pwa\serve-https.py --host 0.0.0.0 --port 8443
+python apps\wordlover-pwa\scripts\serve-https.py --host 0.0.0.0 --port 8443
 ```
 
-Do not run `python poc\iphone-pwa\serve-https.py` from `poc\windows-pwa\public`; from that folder the relative path points to the wrong place.
+Do not run `python apps\wordlover-pwa\scripts\serve-https.py` from `apps\wordlover-pwa\public`; from that folder the relative path points to the wrong place.
 
 If Windows Firewall asks, allow Python on your private Wi-Fi network.
 
@@ -149,7 +149,7 @@ https://192.168.1.73:8443
 Expected:
 
 - No certificate error after the root CA is trusted.
-- Page title: `WordLover local dictionary POC`.
+- Page title: `WordLover`.
 - PWA status eventually says `Offline shell registered`.
 - Diagnostics show:
   - `Secure context: yes`
@@ -162,7 +162,7 @@ In Safari:
 
 1. Tap Share.
 2. Tap **Add to Home Screen**.
-3. Name it `WordLover POC`.
+3. Name it `WordLover`.
 4. Open it from the Home Screen icon.
 
 Expected:
@@ -171,20 +171,20 @@ Expected:
 
 ## 7B. Install On Another iPhone
 
-Use these steps for each additional personal iPhone while using the local Windows-hosted POC.
+Use these steps for each additional personal iPhone while using the local Windows-hosted validation.
 
 1. Put the Windows PC and the new iPhone on the same Wi-Fi network.
 2. Confirm the Windows PC IP address. The examples below use `192.168.1.73`; replace it if your IP changed.
 3. If the IP changed, recreate the local certificate:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File poc\iphone-pwa\create-local-ca-and-cert.ps1 -IpAddress 192.168.1.73
+powershell -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\create-local-ca-and-cert.ps1 -IpAddress 192.168.1.73
 ```
 
-4. Send `poc\iphone-pwa\certs\wordlover-local-root-ca.cer` to the new iPhone.
+4. Send `apps\wordlover-pwa\certs\wordlover-local-root-ca.cer` to the new iPhone.
 5. On the iPhone, open the `.cer` file and install the profile.
 6. Go to **Settings > General > VPN & Device Management** and finish installing the profile if iOS asks.
-7. Go to **Settings > General > About > Certificate Trust Settings** and enable full trust for **WordLover Local POC Root CA**.
+7. Go to **Settings > General > About > Certificate Trust Settings** and enable full trust for **WordLover Local Root CA**.
 8. Start the HTTPS server on Windows:
 
 ```powershell
@@ -217,7 +217,7 @@ For a production hosted HTTPS site, the local certificate steps disappear. The u
 
 ## 7C. Google Login, Drive Sync, And Gemini
 
-The current POC does not include real Google OAuth yet. The planned flow is:
+The current validation does not include real Google OAuth yet. The planned flow is:
 
 1. First launch shows the local app shell.
 2. The app prompts the user to **Sign in with Google** or **Skip for offline use**.
@@ -261,7 +261,7 @@ Dictionary data updates are separate from app-shell updates. A future dictionary
 Open this URL on the iPhone while the Windows HTTPS server is running:
 
 ```text
-https://192.168.1.73:8443/poc-suite.html?autorun=1
+https://192.168.1.73:8443/automated-tests.html?autorun=1
 ```
 
 Expected:
@@ -273,7 +273,7 @@ Expected:
 On Windows, received iPhone/browser reports are saved here:
 
 ```text
-poc\iphone-pwa\received-results\
+apps\wordlover-pwa\received-results\
 ```
 
 This folder is ignored by git because it contains generated local test results.
@@ -281,8 +281,8 @@ This folder is ignored by git because it contains generated local test results.
 To inspect received results from Windows:
 
 ```powershell
-curl.exe -k https://127.0.0.1:8443/__poc_results
-curl.exe -k https://127.0.0.1:8443/__poc_results/latest
+curl.exe -k https://127.0.0.1:8443/__test_results
+curl.exe -k https://127.0.0.1:8443/__test_results/latest
 ```
 
 For a smaller automated dictionary search smoke test, open:
@@ -295,11 +295,11 @@ This loads the dictionary, searches `take off`, and sends a JSON result back to 
 
 ## 8. Load The Dictionary
 
-In the POC app:
+In the validation app:
 
 1. Search `abandon`, or tap **Install/load dictionary** if that button is visible.
 2. Wait for the local dictionary to open. The current compact UI may hide developer metrics, so use the automated suite for exact timing.
-3. In `/poc-suite.html`, record:
+3. In `/automated-tests.html`, record:
    - row count
    - size
    - fetch time
@@ -357,14 +357,14 @@ Expected:
 
 - App shell opens.
 - This only proves the shell is cached.
-- In the original POC, dictionary load/search failed offline. That is a known finding.
+- In the original validation, dictionary load/search failed offline. That is a known finding.
 
 ## 12. Test Offline Dictionary Load And Search
 
-Use this test after updating to the latest POC files.
+Use this test after updating to the latest validation files.
 
 1. Turn Wi-Fi and Cellular back on.
-2. Open the POC from the Home Screen while the Windows HTTPS server is running.
+2. Open the validation from the Home Screen while the Windows HTTPS server is running.
 3. Reload the page once while online so Safari picks up the latest service worker and JavaScript.
 4. Search `abandon`, or tap **Install/load dictionary** if that button is visible.
 5. Confirm the search result appears while online.
@@ -388,7 +388,7 @@ Pass criteria:
 If dictionary load/search still fails offline:
 
 - Reconnect Wi-Fi.
-- Open the POC.
+- Open the validation.
 - Reload the page twice while online.
 - Search `abandon` again and wait for completion.
 - Disconnect Wi-Fi and repeat the offline test.
@@ -450,11 +450,11 @@ On iPhone:
 2. Remove the WordLover local profile.
 3. Go to **Settings > General > About > Certificate Trust Settings** and confirm it is gone.
 
-## What This POC Does Not Prove Yet
+## What This validation Does Not Prove Yet
 
-This POC does not yet prove durable local dictionary persistence on iPhone. It fetches and opens the SQLite file. Production still needs either:
+This validation does not yet prove durable local dictionary persistence on iPhone. It fetches and opens the SQLite file. Production still needs either:
 
 - SQLite WASM with OPFS/IndexedDB persistence that survives app restarts, or
 - the sharded dictionary fallback.
 
-If full SQLite load fails on iPhone, move directly to the sharded dictionary fallback POC.
+If full SQLite load fails on iPhone, move directly to the sharded dictionary fallback validation.

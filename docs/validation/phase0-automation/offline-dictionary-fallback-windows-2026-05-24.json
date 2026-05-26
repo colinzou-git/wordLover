@@ -1,9 +1,9 @@
 {
   "completedAt": "2026-05-24",
   "environment": "Windows browser fallback automation",
-  "purpose": "Verify the updated main POC can load and search the dictionary offline after a prior online load stores dictionary.sqlite in IndexedDB.",
+  "purpose": "Verify the updated main validation can load and search the dictionary offline after a prior online load stores dictionary.sqlite in IndexedDB.",
   "steps": [
-    "Loaded the main POC online from http://127.0.0.1:4173/",
+    "Loaded the main validation online from http://127.0.0.1:4173/",
     "Clicked Load local SQLite dictionary",
     "Confirmed dictionary loaded from source network",
     "Searched abandon successfully",

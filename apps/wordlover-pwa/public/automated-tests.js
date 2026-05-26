@@ -6,24 +6,24 @@ const progressList = document.querySelector("#progressList");
 const summary = document.querySelector("#summary");
 const rawResults = document.querySelector("#rawResults");
 
-const AUTOMATION_DB = "wordlover-phase0-poc";
+const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v27";
+const SHELL_CACHE_NAME = "wordlover-shell-v28";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-9",
-  "/styles.css?v=20260525-9",
-  "/wordlover-config.js?v=20260525-9",
+  "/app.js?v=20260525-10",
+  "/styles.css?v=20260525-10",
+  "/wordlover-config.js?v=20260525-10",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
-  "/poc-suite.html",
-  "/poc-suite.js?v=20260525-9",
+  "/automated-tests.html",
+  "/automated-tests.js?v=20260525-10",
 ];
 
 let lastResults = null;
@@ -229,7 +229,7 @@ async function fetchDictionary() {
     response = await fetch(dictionaryUrl, { cache: "no-store" });
   } catch (error) {
     throw new Error(
-      `Dictionary fetch failed before an HTTP response from ${dictionaryUrl}. Start the WordLover static server from poc/windows-pwa/public, reload this page, and run the suite again. Original error: ${error instanceof Error ? error.message : String(error)}`,
+      `Dictionary fetch failed before an HTTP response from ${dictionaryUrl}. Start the WordLover static server from apps/wordlover-pwa/public, reload this page, and run the suite again. Original error: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
@@ -447,7 +447,7 @@ async function decryptJson(envelope, passphrase) {
 async function runExportImportPoc() {
   const userData = {
     app: "wordlover",
-    dataFormatVersion: "poc-1",
+    dataFormatVersion: "test-1",
     exportedAt: new Date().toISOString(),
     vocabulary: [
       { term: "abandon", rating: "Again", source: "ECDICT" },
@@ -455,11 +455,11 @@ async function runExportImportPoc() {
     ],
     stats: { newSavedToday: 2, reviewedToday: 1, masteredToday: 0 },
   };
-  const passphrase = "wordlover-phase0-recovery-passphrase";
+  const passphrase = "wordlover-product-test-recovery-passphrase";
   const encrypted = await encryptJson(userData, passphrase);
   const manifest = {
     app: "wordlover",
-    exportFormat: "encrypted-tar-poc",
+    exportFormat: "encrypted-tar-test",
     dataFormatVersion: userData.dataFormatVersion,
     createdAt: userData.exportedAt,
     encryption: {
@@ -497,8 +497,8 @@ async function runMockGoogleDriveSyncPoc(exportImportResult) {
   const snapshot = {
     provider: "mock-google-drive",
     statusSequence: ["pending", "synced"],
-    appVersion: "poc",
-    dataFormatVersion: "poc-1",
+    appVersion: "product-test",
+    dataFormatVersion: "test-1",
     createdAt: new Date().toISOString(),
     encryptedArchiveBytes: exportImportResult.archiveBytes,
   };
@@ -747,10 +747,10 @@ async function runAllPocs() {
   const indexedDbLookup = lookupTerm(indexedDbOpened.db, "abandon");
   indexedDbOpened.db.close();
 
-  addProgress("Running encrypted tar export/import recovery POC.");
+  addProgress("Running encrypted tar export/import recovery test.");
   const exportImport = await runExportImportPoc();
 
-  addProgress("Running mock Google Drive encrypted snapshot sync POC.");
+  addProgress("Running mock Google Drive encrypted snapshot sync test.");
   const mockSync = await runMockGoogleDriveSyncPoc(exportImport);
 
   addProgress("Running review, quiz, and FSRS-rating automation tests.");
@@ -802,12 +802,12 @@ async function runAllPocs() {
     deviceCoverage,
   };
   await saveStoreValue(KV_STORE, "lastResults", results);
-  localStorage.setItem("wordlover-phase0-last-results", JSON.stringify(results));
+  localStorage.setItem("wordlover-product-test-last-results", JSON.stringify(results));
   return results;
 }
 
 async function sendResultsToServer(results) {
-  const response = await fetch("/__poc_results", {
+  const response = await fetch("/__test_results", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(results),
@@ -881,7 +881,7 @@ downloadButton.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `wordlover-phase0-poc-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  anchor.download = `wordlover-product-tests-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 });

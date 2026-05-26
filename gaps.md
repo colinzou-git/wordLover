@@ -14,7 +14,7 @@ The PRD and architecture have been updated to address the review's major finding
 
 No blocking document contradiction remains, but several implementation decisions intentionally remain open because they require Phase 0 technical validation on real devices.
 
-Update, 2026-05-24: iPhone is now the explicit primary use case. Windows is the automation and stress-test fallback. Android remains in scope but is deferred until the end and must not block iPhone or Windows progress. The Windows PWA dictionary POC passed, and the real iPhone 17 Pro PWA POC was reported to work well with fast startup and fast dictionary loading while online. A later iPhone offline test found that the shell opens offline but dictionary load/search do not work in the original POC. The POC has now been updated to persist the dictionary to IndexedDB and fall back to that copy offline; this passed in Windows fallback automation and needs real iPhone retest. These results support continuing with the PWA-first, SQLite WASM-first plan.
+Update, 2026-05-24: iPhone is now the explicit primary use case. Windows is the automation and stress-test fallback. Android remains in scope but is deferred until the end and must not block iPhone or Windows progress. The Windows PWA dictionary validation passed, and the real iPhone 17 Pro PWA validation was reported to work well with fast startup and fast dictionary loading while online. A later iPhone offline test found that the shell opens offline but dictionary load/search do not work in the original validation. The validation has now been updated to persist the dictionary to IndexedDB and fall back to that copy offline; this passed in Windows fallback automation and needs real iPhone retest. These results support continuing with the PWA-first, SQLite WASM-first plan.
 
 ## Review Items Addressed
 
@@ -48,7 +48,7 @@ These are not gaps between the documents; they are technical decisions that need
 
 | Topic | Current document state | Next action |
 | --- | --- | --- |
-| SQLite WASM implementation | Windows PWA, real iPhone 17 Pro online testing, and automated Windows persistence POCs support SQLite WASM-first. Architecture still requires iPhone offline persistence validation. | Run the updated offline dictionary persistence test on iPhone Safari/Home Screen, then choose the production persistence mode. |
+| SQLite WASM implementation | Windows PWA, real iPhone 17 Pro online testing, and automated Windows persistence validations support SQLite WASM-first. Architecture still requires iPhone offline persistence validation. | Run the updated offline dictionary persistence test on iPhone Safari/Home Screen, then choose the production persistence mode. |
 | Dictionary fallback format | Architecture defines sharded dictionary fallback, but exact binary schema is not finalized. | Design only if SQLite WASM fails Phase 0 criteria or is too slow/heavy. |
 | Browser encryption recovery UX | Architecture selects DEK + recovery export + optional Google key-wrap. The automated suite proved Web Crypto encrypted export/import round trip. | Decide user-facing passphrase and recovery-file UX before product UI implementation. |
 | Export encryption mode | Architecture leaves open whether normal tar exports are always encrypted or can be plain. | Decide product policy before implementing export/import UI. |
@@ -64,7 +64,7 @@ The PRD requires local-first offline use, and architecture mitigates browser sto
 
 ### Large Dictionary Package On iPhone
 
-The local SQLite dictionary is large. The iPhone 17 Pro POC passed for startup and online dictionary loading, so this is no longer the top feasibility blocker. The current top risk is whether the updated persisted dictionary flow works on iPhone after Wi-Fi is disconnected, app restarts, and normal Home Screen PWA use.
+The local SQLite dictionary is large. The iPhone 17 Pro validation passed for startup and online dictionary loading, so this is no longer the top feasibility blocker. The current top risk is whether the updated persisted dictionary flow works on iPhone after Wi-Fi is disconnected, app restarts, and normal Home Screen PWA use.
 
 ### AI Provider Requirement Shift
 

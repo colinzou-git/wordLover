@@ -49,7 +49,7 @@ const debugModeToggle = document.querySelector("#debugModeToggle");
 const runReviewAutomationButton = document.querySelector("#runReviewAutomation");
 const debugStatus = document.querySelector("#debugStatus");
 
-const DB_NAME = "wordlover-poc-user";
+const DB_NAME = "wordlover-user";
 const STORE = "kv";
 const FILE_STORE = "files";
 const KEY_STORE = "keys";
@@ -63,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.4.8-product.20260525-v27";
+const APP_VERSION = "0.5.0-product.20260525-v28";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v27";
+const SHELL_CACHE_VERSION = "wordlover-shell-v28";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -1825,7 +1825,7 @@ async function runLookup() {
 
 async function sendSmokeResult(payload) {
   if (window.location.protocol !== "https:") return null;
-  const response = await fetch("/__poc_results", {
+  const response = await fetch("/__test_results", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -2160,7 +2160,7 @@ function exportState() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "wordlover-poc-user-data.json";
+  anchor.download = "wordlover-user-data.json";
   anchor.click();
   URL.revokeObjectURL(url);
 }

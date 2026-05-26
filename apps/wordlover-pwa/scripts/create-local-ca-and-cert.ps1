@@ -91,7 +91,7 @@ function ConvertTo-RsaPrivateKeyDer {
 $now = [DateTimeOffset]::UtcNow.AddDays(-1)
 $rootKey = [System.Security.Cryptography.RSA]::Create(3072)
 $rootReq = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-  "CN=WordLover Local POC Root CA",
+  "CN=WordLover Local Root CA",
   $rootKey,
   [System.Security.Cryptography.HashAlgorithmName]::SHA256,
   [System.Security.Cryptography.RSASignaturePadding]::Pkcs1

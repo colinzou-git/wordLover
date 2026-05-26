@@ -1,6 +1,6 @@
-# Next iPhone-First POCs
+# Next iPhone-First validations
 
-Android work is deferred until the end. For now, POCs should focus on iPhone. Windows is used only as the automation and stress-test fallback when a test cannot be fully automated on iPhone.
+Android work is deferred until the end. For now, validations should focus on iPhone. Windows is used only as the automation and stress-test fallback when a test cannot be fully automated on iPhone.
 
 ## Priority 1: iPhone Memory And Production Dictionary Engine
 
@@ -8,11 +8,11 @@ Question: can the production dictionary engine keep normal-use iPhone memory <= 
 
 Current status:
 
-- Current `sql.js` POC is fast but loads the full 206 MB SQLite file into JS/WASM memory.
+- Current `sql.js` validation is fast but loads the full 206 MB SQLite file into JS/WASM memory.
 - Browser JavaScript cannot reliably report iPhone PWA DRAM.
 - This is not production-accepted until measured or replaced.
 
-Next POC:
+Next validation:
 
 - Implement a `wa-sqlite`+OPFS dictionary engine behind the same lookup interface.
 - Run the same exact, phrase, Chinese, fuzzy, and benchmark searches.
@@ -32,8 +32,8 @@ Question: after the dictionary is loaded once online, can the iPhone Home Screen
 
 Current status:
 
-- Original iPhone POC: shell starts offline, but dictionary load/search fails.
-- Updated POC: online dictionary load stores `dictionary.sqlite` in IndexedDB and falls back to `source indexedDB offline copy` when network fetch fails.
+- Original iPhone validation: shell starts offline, but dictionary load/search fails.
+- Updated validation: online dictionary load stores `dictionary.sqlite` in IndexedDB and falls back to `source indexedDB offline copy` when network fetch fails.
 - Windows fallback automation: passed with server stopped.
 - Real iPhone: pending retest.
 
@@ -46,7 +46,7 @@ Manual iPhone steps:
 .\start-iphone-https.ps1
 ```
 
-3. On iPhone Safari, open the HTTPS POC URL, for example:
+3. On iPhone Safari, open the HTTPS validation URL, for example:
 
 ```text
 https://192.168.1.73:8443
@@ -94,7 +94,7 @@ Manual iPhone steps:
 2. Open this autorun URL on iPhone Safari or the Home Screen PWA:
 
 ```text
-https://192.168.1.73:8443/poc-suite.html?autorun=1
+https://192.168.1.73:8443/automated-tests.html?autorun=1
 ```
 
 3. Wait for completion.
@@ -102,7 +102,7 @@ https://192.168.1.73:8443/poc-suite.html?autorun=1
 5. On Windows, check:
 
 ```text
-poc\iphone-pwa\received-results\
+apps\wordlover-pwa\received-results\
 ```
 
 If the status does not show `Sent`, tap **Send results to Windows**.
@@ -110,8 +110,8 @@ If the status does not show `Sent`, tap **Send results to Windows**.
 On Windows, inspect received results:
 
 ```powershell
-curl.exe -k https://127.0.0.1:8443/__poc_results
-curl.exe -k https://127.0.0.1:8443/__poc_results/latest
+curl.exe -k https://127.0.0.1:8443/__test_results
+curl.exe -k https://127.0.0.1:8443/__test_results/latest
 ```
 
 Record:
@@ -190,4 +190,4 @@ Manual actions required later:
 
 ## Deferred: Android
 
-Do not spend POC time on Android now. Android should be validated after iPhone memory/dictionary-engine validation, iPhone offline dictionary, iPhone timed suite, iPhone persistence after restart, app update UX, and real Google Drive sync are stable.
+Do not spend validation time on Android now. Android should be validated after iPhone memory/dictionary-engine validation, iPhone offline dictionary, iPhone timed suite, iPhone persistence after restart, app update UX, and real Google Drive sync are stable.

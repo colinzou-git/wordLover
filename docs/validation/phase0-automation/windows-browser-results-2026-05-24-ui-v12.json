@@ -44,8 +44,8 @@
   "offlineShell": {
     "supported": true,
     "cacheNames": [
-      "wordlover-poc-shell-v12",
-      "wordlover-poc-shell-v11"
+      "wordlover-shell-v12",
+      "wordlover-shell-v11"
     ],
     "allShellAssetsCached": true,
     "missing": [],

@@ -1,13 +1,13 @@
 # WordLover Project Review
 
 **Date:** 2026-05-24  
-**Reviewed files:** `prd.md`, `docs/architecture-design.md`, `docs/development-plan.md`, `docs/dictionary-data.md`, `poc/windows-pwa/public/app.js`, `poc/windows-pwa/public/sw.js`, `poc/windows-pwa/public/poc-suite.js`, `poc/windows-pwa/public/index.html`, `poc/iphone-pwa/RESULTS.md`, `poc/phase0-automation/RESULTS.md`, `poc/windows-pwa/RESULTS.md`, `poc/iphone-pwa/NEXT-POCS.md`, `gaps.md`
+**Reviewed files:** `prd.md`, `docs/architecture-design.md`, `docs/development-plan.md`, `docs/dictionary-data.md`, `apps/wordlover-pwa/public/app.js`, `apps/wordlover-pwa/public/sw.js`, `apps/wordlover-pwa/public/automated-tests.js`, `apps/wordlover-pwa/public/index.html`, `docs/validation/iphone-results-2026-05-24.md`, `docs/validation/phase0-automation/RESULTS.md`, `apps/wordlover-pwa/RESULTS.md`, `docs/validation/iphone-next-validation.md`, `gaps.md`
 
 ---
 
 ## Executive Summary
 
-WordLover is a well-conceived vocabulary learning app with strong documentation, clear phase separation, and a sound PWA-first architecture. The Phase 0 POC proves the core technical direction is feasible. However, several structural problems in the current implementation and design will cause real pain if not addressed before Phase 1 begins. The top concerns are (1) sql.js loading 197 MB into main-thread RAM, (2) the absence of a build pipeline making cache management brittle, (4) no actual encryption in the live app despite being a PRD Priority 1 requirement, and (5) an IndexedDB access pattern that will degrade under production use. The top opportunities are adopting wa-sqlite+OPFS, adding a Vite build pipeline immediately, compressing the dictionary package, automating the dictionary install step, and building the FTS search index during the Python pipeline step.
+WordLover is a well-conceived vocabulary learning app with strong documentation, clear phase separation, and a sound PWA-first architecture. The Phase 0 prototype proves the core technical direction is feasible. However, several structural problems in the current implementation and design will cause real pain if not addressed before Phase 1 begins. The top concerns are (1) sql.js loading 197 MB into main-thread RAM, (2) the absence of a build pipeline making cache management brittle, (4) no actual encryption in the live app despite being a PRD Priority 1 requirement, and (5) an IndexedDB access pattern that will degrade under production use. The top opportunities are adopting wa-sqlite+OPFS, adding a Vite build pipeline immediately, compressing the dictionary package, automating the dictionary install step, and building the FTS search index during the Python pipeline step.
 
 ---
 
@@ -19,9 +19,9 @@ WordLover is a well-conceived vocabulary learning app with strong documentation,
 
 **Severity: Critical**
 
-The POC uses `sql.js`, which loads the entire SQLite database as a `Uint8Array` into the JavaScript heap and then into WASM linear memory. The Windows POC measured 197 MB, the iPhone POC measured 206 MB. This runs on the **main thread**, meaning the browser UI is blocked for the duration of the WASM init + open + memory allocation cycle.
+The prototype uses `sql.js`, which loads the entire SQLite database as a `Uint8Array` into the JavaScript heap and then into WASM linear memory. The Windows prototype measured 197 MB, the iPhone prototype measured 206 MB. This runs on the **main thread**, meaning the browser UI is blocked for the duration of the WASM init + open + memory allocation cycle.
 
-From the Windows POC results:
+From the Windows prototype results:
 
 - Dictionary fetch time: 1006.5 ms (already at the 1-second PRD limit)
 - SQL.js init: 31.9 ms
@@ -65,17 +65,17 @@ The current implementation manually increments version strings in multiple place
 
 ```js
 // sw.js
-const CACHE_NAME = "wordlover-poc-shell-v12";
+const CACHE_NAME = "wordlover-shell-v12";
 
 // index.html
 <script type="module" src="/app.js?v=20260524-2"></script>
 <link rel="stylesheet" href="/styles.css?v=20260524-2" />
 ```
 
-And the same version strings are duplicated in `poc-suite.js`:
+And the same version strings are duplicated in `automated-tests.js`:
 
 ```js
-const SHELL_CACHE_NAME = "wordlover-poc-shell-v12";
+const SHELL_CACHE_NAME = "wordlover-shell-v12";
 const SHELL_ASSETS = [
   "/app.js?v=20260524-2",
   "/styles.css?v=20260524-2",
@@ -83,7 +83,7 @@ const SHELL_ASSETS = [
 ];
 ```
 
-The risk is concrete: if a developer updates `app.js` but forgets to bump `v=` in `index.html` or `SHELL_ASSETS` in the service worker, users will receive stale cached JS with no indication anything is wrong. This has already happened once (the POC notes the service worker cache was initially too small — a human missed adding assets). As the app grows to 15–20 source files, manual tracking becomes unmaintainable.
+The risk is concrete: if a developer updates `app.js` but forgets to bump `v=` in `index.html` or `SHELL_ASSETS` in the service worker, users will receive stale cached JS with no indication anything is wrong. This has already happened once (the prototype notes the service worker cache was initially too small — a human missed adding assets). As the app grows to 15–20 source files, manual tracking becomes unmaintainable.
 
 Additionally, without a bundler there is no tree-shaking, no dead-code elimination, no TypeScript type checking, and no code splitting.
 
@@ -110,7 +110,7 @@ Add Vite as the build tool before Phase 1 feature development begins.
    handler) can be preserved alongside Workbox's precache behavior.
 
 5. Add a TypeScript strict-mode tsconfig.json and progressively migrate 
-   the POC JS to typed modules. This prevents an entire class of bugs 
+   the prototype JS to typed modules. This prevents an entire class of bugs
    (null reference, wrong key type in IndexedDB, etc.) that will surface 
    at scale.
 
@@ -137,7 +137,7 @@ Integrate a chinese word to english feature and corresponding dictionatory. When
 
 **Severity: High**
 
-PRD Req 149 is Priority 1: "User-specific data must be encrypted locally on the device." The architecture describes AES-256-GCM encryption with a DEK, recovery KEK, and optional Google KEK wrapper. The `poc-suite.js` successfully validates the Web Crypto round-trip.
+PRD Req 149 is Priority 1: "User-specific data must be encrypted locally on the device." The architecture describes AES-256-GCM encryption with a DEK, recovery KEK, and optional Google KEK wrapper. The `automated-tests.js` successfully validates the Web Crypto round-trip.
 
 However, the main `app.js` stores all user data — search history, metrics, preferences — in **plaintext IndexedDB** with no encryption at all:
 
@@ -153,7 +153,7 @@ async function saveValue(key, value) {
 }
 ```
 
-This is understandable for a POC, but Phase 1 will add vocabulary items, user-edited meanings, and review progress — all user-created content that the PRD requires to be encrypted. If encryption is deferred to Phase 3 (as currently planned), there will be a live production app with unencrypted user data between Phase 1 launch and Phase 3 launch.
+This is understandable for a prototype, but Phase 1 will add vocabulary items, user-edited meanings, and review progress — all user-created content that the PRD requires to be encrypted. If encryption is deferred to Phase 3 (as currently planned), there will be a live production app with unencrypted user data between Phase 1 launch and Phase 3 launch.
 
 **Suggested solution:**
 
@@ -210,7 +210,7 @@ The key decision (passphrase-only vs. auto-generated vs. Google-wrapped) can be 
 
 **Severity: Medium-High**
 
-In both `app.js` and `poc-suite.js`, every single read or write opens and closes the IndexedDB connection:
+In both `app.js` and `automated-tests.js`, every single read or write opens and closes the IndexedDB connection:
 
 ```js
 async function saveValue(key, value) {
@@ -225,7 +225,7 @@ async function saveValue(key, value) {
 }
 ```
 
-This is a meaningful performance problem. `indexedDB.open()` is an async operation that checks schema versions and may trigger `onupgradeneeded`. In the POC, this is called for every keystroke (the debounce saves the search history on every lookup). In a full product with encrypted records, vocabulary save, review state updates, and stats updates all happening together, this pattern will create a queue of DB open calls that degrades both latency and battery life.
+This is a meaningful performance problem. `indexedDB.open()` is an async operation that checks schema versions and may trigger `onupgradeneeded`. In the prototype, this is called for every keystroke (the debounce saves the search history on every lookup). In a full product with encrypted records, vocabulary save, review state updates, and stats updates all happening together, this pattern will create a queue of DB open calls that degrades both latency and battery life.
 
 **Suggested solution:**
 
@@ -267,7 +267,7 @@ When the app starts and the dictionary is already installed, the UI shows:
 
 > "Dictionary is installed. Tap **Install/load dictionary** to start searching."
 
-The user must manually tap a button before they can search. This is a POC affordance that should not exist in the production app. The PRD (Req 144) requires: "App startup time must be within 1 second to the point where the home screen search input is visible and **usable** on supported devices." Usable implies the dictionary is searchable, not waiting for a manual load tap.
+The user must manually tap a button before they can search. This is a prototype affordance that should not exist in the production app. The PRD (Req 144) requires: "App startup time must be within 1 second to the point where the home screen search input is visible and **usable** on supported devices." Usable implies the dictionary is searchable, not waiting for a manual load tap.
 
 The actual auto-load logic exists in `init()` but is conditional:
 
@@ -486,7 +486,7 @@ The architecture correctly identifies this as the preferred production path but 
 
 **Concrete gains:**
 
-| Metric                   | sql.js (current POC)           | wa-sqlite + OPFS (expected)          |
+| Metric                   | sql.js (current prototype)           | wa-sqlite + OPFS (expected)          |
 | ------------------------ | ------------------------------ | ------------------------------------ |
 | Peak memory              | ~200 MB (full DB in WASM heap) | ~8–16 MB (SQLite page cache only)    |
 | First open time          | 77.8 ms (after fetch)          | ~20–40 ms (file already on disk)     |
@@ -715,7 +715,7 @@ function detectInstallContext() {
 
 The current Phase 0 testing was done on an iPhone 17 Pro — the most capable iPhone in the baseline. The architecture states iOS 17 as the minimum baseline, which includes iPhone XR (2018, 3 GB RAM) and iPhone 12 (2020, 4 GB RAM). These devices have significantly tighter WASM memory budgets than the iPhone 17 Pro.
 
-The transition from sql.js (full heap) to wa-sqlite (page cache) matters most on these older devices. Running the updated OPFS persistence POC on an iPhone 12 or XR before Phase 1 starts would confirm whether the architecture is safe for the full stated device range, or whether the sharded dictionary fallback needs to be activated for older devices. This is a one-device, one-afternoon test that could prevent a major architectural change mid-Phase 1.
+The transition from sql.js (full heap) to wa-sqlite (page cache) matters most on these older devices. Running the updated OPFS persistence prototype on an iPhone 12 or XR before Phase 1 starts would confirm whether the architecture is safe for the full stated device range, or whether the sharded dictionary fallback needs to be activated for older devices. This is a one-device, one-afternoon test that could prevent a major architectural change mid-Phase 1.
 
 **Checklist for the older-device test:**
 

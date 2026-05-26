@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25  
 **Previous review:** `docs/wordlover-review-2026-05-24.md`  
-**Reviewed files (new):** `poc/windows-pwa/public/app.js` (v0.4.1, 2033 lines), `poc/windows-pwa/public/sw.js` (v20), `poc/windows-pwa/public/wordlover-config.js`, `poc/windows-pwa/public/index.html`, `poc/windows-pwa/public/styles.css`, `scripts/build_dictionary.py`, `poc/iphone-pwa/received-results/*.json` (9 iPhone result files), `docs/full-product-gaps.md`, `poc/phase0-automation/RESULTS.md` (updated), `poc/iphone-pwa/RESULTS.md` (updated)
+**Reviewed files (new):** `apps/wordlover-pwa/public/app.js` (v0.4.1, 2033 lines), `apps/wordlover-pwa/public/sw.js` (v20), `apps/wordlover-pwa/public/wordlover-config.js`, `apps/wordlover-pwa/public/index.html`, `apps/wordlover-pwa/public/styles.css`, `scripts/build_dictionary.py`, `apps/wordlover-pwa/received-results/*.json` (9 iPhone result files), `docs/full-product-gaps.md`, `docs/validation/phase0-automation/RESULTS.md` (updated), `docs/validation/iphone-results-2026-05-24.md` (updated)
 
 ---
 
@@ -27,10 +27,10 @@ A large amount of work landed between the two zips. Most of the previously ident
 - Install browser detection banner is implemented.
 - Service worker update check/apply flow is implemented.
 - Three UI themes are selectable.
-- Product title changed from "POC" to "WordLover".
+- Product title changed from the prototype label to "WordLover".
 - Real iPhone results received: 9 result files; two full suite runs in standalone mode passed all verdicts.
 
-**Key measured iPhone numbers (from `20260524T225251Z-iphone-poc-results.json`, standalone Home Screen PWA, iOS 18.7):**
+**Key measured iPhone numbers (from `20260524T225251Z-iphone-test-results.json`, standalone Home Screen PWA, iOS 18.7):**
 
 | Metric                     | Value                      |
 | -------------------------- | -------------------------- |
@@ -553,7 +553,7 @@ Currently, every iPhone install requires: (a) Windows PC on the same LAN, (b) IP
 
 For a personal app this doesn't require a paid hosting tier. Options:
 
-- **GitHub Pages** (free): Deploy `poc/windows-pwa/public/` to GitHub Pages. Automatic HTTPS via GitHub's TLS. iPhone install is: open URL in Safari → Add to Home Screen. The 206 MB dictionary file exceeds GitHub's 100 MB file limit, but this will be resolved by dictionary compression (Opportunity 2) since the compressed file will be ~75–90 MB. The compressed file could also be hosted on a CDN like Cloudflare R2 (free tier).
+- **GitHub Pages** (free): Deploy `apps/wordlover-pwa/public/` to GitHub Pages. Automatic HTTPS via GitHub's TLS. iPhone install is: open URL in Safari → Add to Home Screen. The 206 MB dictionary file exceeds GitHub's 100 MB file limit, but this will be resolved by dictionary compression (Opportunity 2) since the compressed file will be ~75–90 MB. The compressed file could also be hosted on a CDN like Cloudflare R2 (free tier).
 
 The install certificate workflow can be eliminated entirely by hosting at a public URL. This removes 12+ manual steps from the iPhone setup process and makes the app accessible to non-developer users.
 

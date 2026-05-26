@@ -12,14 +12,14 @@ This plan follows the current product priority:
 
 - PWA-first path is accepted for no-fee long-term iPhone use.
 - Current generated SQLite dictionary has `770,611` rows and is about `197 MB`.
-- Windows browser POCs prove SQLite WASM lookup speed is far under the 1 second target.
-- iPhone online POC works: app starts fast and dictionary loads fast.
+- Windows browser validations prove SQLite WASM lookup speed is far under the 1 second target.
+- iPhone online validation works: app starts fast and dictionary loads fast.
 - Initial iPhone offline test found a real gap: shell starts offline, but dictionary search did not work until dictionary persistence was added.
-- The POC now saves the dictionary into IndexedDB after online load and falls back to the saved copy offline.
+- The validation now saves the dictionary into IndexedDB after online load and falls back to the saved copy offline.
 - Windows fallback automation verifies offline dictionary load/search from IndexedDB works.
 - iPhone automated suite reports now verify service worker readiness, IndexedDB dictionary persistence, OPFS persistence, encrypted export/import, mock sync, and p95 lookup time well under 1 second after open.
-- Latest iPhone Home Screen PWA suite runs reported standalone display mode, persistent storage granted, shell cache `wordlover-poc-shell-v13`, dictionary fetch about `7.31 s`, SQLite open about `14-17 ms`, and lookup p95 about `0.28 ms`.
-- The current `sql.js` POC still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but does not satisfy the production memory direction; assume it exceeds the <= 50 MB iPhone DRAM target until proven otherwise.
+- Latest pre-migration iPhone Home Screen PWA suite runs reported standalone display mode, persistent storage granted, shell cache `wordlover-shell-v13`, dictionary fetch about `7.31 s`, SQLite open about `14-17 ms`, and lookup p95 about `0.28 ms`.
+- The current `sql.js` validation still fetches about 206 MB for first install and uses a full in-memory SQLite buffer. This works on iPhone 17 Pro but does not satisfy the production memory direction; assume it exceeds the <= 50 MB iPhone DRAM target until proven otherwise.
 - The live app now has passphrase-wrapped encrypted user records, a persistent IndexedDB connection, Chinese-to-English lookup, fuzzy misspelling suggestions, startup auto-load UX, a resumable chunked dictionary installer, an iPhone install-context banner, a compact three-dot app menu, theme selection, Google/Gemini integration surfaces, and a debug review acceleration mode.
 
 ## Phase 0: Finish iPhone Feasibility
@@ -30,13 +30,13 @@ Scope:
 
 - Run updated iPhone offline dictionary persistence test.
 - Run iPhone automated timed suite with `?autorun=1`. Status: passed on iPhone Safari.
-- Verify iPhone result upload into `poc/iphone-pwa/received-results`. Status: passed.
+- Verify iPhone result upload into `apps/wordlover-pwa/received-results`. Status: passed.
 - Test iPhone close/reopen and iPhone restart persistence.
-- POC `wa-sqlite` + OPFS on iPhone and compare with `sql.js` memory/startup behavior before choosing the production dictionary engine.
+- Validate `wa-sqlite` + OPFS on iPhone and compare with `sql.js` memory/startup behavior before choosing the production dictionary engine.
 - Replace the current `sql.js` dictionary query runtime with a real `wa-sqlite`+OPFS query engine or sharded package before claiming the 50 MB iPhone memory target.
 - Measure peak and steady-state iPhone memory during dictionary install, open, lookup, background, and relaunch. Production target is <= 50 MB normal-use incremental memory.
 - Confirm the app version/update menu can activate a new service worker on the real iPhone Home Screen PWA.
-- Add Vite + TypeScript + Workbox before Phase 1 grows beyond the current single-page POC.
+- Add Vite + TypeScript + Workbox before Phase 1 grows beyond the current single-page validation.
 - Test basic Google OAuth feasibility only after OAuth client setup exists.
 
 Exit criteria:
@@ -62,7 +62,7 @@ Scope:
 - English meaning, Chinese meaning, IPA/pronunciation field, source, tags, and lookup latency.
 - Recent valid searches.
 - Offline dictionary load from IndexedDB.
-- Encrypted storage for user-specific POC records before vocabulary data is introduced.
+- Encrypted storage for user-specific test records before vocabulary data is introduced.
 - Persistent IndexedDB connection instead of opening a new database connection per read/write.
 - Resumable dictionary install checkpoints for interrupted first-time dictionary download.
 - Lightweight frequency-ranked "Explore next" word prompt.
@@ -78,7 +78,7 @@ Current implementation started:
 - Prefix suggestions added.
 - Chinese-to-English lookup and fuzzy misspelling suggestions added.
 - Startup auto-load now shows a loading state instead of asking the user to tap after install.
-- User-specific POC records are encrypted with Web Crypto before storage.
+- User-specific test records are encrypted with Web Crypto before storage.
 - IndexedDB access now reuses one connection for the app lifetime.
 - Dictionary installer now stores 4 MB chunk checkpoints when the server supports `Range`.
 - Frequency-ranked "Explore next" prompt added.
@@ -172,7 +172,7 @@ Scope:
 - Rollback to known-good checkpoint.
 - Redacted diagnostic bundle.
 - Browser download and Web Share where available.
-- Optional result upload endpoint remains POC-only, not product behavior.
+- Optional result upload endpoint remains test-only, not product behavior.
 
 Exit criteria:
 

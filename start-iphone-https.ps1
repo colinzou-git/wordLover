@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$server = Join-Path $repoRoot "poc\iphone-pwa\serve-https.py"
+$server = Join-Path $repoRoot "apps\wordlover-pwa\scripts\serve-https.py"
 $python = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 
 if (-not (Test-Path $server)) {

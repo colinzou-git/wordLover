@@ -43,7 +43,7 @@
   "offlineShell": {
     "supported": true,
     "cacheNames": [
-      "wordlover-poc-shell-v2"
+      "wordlover-shell-v2"
     ],
     "allShellAssetsCached": true,
     "missing": [],
