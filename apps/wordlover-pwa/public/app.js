@@ -63,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.5.2-product.20260525-v30";
+const APP_VERSION = "0.5.3-product.20260525-v31";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v30";
+const SHELL_CACHE_VERSION = "wordlover-shell-v31";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -74,6 +74,7 @@ const DEFAULT_THEME = "calm";
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
+const REVIEW_REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000;
 const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
@@ -1345,6 +1346,14 @@ function getVocabularyRatingChangedAt(item) {
   return item.review?.lastReviewedAt ?? item.updatedAt ?? item.savedAt ?? "";
 }
 
+function getVocabularyPhonetic(item) {
+  return item.user?.phonetic || item.original?.phonetic || "";
+}
+
+function renderIpa(phonetic) {
+  return phonetic ? `<span class="word-ipa">${escapeHtml(phonetic)}</span>` : `<span class="word-ipa missing">No IPA</span>`;
+}
+
 function getVocabularyStats() {
   const active = vocabularyItems.filter((item) => !item.archivedAt);
   const archived = vocabularyItems.filter((item) => item.archivedAt);
@@ -1390,9 +1399,6 @@ function renderVocabularyStats(stats) {
         </button>
       `).join("")}
     </div>
-    <div class="vocab-toolbar">
-      <button type="button" data-action="vocab-filter" data-filter="all">Browse other words</button>
-    </div>
   `;
 }
 
@@ -1404,7 +1410,7 @@ function renderVocabularyDetail(item) {
       <p>${escapeHtml(chinese)}</p>
       <p>${escapeHtml(english)}</p>
       <p class="vocab-meta">
-        ${escapeHtml(item.user?.phonetic || item.original?.phonetic || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - rating ${escapeHtml(FSRS_RATING_LABELS[getVocabularyRating(item)])}
+        ${escapeHtml(getVocabularyPhonetic(item) || "No pronunciation")} - source ${escapeHtml(item.original?.englishMeaningSource ?? "unknown")} - saved ${escapeHtml(new Date(item.savedAt).toLocaleDateString())} - rating ${escapeHtml(FSRS_RATING_LABELS[getVocabularyRating(item)])}
       </p>
       <div class="vocab-actions">
         <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Search</button>
@@ -1442,7 +1448,10 @@ function renderVocabularyBrowser(stats) {
             const selected = selectedItem?.normalizedTerm === item.normalizedTerm;
             return `
               <li class="${selected ? "selected" : ""}">
-                <button type="button" data-action="vocab-select" data-term="${escapeHtml(item.term)}">${escapeHtml(item.term)}</button>
+                <button type="button" data-action="vocab-select" data-term="${escapeHtml(item.term)}">
+                  <span class="vocab-term">${escapeHtml(item.term)}</span>
+                  ${renderIpa(getVocabularyPhonetic(item))}
+                </button>
                 ${selected ? renderVocabularyDetail(item) : ""}
               </li>
             `;
@@ -1528,6 +1537,13 @@ function renderStudyStats() {
     : stats.activeCount
       ? "No words are due right now. You can still practice saved words."
       : "No saved words to review yet.";
+}
+
+function refreshReviewScheduleViews() {
+  ensureVocabularyReviewStates();
+  renderStudyStats();
+  renderVocabulary();
+  if (loaded) void renderWordPrompt();
 }
 
 function clamp(value, min, max) {
@@ -1642,7 +1658,7 @@ function suggestWordOfTheDay() {
   if (!dictionaryDb) return null;
   const searched = new Set(historyItems.map((item) => normalizeTerm(item.term)));
   const statement = dictionaryDb.prepare(`
-    SELECT word, definition, translation
+    SELECT word, phonetic, definition, translation
     FROM dictionary_entries
     WHERE is_toefl = 1
       AND definition IS NOT NULL
@@ -1663,6 +1679,7 @@ function suggestWordOfTheDay() {
       if (!searched.has(normalizeTerm(row.word))) {
         candidates.push({
           word: row.word,
+          phonetic: row.phonetic,
           preview: topLines(row.definition, 1)[0] ?? topLines(row.translation, 1)[0] ?? "",
         });
       }
@@ -1683,7 +1700,7 @@ async function renderWordPrompt() {
     return;
   }
   currentPromptTerm = suggestion.word;
-  wordPromptText.textContent = `${suggestion.word} - ${suggestion.preview}`;
+  wordPromptText.textContent = `${suggestion.word}${suggestion.phonetic ? ` ${suggestion.phonetic}` : ""} - ${suggestion.preview}`;
   wordPromptPanel.hidden = false;
 }
 
@@ -1695,6 +1712,7 @@ function quizEntryFromVocabulary(item) {
   return {
     term: item.term,
     normalizedTerm: item.normalizedTerm,
+    phonetic: getVocabularyPhonetic(item),
     correct: summarizeLines(item.user?.chineseMeanings?.length ? item.user.chineseMeanings : item.original?.chineseMeanings),
     sourceItem: item,
   };
@@ -1749,6 +1767,7 @@ function renderQuiz(entry, mode) {
     <div class="quiz-question">
       <span>${mode === "review" ? "Review" : mode === "practice" ? "Practice" : "First check"}</span>
       <strong>${escapeHtml(entry.term)}</strong>
+      ${renderIpa(entry.phonetic)}
       <p class="muted">Choose the closest meaning.</p>
     </div>
     <div class="quiz-options">
@@ -1790,7 +1809,7 @@ function pickNewStudyEntry() {
       .filter(Boolean),
   );
   const statement = dictionaryDb.prepare(`
-    SELECT word, normalized_word, definition, translation
+    SELECT word, normalized_word, phonetic, definition, translation
     FROM dictionary_entries
     WHERE is_toefl = 1
       AND translation IS NOT NULL
@@ -1807,6 +1826,7 @@ function pickNewStudyEntry() {
         candidates.push({
           term: row.word,
           normalizedTerm: row.normalized_word,
+          phonetic: row.phonetic,
           correct: meaningPreviewFromEntry(row),
         });
       }
@@ -2328,7 +2348,7 @@ async function applyAppUpdate() {
     return;
   }
   if (pendingAppReloadUrl) {
-    updateStatus.textContent = "Reloading the latest app shell...";
+    updateStatus.textContent = "Reloading the latest app shell. Local vocabulary and study data stay on this device.";
     window.location.href = pendingAppReloadUrl;
     return;
   }
@@ -2419,6 +2439,7 @@ async function init() {
   renderVocabulary();
   renderStudyStats();
   renderMetrics();
+  window.setInterval(refreshReviewScheduleViews, REVIEW_REFRESH_INTERVAL_MS);
   const installed = await hasInstalledDictionary();
   if (installed && !lastMetrics) {
     dictionaryState.textContent = "Installed";
@@ -2694,6 +2715,10 @@ runReviewAutomationButton.addEventListener("click", () => {
 
 window.addEventListener("online", renderAppMenu);
 window.addEventListener("offline", renderAppMenu);
+window.addEventListener("focus", refreshReviewScheduleViews);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshReviewScheduleViews();
+});
 
 window.WordLoverApp = {
   ensureDictionaryLoaded,
@@ -2707,6 +2732,7 @@ window.WordLoverApp = {
   startNewWordStudy,
   getActiveQuiz: () => activeQuiz,
   checkForAppUpdate,
+  refreshReviewScheduleViews,
   runReviewAutomation,
   setDebugMode,
   getDueVocabularyItems,

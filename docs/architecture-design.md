@@ -170,6 +170,7 @@ Responsibilities:
 - Home screen with top search input, daily stats, due-review button, and proactive new-word button.
 - Dictionary result detail view.
 - Vocabulary status dashboard, paged term browser, term detail, edit, archive, restore, and search/filter UI.
+- Vocabulary and Today review word displays include IPA/pronunciation whenever available; missing IPA is shown explicitly so the user can notice incomplete pronunciation data.
 - Review and quiz flows.
 - Fast Encoding Mode.
 - AI-assisted detail entry point wherever a term is displayed.
@@ -194,7 +195,7 @@ Responsibilities:
 
 Service worker caching strategy:
 
-- App shell: cache-first with explicit version.
+- App shell: network-first while online with explicit version and offline cache fallback.
 - API/network requests: network-first where online, graceful offline fallback.
 - Dictionary package: do not rely only on HTTP cache; persist through app storage after first setup.
 
@@ -203,6 +204,7 @@ App update UX:
 - The app exposes a compact menu/settings surface that displays app version, user-data format version, dictionary data version, dictionary engine, sync status, and offline readiness.
 - The user can tap **Check update** to ask the service worker to look for a newer app shell.
 - If a waiting service worker is available, the user can tap **Apply update**. The app switches to the new shell only after the user chooses to apply it.
+- App shell updates preserve all user data. Service-worker cache replacement may delete old shell caches only; it must not clear IndexedDB, OPFS, local storage, Google Drive data, vocabulary records, review progress, or dictionary packages.
 - Dictionary package updates use a separate side-by-side install and validation flow before switching active dictionary versions.
 - If update activation or dictionary validation fails, the app keeps the last-known-good app shell or dictionary package.
 

@@ -634,6 +634,17 @@ li button {
   margin-top: 4px;
 }
 
+.word-ipa {
+  color: var(--muted);
+  display: inline-block;
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
+.word-ipa.missing {
+  opacity: 0.75;
+}
+
 .quiz-options {
   display: grid;
   gap: 10px;
@@ -689,7 +700,6 @@ li button {
   font-size: 1.25rem;
 }
 
-.vocab-toolbar,
 .vocab-browser-head,
 .vocab-pager {
   align-items: center;
@@ -726,11 +736,17 @@ li button {
 }
 
 .vocab-word-list li > button {
+  display: grid;
+  gap: 2px;
   background: transparent;
   color: var(--text);
   min-height: 0;
   padding: 4px;
   text-align: left;
+}
+
+.vocab-term {
+  font-weight: 700;
 }
 
 .vocab-detail {

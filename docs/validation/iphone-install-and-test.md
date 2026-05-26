@@ -253,7 +253,7 @@ If the iPhone keeps an old cached shell:
 2. Open the cache-busting URL in Safari while online:
 
 ```text
-https://192.168.1.73:8443/?fresh=v30
+https://192.168.1.73:8443/?fresh=v31
 ```
 
 3. Tap **Menu > Check update > Apply update**.
