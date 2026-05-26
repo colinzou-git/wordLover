@@ -22,15 +22,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\s
 Then open:
 
 ```text
-http://127.0.0.1:4173
+http://127.0.0.1:4173/?fresh=v30
 ```
 
 Keep that PowerShell window open while using WordLover. If the server is closed, an already-open browser tab can still show the app shell from cache, but first-time dictionary install cannot fetch `dictionary.sqlite`.
 
+If the menu still shows an older app version, open the cache-busting URL above, then use **Menu > Check update > Apply update**. Older builds used a cache-first app shell, so opening only `http://127.0.0.1:4173/` can keep showing the previous installed shell.
+
 To run the automated suite, open:
 
 ```text
-http://127.0.0.1:4173/automated-tests.html?fresh=v28
+http://127.0.0.1:4173/automated-tests.html?fresh=v30
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.

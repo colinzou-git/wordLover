@@ -1,15 +1,15 @@
-const CACHE_NAME = "wordlover-shell-v29";
+const CACHE_NAME = "wordlover-shell-v30";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-11",
-  "/styles.css?v=20260525-11",
-  "/wordlover-config.js?v=20260525-11",
+  "/app.js?v=20260525-12",
+  "/styles.css?v=20260525-12",
+  "/wordlover-config.js?v=20260525-12",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260525-11",
+  "/automated-tests.js?v=20260525-12",
 ];
 
 self.addEventListener("install", (event) => {
@@ -35,7 +35,25 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
-  if (new URL(request.url).pathname.endsWith("dictionary.sqlite")) return;
+  const url = new URL(request.url);
+  if (url.pathname.endsWith("dictionary.sqlite")) return;
+
+  const shouldPreferNetwork =
+    request.mode === "navigate" ||
+    request.destination === "document" ||
+    request.destination === "script" ||
+    request.destination === "style" ||
+    url.searchParams.has("fresh") ||
+    url.searchParams.has("update-check");
+
+  if (shouldPreferNetwork) {
+    event.respondWith(
+      fetch(request).catch(() =>
+        caches.match(request).then((cached) => cached || caches.match(url.pathname) || caches.match("/")),
+      ),
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then((cached) => {

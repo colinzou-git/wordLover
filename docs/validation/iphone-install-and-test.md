@@ -250,9 +250,15 @@ The current PWA includes a compact menu for version and update controls.
 If the iPhone keeps an old cached shell:
 
 1. Close the Home Screen app.
-2. Open the same URL in Safari once while online.
-3. Tap **Menu > Check update**.
+2. Open the cache-busting URL in Safari while online:
+
+```text
+https://192.168.1.73:8443/?fresh=v30
+```
+
+3. Tap **Menu > Check update > Apply update**.
 4. Reopen the Home Screen app.
+5. If the Home Screen icon still shows the old version, delete only the Home Screen icon and add it again from the cache-busting Safari page. This does not delete the local browser data unless Safari website data is cleared.
 
 Dictionary data updates are separate from app-shell updates. A future dictionary update must download or import the new dictionary alongside the current package, validate it, and switch only after validation succeeds.
 

@@ -63,9 +63,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.5.1-product.20260525-v29";
+const APP_VERSION = "0.5.2-product.20260525-v30";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v29";
+const SHELL_CACHE_VERSION = "wordlover-shell-v30";
 const DICTIONARY_ENGINE = "OPFS package store active; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build stores the package in OPFS/IndexedDB and keeps the wa-sqlite OPFS engine as the production gate.";
@@ -147,6 +147,7 @@ let googleAuth = {
   scopes: [],
 };
 let googleTokenClient = null;
+let pendingAppReloadUrl = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -2281,11 +2282,21 @@ function exportState() {
 
 async function checkForAppUpdate() {
   applyUpdateButton.disabled = true;
+  pendingAppReloadUrl = null;
   if (!("serviceWorker" in navigator)) {
     updateStatus.textContent = "Service worker is unavailable on this device.";
     return;
   }
   updateStatus.textContent = "Checking for an app update...";
+  let latestVersion = null;
+  try {
+    const response = await fetch(`/app.js?update-check=${Date.now()}`, { cache: "no-store" });
+    const scriptText = await response.text();
+    latestVersion = scriptText.match(/const APP_VERSION = "([^"]+)"/)?.[1] ?? null;
+  } catch (error) {
+    updateStatus.textContent = `Could not check the server app version: ${error instanceof Error ? error.message : String(error)}.`;
+    return;
+  }
   const registration = await navigator.serviceWorker.getRegistration();
   if (!registration) {
     updateStatus.textContent = "Offline shell is not registered yet. Reopen the app and try again.";
@@ -2295,7 +2306,15 @@ async function checkForAppUpdate() {
   const waitingWorker = registration.waiting;
   if (waitingWorker) {
     applyUpdateButton.disabled = false;
-    updateStatus.textContent = "An update is ready. Tap Apply update to switch.";
+    updateStatus.textContent = latestVersion && latestVersion !== APP_VERSION
+      ? `App shell ${latestVersion} is ready. Tap Apply update to switch.`
+      : "An app-shell update is ready. Tap Apply update to switch.";
+    return;
+  }
+  if (latestVersion && latestVersion !== APP_VERSION) {
+    pendingAppReloadUrl = `/?fresh=${encodeURIComponent(latestVersion)}-${Date.now()}`;
+    applyUpdateButton.disabled = false;
+    updateStatus.textContent = `App shell ${latestVersion} is available on the server. Tap Apply update to reload it.`;
     return;
   }
   updateStatus.textContent = `No app-shell update found. Current version: ${APP_VERSION}.`;
@@ -2303,12 +2322,20 @@ async function checkForAppUpdate() {
 
 async function applyAppUpdate() {
   const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+  if (registration?.waiting) {
+    updateStatus.textContent = "Applying update...";
+    registration.waiting.postMessage({ type: "SKIP_WAITING" });
+    return;
+  }
+  if (pendingAppReloadUrl) {
+    updateStatus.textContent = "Reloading the latest app shell...";
+    window.location.href = pendingAppReloadUrl;
+    return;
+  }
   if (!registration?.waiting) {
     updateStatus.textContent = "No waiting update is available yet. Check update first.";
     return;
   }
-  updateStatus.textContent = "Applying update...";
-  registration.waiting.postMessage({ type: "SKIP_WAITING" });
 }
 
 async function runReviewAutomation() {
