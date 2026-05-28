@@ -5002,6 +5002,11 @@ function exportState() {
     historyItems,
     vocabularyItems,
     studyEvents,
+    spellingItems,
+    spellingEvents,
+    userDictionary: userDictionaryEntries,
+    onReturnAction,
+    speakOnReturn,
     autosaveEnabled,
     lastMetrics,
   };
