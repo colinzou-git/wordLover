@@ -22,7 +22,7 @@ def main() -> int:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.on("pageerror", lambda e: print(f"PAGEERROR: {e}", flush=True))
-        page.goto(f"{base}/?fresh=v56", wait_until="domcontentloaded")
+        page.goto(f"{base}/?fresh=v57", wait_until="domcontentloaded")
         page.wait_for_function("window.WordLoverApp != null", timeout=15000)
 
         # Give SW controllerchange-reload a chance to settle.
@@ -105,10 +105,10 @@ def main() -> int:
         # Check 4: App version + cache version bumped.
         state = page.evaluate("() => window.WordLoverApp.getState()")
         print(f"appVersion={state.get('appVersion')} cache={state.get('shellCacheVersion')}", flush=True)
-        if state.get("appVersion") != "0.6.2-product.20260528-v56":
-            failures.append(f"appVersion not v56: {state.get('appVersion')}")
-        if state.get("shellCacheVersion") != "wordlover-shell-v56":
-            failures.append(f"shell cache version not v56: {state.get('shellCacheVersion')}")
+        if state.get("appVersion") != "0.6.2-product.20260528-v57":
+            failures.append(f"appVersion not v57: {state.get('appVersion')}")
+        if state.get("shellCacheVersion") != "wordlover-shell-v57":
+            failures.append(f"shell cache version not v57: {state.get('shellCacheVersion')}")
 
         # Check 5 (v44): all theme options present, including the new kid-friendly candy theme.
         theme_options = page.evaluate(

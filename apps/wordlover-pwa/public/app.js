@@ -95,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v56";
+const APP_VERSION = "0.6.2-product.20260528-v57";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v56";
+const SHELL_CACHE_VERSION = "wordlover-shell-v57";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -1030,18 +1030,6 @@ async function cleanupDictionaryChunks(chunkCount) {
   );
 }
 
-async function assembleDictionaryChunks(totalBytes, chunkCount) {
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (let index = 0; index < chunkCount; index += 1) {
-    const chunk = await loadFile(`${DICTIONARY_CHUNK_PREFIX}${index}`);
-    if (!chunk) throw new Error(`Dictionary chunk ${index + 1} is missing; retry while online.`);
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
 // Wrap fetch with an abort timeout so an offline iOS request that never settles
 // cannot hang the dictionary load (the request rejects and we fall back to the local copy).
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -1054,63 +1042,46 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
-async function fetchDictionaryWithResume(url) {
-  let totalBytes = 0;
-  try {
-    const head = await fetchWithTimeout(url, { method: "HEAD", cache: "no-store" }, 8000);
-    totalBytes = Number(head.headers.get("content-length") ?? 0);
-  } catch {
-    totalBytes = 0;
-  }
-
-  const storageCheck = await checkStorageBeforeInstall(totalBytes || DICTIONARY_ESTIMATED_BYTES);
+// Download the dictionary in a single request and verify its integrity BEFORE it is stored.
+// (A previous chunked Range download corrupted the file on CDNs that honor 206 responses, e.g.
+// GitHub Pages — the local test server only returns 200, so it went unnoticed. Single GET +
+// checksum is simple and robust.)
+async function downloadDictionaryFile(url, expected) {
+  const storageCheck = await checkStorageBeforeInstall(Number(expected?.bytes) || DICTIONARY_ESTIMATED_BYTES);
   if (!storageCheck.ok) throw new Error(storageCheck.message);
   if (storageCheck.warning) result.innerHTML = `<p class="muted">${escapeHtml(storageCheck.warning)}</p>`;
-
-  if (!totalBytes) {
-    const response = await fetchWithTimeout(url, { cache: "no-store" }, 120000);
-    if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    await saveFile(DICTIONARY_KEY, bytes);
-    return bytes;
-  }
-
-  const expectedChunkCount = Math.ceil(totalBytes / DICTIONARY_CHUNK_SIZE);
-  let progress = await loadRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, null);
-  if (!progress || progress.totalBytes !== totalBytes || progress.chunkSize !== DICTIONARY_CHUNK_SIZE) {
-    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: 0 };
-    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
-  }
-
-  for (let index = progress.completedChunks; index < expectedChunkCount; index += 1) {
-    const start = index * DICTIONARY_CHUNK_SIZE;
-    const end = Math.min(start + DICTIONARY_CHUNK_SIZE - 1, totalBytes - 1);
-    const response = await fetchWithTimeout(url, {
-      cache: "no-store",
-      headers: { Range: `bytes=${start}-${end}` },
-    }, 60000);
-    if (response.status === 200 && index === 0) {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      await saveFile(DICTIONARY_KEY, bytes);
-      await cleanupDictionaryChunks(expectedChunkCount);
-      return bytes;
-    }
-    if (response.status !== 206) {
-      throw new Error(`Dictionary range fetch failed: ${response.status}`);
-    }
-    const chunk = new Uint8Array(await response.arrayBuffer());
-    await saveFile(`${DICTIONARY_CHUNK_PREFIX}${index}`, chunk);
-    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: index + 1 };
-    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
-    const percent = Math.round((progress.completedChunks / expectedChunkCount) * 100);
-    loadButton.textContent = `Downloading ${percent}%`;
-    result.innerHTML = `<p class="muted">Downloading dictionary ${percent}%.</p>`;
-  }
-
-  const bytes = await assembleDictionaryChunks(totalBytes, expectedChunkCount);
-  await saveFile(DICTIONARY_KEY, bytes);
-  await cleanupDictionaryChunks(expectedChunkCount);
+  result.innerHTML = `<p class="muted">Downloading dictionary (one-time)…</p>`;
+  const response = await fetchWithTimeout(url, { cache: "no-store" }, 120000);
+  if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await verifyDictionaryBytes(bytes, expected);
   return bytes;
+}
+
+// Validate downloaded bytes against the manifest (length + SHA-256) so a truncated/corrupted
+// transfer is rejected instead of being saved and later failing to open ("malformed").
+async function verifyDictionaryBytes(bytes, expected) {
+  if (!expected) return;
+  if (expected.bytes && bytes.byteLength !== Number(expected.bytes)) {
+    throw new Error(`Dictionary download size mismatch (got ${bytes.byteLength}, expected ${expected.bytes}).`);
+  }
+  if (expected.sha256 && crypto?.subtle?.digest) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (hex !== String(expected.sha256).toLowerCase()) {
+      throw new Error("Dictionary download checksum mismatch (corrupt transfer).");
+    }
+  }
+}
+
+// Open + sanity-check a SQLite buffer. A corrupt buffer throws here ("database disk image is
+// malformed"), which the caller uses to discard the bad copy and re-download.
+async function openDictionaryFromBytes(bytes) {
+  SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
+  dictionaryDb?.close();
+  dictionaryDb = new SQL.Database(bytes);
+  ftsSearchAvailable = null;
+  return dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
 }
 
 async function fetchRemoteDictionaryManifest() {
@@ -1151,9 +1122,6 @@ async function loadLocalDictionaryBytes() {
 
 async function loadDictionary() {
   const start = performance.now();
-  let source = "offline copy";
-  let bytes = null;
-
   const hasLocalCopy = await hasInstalledDictionary();
   // Best-effort, time-boxed update check. Skipped entirely when offline so a never-settling
   // request can't block loading the installed copy (the iOS offline-hang bug).
@@ -1162,46 +1130,74 @@ async function loadDictionary() {
   const remoteVersion = remoteManifest?.dictionaryDataVersion ?? null;
   const versionChanged = Boolean(remoteVersion && localVersion && remoteVersion !== localVersion);
 
-  // Local-first: if an installed copy exists and there is no confirmed update, use it with
-  // no network body fetch at all. This makes offline launches load instantly and reliably.
+  let bytes = null;
+  let count = null;
+  let source = "offline copy";
+  let fetchedMs = null;
+
+  // 1) Local-first: open the installed copy directly (instant + offline-safe) unless a new
+  // version is available. If it is corrupt, discard it and fall through to a fresh download.
   if (hasLocalCopy && !versionChanged) {
-    bytes = await loadLocalDictionaryBytes();
+    const local = await loadLocalDictionaryBytes();
+    if (local) {
+      try {
+        fetchedMs = performance.now();
+        count = await openDictionaryFromBytes(local);
+        bytes = local;
+      } catch (error) {
+        console.warn("Local dictionary is unreadable; re-downloading.", error);
+        await invalidateLocalDictionaryCopy();
+        await saveValue("dictionaryInstalled", false);
+      }
+    }
   }
 
+  // 2) Download a fresh, verified copy (first install / version change / corrupt local copy).
   if (!bytes) {
     if (versionChanged) {
       result.innerHTML = `<p class="muted">Dictionary update detected (${escapeHtml(localVersion)} -> ${escapeHtml(remoteVersion)}). Replacing local copy.</p>`;
       await invalidateLocalDictionaryCopy();
       await saveValue("dictionaryInstalled", false);
     }
+    let downloaded = null;
     try {
-      bytes = await fetchDictionaryWithResume("/dictionary.sqlite");
+      downloaded = await downloadDictionaryFile("/dictionary.sqlite", remoteManifest?.sqlite ?? null);
+    } catch (error) {
+      // Network/integrity failure → fall back to any already-installed local copy.
+      const local = await loadLocalDictionaryBytes();
+      if (!local) {
+        throw new Error(`Dictionary is unavailable online and no offline copy is installed yet. Connect to the internet to install it. ${error instanceof Error ? error.message : String(error)}`);
+      }
+      fetchedMs = performance.now();
+      count = await openDictionaryFromBytes(local);
+      bytes = local;
+      source = "offline copy after failed download";
+    }
+    if (downloaded) {
+      fetchedMs = performance.now();
+      try {
+        count = await openDictionaryFromBytes(downloaded);
+      } catch (error) {
+        // Downloaded bytes are unreadable — do not keep a bad copy.
+        await invalidateLocalDictionaryCopy();
+        await saveValue("dictionaryInstalled", false);
+        throw new Error(`The dictionary could not be opened after download (it may be corrupt). Reload to retry. ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Persist only AFTER it opened cleanly.
+      bytes = downloaded;
       source = "network";
-      await saveOpfsFile(DICTIONARY_KEY, bytes);
+      await saveFile(DICTIONARY_KEY, downloaded);
+      await saveOpfsFile(DICTIONARY_KEY, downloaded);
       await saveValue("dictionaryInstalled", true);
       if (remoteVersion) await saveValue(DICTIONARY_VERSION_KEY, remoteVersion);
-    } catch (error) {
-      bytes = await loadLocalDictionaryBytes();
-      source = "offline copy after failed download";
-      if (!bytes) {
-        throw new Error(
-          `Dictionary is unavailable online and no offline copy is installed yet. Load it once while online first. ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
     }
   }
-  const fetched = performance.now();
-  SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
-  const initialized = performance.now();
-  dictionaryDb?.close();
-  dictionaryDb = new SQL.Database(bytes);
-  ftsSearchAvailable = null;
-  const opened = performance.now();
-  const count = dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
+
+  const now = performance.now();
   lastMetrics = {
-    fetchMs: fetched - start,
-    initMs: initialized - fetched,
-    openMs: opened - initialized,
+    fetchMs: (fetchedMs ?? now) - start,
+    initMs: 0,
+    openMs: now - (fetchedMs ?? now),
     bytes: bytes.byteLength,
     entries: count,
     source,

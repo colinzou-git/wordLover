@@ -39,7 +39,7 @@ def main() -> int:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.on("pageerror", lambda e: print(f"PAGEERROR: {e}", flush=True))
-        page.goto(f"{base}/?fresh=v56", wait_until="domcontentloaded")
+        page.goto(f"{base}/?fresh=v57", wait_until="domcontentloaded")
         page.wait_for_function("window.WordLoverApp != null", timeout=15000)
 
         # Drain any startup passphrase modals (legacy path). On v43+ there should be none.
