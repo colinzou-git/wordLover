@@ -1,20 +1,28 @@
-const CACHE_NAME = "wordlover-shell-v31";
+const CACHE_NAME = "wordlover-shell-v51";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-13",
-  "/styles.css?v=20260525-13",
-  "/wordlover-config.js?v=20260525-13",
+  "/app.js?v=20260527-40",
+  "/styles.css?v=20260527-40",
+  "/wordlover-config.js?v=20260527-40",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
+  "/wa-sqlite-opfs-worker.js",
+  "/vendor/wa-sqlite/LICENSE",
+  "/vendor/wa-sqlite/dist/wa-sqlite-async.mjs",
+  "/vendor/wa-sqlite/dist/wa-sqlite-async.wasm",
+  "/vendor/wa-sqlite/src/sqlite-api.js",
+  "/vendor/wa-sqlite/src/sqlite-constants.js",
+  "/vendor/wa-sqlite/src/VFS.js",
+  "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
+  "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260525-13",
+  "/automated-tests.js?v=20260527-40",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
@@ -37,6 +45,8 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.pathname.endsWith("dictionary.sqlite")) return;
+  if (url.pathname.endsWith("dictionary.sqlite.zst")) return;
+  if (url.pathname.endsWith("dictionary-manifest.json")) return;
 
   const shouldPreferNetwork =
     request.mode === "navigate" ||

@@ -6,7 +6,7 @@ window.WORDLOVER_CONFIG = {
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
   ],
-  geminiScopes: ["https://www.googleapis.com/auth/generative-language"],
-  geminiModel: "gemini-2.0-flash",
+  geminiApiKey: "",
+  geminiModel: "gemini-2.5-flash",
   localDevelopmentPassphrase: "",
 };

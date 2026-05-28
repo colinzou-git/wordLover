@@ -204,7 +204,9 @@ App update UX:
 - The app exposes a compact menu/settings surface that displays app version, user-data format version, dictionary data version, dictionary engine, sync status, and offline readiness.
 - The user can tap **Check update** to ask the service worker to look for a newer app shell.
 - If a waiting service worker is available, the user can tap **Apply update**. The app switches to the new shell only after the user chooses to apply it.
+- The service worker must not call `skipWaiting()` during install. It may call `skipWaiting()` only after the app posts an explicit `SKIP_WAITING` message from the user-controlled Apply update flow.
 - App shell updates preserve all user data. Service-worker cache replacement may delete old shell caches only; it must not clear IndexedDB, OPFS, local storage, Google Drive data, vocabulary records, review progress, or dictionary packages.
+- User-data migrations must merge compatible old and new stores. In particular, the legacy aggregate vocabulary list and the per-record vocabulary store are both valid sources during upgrade, and legacy-only words must be carried forward into the per-record store.
 - Dictionary package updates use a separate side-by-side install and validation flow before switching active dictionary versions.
 - If update activation or dictionary validation fails, the app keeps the last-known-good app shell or dictionary package.
 
@@ -268,6 +270,7 @@ Production direction:
 - Prefer `wa-sqlite` with an OPFS VFS so SQLite page cache controls memory and the full dictionary is not loaded into JS heap.
 - Treat "WA/SingleNAND plus OPFS" as the product direction of WebAssembly SQLite backed by the iPhone's local storage through OPFS, with dictionary reads paged from local persistent storage instead of copied into a giant JavaScript buffer.
 - The current app shell now exposes an OPFS-aware dictionary-engine status and stores dictionary packages durably, but the actual production `wa-sqlite` OPFS query engine still needs to replace the `sql.js` full-buffer runtime before the 50 MB memory requirement can be closed.
+- The current PWA bundle includes `wa-sqlite` 1.0.0 and a module worker that can open the OPFS dictionary through `OriginPrivateFileSystemVFS` for smoke validation. The user-facing dictionary repository still falls back to `sql.js` until iPhone memory and offline validation accept the worker engine.
 - Keep a sharded dictionary package as fallback if OPFS is unavailable or older iPhones still exceed the memory budget.
 - Isolate dictionary access behind a `DictionaryRepository` interface so the UI, vocabulary, and quiz code do not depend on `sql.js`.
 - Treat the memory benchmark as a blocking Phase 0/early Phase 1 gate before scaling the dictionary UI further.
@@ -379,6 +382,7 @@ Wrapped DEK
   stored in IndexedDB only after AES-GCM wrapping
   unwrap requires the local passphrase or another configured key-recovery path
   known PWA limitation: browser storage is not equivalent to native secure enclave/keychain
+  implementation note: keep the non-extractable Web Crypto key for the page session; do not keep the plaintext passphrase in a long-lived JS global
 
 Recovery export
   user-downloaded encrypted recovery file
@@ -602,7 +606,8 @@ Sync strategy:
 - Local user data is authoritative while offline.
 - Each local write records an event with a monotonically increasing local sequence number.
 - Sync uploads a full encrypted snapshot and a manifest after successful local validation.
-- The current PWA implementation upserts one passphrase-encrypted snapshot file in Drive `appDataFolder` instead of creating duplicate files on every sync; restore downloads the latest matching file and replaces local user records after confirmation.
+- The current PWA implementation upserts one passphrase-encrypted snapshot file in Drive `appDataFolder` instead of creating duplicate files on every sync; restore downloads the latest matching file and replaces local user records after in-page confirmation.
+- Snapshot restore must use an atomic IndexedDB transaction for clear-and-write replacement so an interrupted restore cannot leave vocabulary or study-event stores empty.
 - Sync downloads cloud manifest first, compares versions and device clocks, then merges or prompts when needed.
 - After sync merge, validate integrity and create/update checkpoint.
 
@@ -653,6 +658,7 @@ Responsibilities:
 - Create final checkpoint before rollback.
 - Revalidate after restore.
 - Retain multiple checkpoints with storage-aware pruning.
+- Current implementation baseline: encrypted local checkpoint envelopes are stored in IndexedDB, a daily checkpoint is created at launch, manual checkpoint and rollback-latest actions are exposed in the menu, and pre-restore/pre-rollback checkpoints are created before destructive replacement.
 
 Export:
 

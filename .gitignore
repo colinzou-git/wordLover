@@ -6,6 +6,7 @@ data/wordnet-augmentation-report.json
 data/opted-augmentation-report.json
 data/sources/
 apps/wordlover-pwa/public/dictionary.sqlite
+apps/wordlover-pwa/public/dictionary.sqlite.zst
 apps/wordlover-pwa/dist/
 apps/wordlover-pwa/node_modules/
 apps/wordlover-pwa/.vite/

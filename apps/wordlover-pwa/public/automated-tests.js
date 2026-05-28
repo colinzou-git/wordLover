@@ -10,20 +10,34 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v31";
+const SHELL_CACHE_NAME = "wordlover-shell-v51";
+const APP_DB = "wordlover-user";
+const APP_DB_VERSION = 5;
+const APP_KV_STORE = "kv";
+const APP_VOCABULARY_STORE = "vocabularyRecords";
+const APP_STUDY_EVENT_STORE = "studyEventRecords";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260525-13",
-  "/styles.css?v=20260525-13",
-  "/wordlover-config.js?v=20260525-13",
+  "/app.js?v=20260527-40",
+  "/styles.css?v=20260527-40",
+  "/wordlover-config.js?v=20260527-40",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
+  "/wa-sqlite-opfs-worker.js",
+  "/vendor/wa-sqlite/LICENSE",
+  "/vendor/wa-sqlite/dist/wa-sqlite-async.mjs",
+  "/vendor/wa-sqlite/dist/wa-sqlite-async.wasm",
+  "/vendor/wa-sqlite/src/sqlite-api.js",
+  "/vendor/wa-sqlite/src/sqlite-constants.js",
+  "/vendor/wa-sqlite/src/VFS.js",
+  "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
+  "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260525-13",
+  "/automated-tests.js?v=20260527-40",
 ];
 
 let lastResults = null;
@@ -53,6 +67,14 @@ function requestToPromise(request) {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function unlockMainAppFrame(frame) {
+  const passphraseInput = frame.contentDocument?.querySelector("#passphrase");
+  if (!passphraseInput) return false;
+  passphraseInput.value = "wordlover-localhost-development-passphrase";
+  frame.contentDocument.querySelector("[data-modal-submit]")?.click();
+  return true;
 }
 
 function openAutomationDb() {
@@ -85,6 +107,50 @@ async function loadStoreValue(storeName, key, fallback = null) {
   const value = await requestToPromise(tx.objectStore(storeName).get(key));
   db.close();
   return value ?? fallback;
+}
+
+function openAppDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(APP_DB, APP_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(APP_KV_STORE)) db.createObjectStore(APP_KV_STORE);
+      if (!db.objectStoreNames.contains(APP_VOCABULARY_STORE)) db.createObjectStore(APP_VOCABULARY_STORE);
+      if (!db.objectStoreNames.contains(APP_STUDY_EVENT_STORE)) db.createObjectStore(APP_STUDY_EVENT_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function putAppStoreValue(storeName, key, value) {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function getAppStoreValue(storeName, key, fallback = null) {
+  const db = await openAppDb();
+  const tx = db.transaction(storeName, "readonly");
+  const value = await requestToPromise(tx.objectStore(storeName).get(key));
+  db.close();
+  return value ?? fallback;
+}
+
+async function deleteAppStoreValue(storeName, key) {
+  const db = await openAppDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
 }
 
 function normalizeTerm(term) {
@@ -283,6 +349,54 @@ async function saveDictionaryToOpfs(bytes) {
     bytes: restored.byteLength,
     sampleChecksum: sampleChecksum(restored),
   };
+}
+
+function callWaSqliteWorker(worker, message, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID ? crypto.randomUUID() : `wa-${Date.now()}-${Math.random()}`;
+    const timer = window.setTimeout(() => {
+      worker.removeEventListener("message", onMessage);
+      reject(new Error(`wa-sqlite worker timed out for ${message.type}`));
+    }, timeoutMs);
+    function onMessage(event) {
+      if (event.data?.id !== id) return;
+      window.clearTimeout(timer);
+      worker.removeEventListener("message", onMessage);
+      if (event.data.ok) resolve(event.data.result);
+      else reject(new Error(event.data.error ?? "wa-sqlite worker failed"));
+    }
+    worker.addEventListener("message", onMessage);
+    worker.postMessage({ ...message, id });
+  });
+}
+
+async function runWaSqliteOpfsSmoke() {
+  if (!navigator.storage?.getDirectory || typeof Worker === "undefined") {
+    return { supported: false, passed: false, reason: "OPFS worker support is unavailable." };
+  }
+  const worker = new Worker("/wa-sqlite-opfs-worker.js", { type: "module" });
+  try {
+    const openStartedAt = performance.now();
+    await callWaSqliteWorker(worker, { type: "open" }, 10000);
+    const openMs = performance.now() - openStartedAt;
+    const lookup = await callWaSqliteWorker(worker, { type: "lookup", term: "abandon" }, 10000);
+    return {
+      supported: true,
+      passed: lookup.status === "found",
+      openMs,
+      lookup,
+      note: "wa-sqlite opened the OPFS dictionary from a worker without copying the full SQLite file into the main JS heap.",
+    };
+  } catch (error) {
+    return {
+      supported: true,
+      passed: false,
+      error: error instanceof Error ? error.message : String(error),
+      note: "wa-sqlite OPFS worker is bundled but did not pass smoke validation yet; sql.js remains the active fallback.",
+    };
+  } finally {
+    worker.terminate();
+  }
 }
 
 async function benchmarkDictionary(db) {
@@ -525,9 +639,10 @@ async function runMainAppDictionarySmoke() {
       const result = await new Promise((resolve, reject) => {
         const startedAt = performance.now();
         const timer = window.setInterval(() => {
-          const frameWindow = frame.contentWindow;
-          const frameDocument = frame.contentDocument;
-          const text = frameDocument?.querySelector("#result")?.textContent ?? "";
+        const frameWindow = frame.contentWindow;
+        const frameDocument = frame.contentDocument;
+        unlockMainAppFrame(frame);
+        const text = frameDocument?.querySelector("#result")?.textContent ?? "";
           const input = frameDocument?.querySelector("#termInput");
           const failed = /Dictionary is unavailable|Failed to fetch|No exact dictionary match|Invalid input/i.test(text);
           const loaded = Boolean(frameWindow?.WordLoverApp?.getState?.().loaded);
@@ -573,6 +688,7 @@ async function runMainAppStudySmoke() {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
         const frameWindow = frame.contentWindow;
+        unlockMainAppFrame(frame);
         const input = frame.contentDocument?.querySelector("#termInput");
         const failedText = frame.contentDocument?.querySelector("#result")?.textContent ?? "";
         if (/Dictionary is unavailable|Failed to fetch/i.test(failedText)) {
@@ -697,6 +813,11 @@ async function runMainAppStudySmoke() {
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const refreshedReviewText = frameDocument.querySelector("#startReview")?.textContent ?? "";
     if (!refreshedReviewText) throw new Error("Review schedule refresh did not leave a valid review button state.");
+    await frameWindow.WordLoverApp.checkForAppUpdate();
+    const updateStatusText = frameDocument.querySelector("#updateStatus")?.textContent ?? "";
+    if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
+      throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
+    }
 
     return {
       passed: Boolean(firstTerm && secondTerm && firstTerm !== secondTerm),
@@ -710,6 +831,134 @@ async function runMainAppStudySmoke() {
       visibleIpaCount,
       detailRevealedAfterClick: true,
       refreshedReviewText,
+      updateStatusText,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
+async function runUpgradeVocabularyMergeSmoke() {
+  const previousLegacy = await getAppStoreValue(APP_KV_STORE, "vocabularyItems", undefined);
+  const now = new Date().toISOString();
+  const legacyOnly = {
+    term: "upgrade legacy only",
+    normalizedTerm: "upgrade legacy only",
+    savedAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    original: { phonetic: "legacy", englishMeanings: ["legacy meaning"], englishMeaningSource: "test", chineseMeanings: ["legacy"], tags: [] },
+    user: { phonetic: "legacy", englishMeanings: ["legacy meaning"], chineseMeanings: ["legacy"] },
+    review: { lastRating: "again", dueAt: now, reviewCount: 0 },
+  };
+  const recordOnly = {
+    term: "upgrade record only",
+    normalizedTerm: "upgrade record only",
+    savedAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    original: { phonetic: "record", englishMeanings: ["record meaning"], englishMeaningSource: "test", chineseMeanings: ["record"], tags: [] },
+    user: { phonetic: "record", englishMeanings: ["record meaning"], chineseMeanings: ["record"] },
+    review: { lastRating: "again", dueAt: now, reviewCount: 0 },
+  };
+
+  await putAppStoreValue(APP_KV_STORE, "vocabularyItems", [legacyOnly]);
+  await putAppStoreValue(APP_VOCABULARY_STORE, recordOnly.normalizedTerm, recordOnly);
+
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-upgrade-merge=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    const state = await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        const currentState = app?.getState?.();
+        if (currentState?.vocabularyItems?.some((item) => item.normalizedTerm === legacyOnly.normalizedTerm)
+          && currentState?.vocabularyItems?.some((item) => item.normalizedTerm === recordOnly.normalizedTerm)) {
+          window.clearInterval(timer);
+          resolve(currentState);
+          return;
+        }
+        if (performance.now() - startedAt > 20000) {
+          window.clearInterval(timer);
+          reject(new Error("Upgrade merge smoke did not load both legacy and record vocabulary items."));
+        }
+      }, 250);
+    });
+    return {
+      passed: true,
+      legacyOnlyPresent: state.vocabularyItems.some((item) => item.normalizedTerm === legacyOnly.normalizedTerm),
+      recordOnlyPresent: state.vocabularyItems.some((item) => item.normalizedTerm === recordOnly.normalizedTerm),
+    };
+  } finally {
+    frame.remove();
+    await deleteAppStoreValue(APP_VOCABULARY_STORE, legacyOnly.normalizedTerm);
+    await deleteAppStoreValue(APP_VOCABULARY_STORE, recordOnly.normalizedTerm);
+    if (previousLegacy === undefined) await deleteAppStoreValue(APP_KV_STORE, "vocabularyItems");
+    else await putAppStoreValue(APP_KV_STORE, "vocabularyItems", previousLegacy);
+  }
+}
+
+async function runCheckpointRollbackSmoke() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-checkpoint-rollback=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Checkpoint rollback smoke timed out waiting for the app to load."));
+        }
+      }, 250);
+    });
+    const app = frame.contentWindow.WordLoverApp;
+    const beforeTerms = new Set(app.getState().vocabularyItems.map((item) => item.normalizedTerm));
+    await app.createCheckpoint("automation-rollback");
+    const candidate = ["capacity", "temporary", "sufficient", "evidence"].find((term) => !beforeTerms.has(normalizeTerm(term))) ?? "capacity";
+    const lookup = app.lookupTerm(candidate);
+    if (lookup.status !== "found") throw new Error(`Checkpoint rollback smoke lookup failed for ${candidate}.`);
+    await app.saveVocabularyItem(lookup, "checkpoint-rollback-test");
+    if (!app.getState().vocabularyItems.some((item) => item.normalizedTerm === normalizeTerm(candidate))) {
+      throw new Error("Checkpoint rollback smoke did not save the candidate word.");
+    }
+    const rollbackPromise = app.rollbackLatestCheckpoint();
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const submit = frame.contentDocument?.querySelector("[data-modal-submit]");
+        if (submit) {
+          submit.click();
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Checkpoint rollback smoke did not show rollback confirmation."));
+        }
+      }, 100);
+    });
+    await rollbackPromise;
+    const afterRollbackTerms = new Set(app.getState().vocabularyItems.map((item) => item.normalizedTerm));
+    return {
+      passed: !afterRollbackTerms.has(normalizeTerm(candidate)) && afterRollbackTerms.size === beforeTerms.size,
+      candidate,
+      beforeCount: beforeTerms.size,
+      afterRollbackCount: afterRollbackTerms.size,
+      checkpointCount: (await app.listCheckpoints()).length,
     };
   } finally {
     frame.remove();
@@ -762,6 +1011,12 @@ async function runAllPocs() {
   addProgress("Running real main-app new-word study smoke.");
   const mainAppStudyFlow = await runMainAppStudySmoke();
 
+  addProgress("Running upgrade vocabulary merge smoke.");
+  const upgradeVocabularyMerge = await runUpgradeVocabularyMergeSmoke();
+
+  addProgress("Running checkpoint rollback smoke.");
+  const checkpointRollback = await runCheckpointRollbackSmoke();
+
   addProgress("Fetching current SQLite dictionary.");
   let dictionary = await fetchDictionary();
   const dictionaryFetchMetrics = dictionary.metrics;
@@ -776,6 +1031,8 @@ async function runAllPocs() {
 
   addProgress("Saving dictionary package to OPFS when available.");
   const opfs = await saveDictionaryToOpfs(dictionary.bytes);
+  addProgress("Opening OPFS dictionary with wa-sqlite worker when available.");
+  const waSqliteOpfs = await runWaSqliteOpfsSmoke();
   const originalChecksum = dictionary.metrics.sampleChecksum;
   dictionary = null;
 
@@ -808,9 +1065,12 @@ async function runAllPocs() {
       sqliteWasmDirection: benchmark.allFound && benchmark.timing.p95Ms < 1000 ? "pass" : "investigate",
       indexedDbDictionaryPersistence: indexedDbLookup.status === "found" ? "pass" : "fail",
       opfsDictionaryPersistence: opfs.supported ? (opfs.sampleChecksum === originalChecksum ? "pass" : "fail") : "not-supported",
+      waSqliteOpfs: waSqliteOpfs.supported ? (waSqliteOpfs.passed ? "pass" : "investigate") : "not-supported",
       offlineShellCacheReadiness: offlineShell.allShellAssetsCached ? "pass" : "partial",
       mainAppDictionarySearch: mainAppDictionarySearch.passed ? "pass" : "fail",
       mainAppStudyFlow: mainAppStudyFlow.passed ? "pass" : "fail",
+      upgradeVocabularyMerge: upgradeVocabularyMerge.passed ? "pass" : "fail",
+      checkpointRollback: checkpointRollback.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
@@ -822,6 +1082,8 @@ async function runAllPocs() {
     offlineShell,
     mainAppDictionarySearch,
     mainAppStudyFlow,
+    upgradeVocabularyMerge,
+    checkpointRollback,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
     benchmark,
@@ -834,6 +1096,7 @@ async function runAllPocs() {
       lookup: indexedDbLookup,
     },
     opfsPersistence: opfs,
+    waSqliteOpfs,
     exportImport,
     mockGoogleDriveSync: mockSync,
     reviewQuizRating,

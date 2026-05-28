@@ -11,6 +11,8 @@ This plan follows the current product priority:
 ## Current Technical Baseline
 
 - PWA-first path is accepted for no-fee long-term iPhone use.
+- The shipped PWA dictionary is now a slim ~100,000-entry SQLite (~32 MB raw, ~15 MB zstd) generated from the full 770k ECDICT-derived database. The full file remains under `data/` as the build-time source but is not packaged. See `docs/dictionary-data.md` for the build/package commands. The slim composition is all TOEFL-tagged + all single words with any frequency signal (frq/bnc/Collins/Oxford) + phrases whose constituents are all in the slim set, ranked by average constituent frequency until the target row count is hit.
+- The manifest's `dictionaryDataVersion` is the trigger for in-place dictionary upgrade on already-installed devices: when the local version differs from the remote manifest, the app deletes the OPFS/IndexedDB copy and re-downloads on the next online launch.
 - Current generated SQLite dictionary has `770,611` rows and is about `197 MB`.
 - Windows browser validations prove SQLite WASM lookup speed is far under the 1 second target.
 - iPhone online validation works: app starts fast and dictionary loads fast.
@@ -34,6 +36,7 @@ Scope:
 - Test iPhone close/reopen and iPhone restart persistence.
 - Validate `wa-sqlite` + OPFS on iPhone and compare with `sql.js` memory/startup behavior before choosing the production dictionary engine.
 - Replace the current `sql.js` dictionary query runtime with a real `wa-sqlite`+OPFS query engine or sharded package before claiming the 50 MB iPhone memory target.
+- Current implementation surface now bundles `wa-sqlite` 1.0.0 and adds a worker smoke path that opens the OPFS dictionary directly. The main app still uses `sql.js` as fallback until iPhone memory validation accepts the worker engine.
 - Measure peak and steady-state iPhone memory during dictionary install, open, lookup, background, and relaunch. Production target is <= 50 MB normal-use incremental memory.
 - Confirm the app version/update menu can activate a new service worker on the real iPhone Home Screen PWA.
 - Add Vite + TypeScript + Workbox before Phase 1 grows beyond the current single-page validation.
@@ -65,6 +68,7 @@ Scope:
 - Encrypted storage for user-specific test records before vocabulary data is introduced.
 - Persistent IndexedDB connection instead of opening a new database connection per read/write.
 - Resumable dictionary install checkpoints for interrupted first-time dictionary download.
+- Zstd web packaging script added for the production dictionary package; the app still needs the browser decompression installer before the uncompressed SQLite file can be removed from hosting.
 - Lightweight frequency-ranked "Explore next" word prompt.
 - Diagnostics hidden behind an advanced panel.
 - PWA install/update behavior that reliably refreshes service worker assets.
@@ -84,6 +88,7 @@ Current implementation started:
 - Frequency-ranked "Explore next" prompt added.
 - Versioned app assets added to avoid stale service worker JavaScript/CSS.
 - Compact app menu added with app version, user-data format version, dictionary engine, sync status, memory-target note, export state, and update controls.
+- App-shell updates now wait for the user-controlled Apply update flow instead of activating a new service worker immediately during install.
 - Three color schemes added: Calm teal, Ink focus, and Sunrise.
 - Menu moved beside the clear search button as a compact three-dot control.
 - URL-based automated search smoke added, for example `/?q=take%20off&report=1`.
@@ -118,12 +123,15 @@ Current implementation started:
 - Vocabulary browsing is paged at 10 words per screen; status-count browsing shows term text only until a word is clicked.
 - Vocabulary and review quiz word displays show IPA/pronunciation next to the word, with an explicit missing-IPA label when unavailable.
 - Manual save from the current dictionary result added.
+- Unknown-term save-anyway flow added: when a search has no dictionary match, the user can open an in-page modal to confirm the term, type at least one English or Chinese meaning, and save the entry. Saved unknown-terms carry a `User entered` badge in vocabulary detail (PRD Req 6/7).
+- Vocabulary panel now supports a search/filter input that matches by term text, normalized term, English meaning, Chinese meaning, and pronunciation while preserving the stats-first default layout (PRD Req 24).
 - Saved-state button prevents duplicate active entries.
 - Autosave setting added and persisted per user; valid dictionary results autosave only after an at-least-5-second dwell.
 - Saved vocabulary items preserve original dictionary meanings/source separately from editable user meanings.
 - Edit flow added for English meaning, Chinese meaning, and pronunciation.
 - Archive and restore controls added.
 - Vocabulary records include `createdDeviceId`, `syncVersion`, and `isSynced` fields to support later sync/version work.
+- Upgrade migration now merges the old aggregate `vocabularyItems` storage with the newer per-record vocabulary store so legacy-only words are not hidden after an app-shell update.
 - Browser smoke verified manual save, autosave, archive, restore, saved-state rendering, and iPhone-width layout.
 
 Exit criteria:
@@ -159,6 +167,8 @@ Current implementation started:
 - Diagnostics debug speed added: one review day elapses every 20 seconds and debug-created data is purged when disabled.
 - Automated review, quiz, and FSRS-rating checks added to the browser test suite.
 - Time-sensitive review UI refreshes at least every 3 hours while the app is open, so next-day stats and due-review counts update without requiring a manual reload.
+- Due review includes a 12-hour grace window so words due later the same day can be reviewed together.
+- Stepwise multiple-choice mode added for same-day follow-up reviews: when a term has already been reviewed today, the quiz shows only the term and asks the user to recall before tapping **Reveal options** to see the multiple choices (PRD Req 121).
 
 Exit criteria:
 
@@ -182,6 +192,14 @@ Exit criteria:
 
 - User can export, delete local data, import, and recover vocabulary progress.
 - Diagnostics can be shared without leaking sensitive content by default.
+
+Current implementation started:
+
+- Encrypted local checkpoints are stored in IndexedDB, pruned to the latest five.
+- The app creates a daily checkpoint and pre-restore/pre-rollback checkpoints.
+- The menu includes manual Checkpoint and Rollback latest actions.
+- Google Drive restore uses an atomic IndexedDB replace transaction after creating a pre-restore checkpoint.
+- The menu's danger zone now exposes **Delete all data on this device**, which requires the user to type DELETE in a confirmation modal, then closes the dictionary, drops the IndexedDB database, clears OPFS, removes service-worker caches, unregisters service workers, and reloads with a fresh state (PRD Req 152). Cloud backups are not touched.
 
 ## Phase 5: Google Drive Sync
 
@@ -220,6 +238,10 @@ Exit criteria:
 
 - Core dictionary and study still work without AI.
 - AI content is source-labeled and validated before saving.
+
+Current implementation started:
+
+- AI-saved content is recorded on the vocabulary item under `aiAssist[]` with provider, model, generated/saved timestamps, and the structured payload, so it is distinguishable from dictionary-provided and user-entered meanings (PRD Req 79). The vocabulary detail view shows an **AI assisted** badge and a card with the latest insight.
 
 ## Phase 7: Android Deferred Work
 

@@ -7,7 +7,8 @@ This is the formal WordLover PWA product app. iPhone is the primary user target;
 From the repo root:
 
 ```powershell
-Copy-Item data\dictionary.sqlite apps\wordlover-pwa\public\dictionary.sqlite -Force
+python scripts\build_slim_dictionary.py
+python scripts\package_dictionary_web.py --copy-sqlite
 New-Item -ItemType Directory -Force apps\wordlover-pwa\public\vendor
 Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.js -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.js
 Invoke-WebRequest https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.13.0/sql-wasm.wasm -OutFile apps\wordlover-pwa\public\vendor\sql-wasm.wasm
@@ -22,22 +23,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\s
 Then open:
 
 ```text
-http://127.0.0.1:4173/?fresh=v31
+http://127.0.0.1:4173/?fresh=v34
 ```
 
 Keep that PowerShell window open while using WordLover. If the server is closed, an already-open browser tab can still show the app shell from cache, but first-time dictionary install cannot fetch `dictionary.sqlite`.
 
 If the menu still shows an older app version, open the cache-busting URL above, then use **Menu > Check update > Apply update**. Older builds used a cache-first app shell, so opening only `http://127.0.0.1:4173/` can keep showing the previous installed shell.
 
+When the app asks to unlock encrypted local data on Windows, enter the passphrase you used before. Local builds before v34 silently used `wordlover-localhost-development-passphrase`; use that value if you never chose your own passphrase.
+
 To run the automated suite, open:
 
 ```text
-http://127.0.0.1:4173/automated-tests.html?fresh=v31
+http://127.0.0.1:4173/automated-tests.html?fresh=v34
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
 
 Click **Run automated tests**. The suite includes a real main-app smoke test that opens WordLover in an iframe and verifies actual dictionary searches for `abandon` and `take off`, then continues with dictionary persistence, offline shell cache readiness, encrypted export/import, mock sync, review/quiz scheduling, and timed lookup benchmarks.
+
+The suite also checks that `wa-sqlite` can open the OPFS dictionary from a worker when the bundled vendor files are present. The normal app still keeps the `sql.js` path as a fallback until the iPhone memory validation accepts the `wa-sqlite` engine.
+
+To create the compressed production dictionary package:
+
+```powershell
+python -m pip install zstandard
+python scripts\package_dictionary_web.py --copy-sqlite
+```
 
 ## Run On iPhone
 

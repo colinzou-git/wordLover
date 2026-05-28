@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260525-13" />
+    <link rel="stylesheet" href="/styles.css?v=20260527-40" />
     <title>WordLover</title>
   </head>
   <body>
@@ -13,6 +13,10 @@
       <div id="pwaStatus" hidden>Checking offline shell...</div>
 
       <section id="appMenu" class="panel app-menu" hidden>
+        <div class="menu-header">
+          <button id="appMenuBack" class="secondary-button" type="button" aria-label="Back to main">&larr; Back</button>
+          <h2>Settings</h2>
+        </div>
         <div class="menu-grid">
           <div>
             <span>App version</span>
@@ -29,6 +33,7 @@
           <div>
             <span>Sync</span>
             <strong id="syncStatus">Offline/local</strong>
+            <small id="syncDetails" class="muted"></small>
           </div>
         </div>
         <p id="memoryNote" class="small"></p>
@@ -37,9 +42,12 @@
           <label>
             <span>Theme</span>
             <select id="themeSelect">
+              <option value="sunrise">Sunrise</option>
+              <option value="candy">Candy pop (kids)</option>
               <option value="calm">Calm teal</option>
               <option value="ink">Ink focus</option>
-              <option value="sunrise">Sunrise</option>
+              <option value="sky">Bright blue</option>
+              <option value="rose">Bright red</option>
             </select>
           </label>
         </div>
@@ -47,20 +55,52 @@
           <div>
             <strong id="googleAccount">Not signed in</strong>
             <p id="googleAuthStatus" class="small">Connect Google to sync Drive data and enable Gemini details.</p>
+            <p class="small">
+              Need a Google OAuth client ID?
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Open Google Cloud Console</a>
+              and create a Web-application OAuth client. Add your app origin (e.g. <code>http://127.0.0.1:4173</code> or your iPhone HTTPS LAN URL) as an Authorized JavaScript origin, then tap <strong>Set client ID</strong> below to paste it.
+            </p>
           </div>
           <div class="menu-actions">
             <button id="googleSignIn" type="button">Sign in with Google</button>
+            <button id="googleClientIdConfig" class="secondary-button" type="button">Set client ID</button>
+            <button id="geminiApiKeyConfig" class="secondary-button" type="button">Set Gemini key</button>
             <button id="googleSyncNow" class="secondary-button" type="button" disabled>Sync now</button>
             <button id="googleRestore" class="secondary-button" type="button" disabled>Restore</button>
             <button id="googleSignOut" class="secondary-button" type="button" disabled>Sign out</button>
           </div>
+          <div class="menu-actions">
+            <button id="authDiagnosticsToggle" class="secondary-button" type="button">Sign-in diagnostics</button>
+            <button id="authDiagnosticsSend" class="secondary-button" type="button">Send diagnostics</button>
+          </div>
+          <pre id="authDiagnostics" class="auth-diagnostics" hidden></pre>
         </div>
         <div class="menu-actions">
           <button id="checkForUpdate" type="button">Check update</button>
           <button id="applyUpdate" class="secondary-button" type="button" disabled>Apply update</button>
           <button id="exportStateMenu" class="secondary-button" type="button">Export state</button>
+          <button id="createCheckpoint" class="secondary-button" type="button">Checkpoint</button>
+          <button id="rollbackCheckpoint" class="secondary-button" type="button">Rollback latest</button>
         </div>
         <p id="updateStatus" class="small" aria-live="polite"></p>
+        <p id="checkpointStatus" class="small" aria-live="polite"></p>
+        <div class="danger-actions">
+          <button id="deleteLocalData" class="danger-button" type="button">Delete all data on this device</button>
+        </div>
+      </section>
+
+      <section id="aiChatPanel" class="panel ai-chat-panel" hidden>
+        <div class="menu-header">
+          <button id="aiChatBack" class="secondary-button" type="button" aria-label="Back to main">&larr; Back</button>
+          <h2 id="aiChatTitle">AI Chat</h2>
+        </div>
+        <nav class="ai-chat-tabs" role="tablist" aria-label="AI Chat sections">
+          <button type="button" data-ai-tab="explain" aria-selected="true">Explain</button>
+          <button type="button" data-ai-tab="examples" aria-selected="false">Examples</button>
+          <button type="button" data-ai-tab="synonyms" aria-selected="false">Synonyms</button>
+          <button type="button" data-ai-tab="quiz" aria-selected="false">Quiz</button>
+        </nav>
+        <div id="aiChatContent" class="ai-chat-content" aria-live="polite"></div>
       </section>
 
       <div id="installBanner" class="notice-banner" hidden></div>
@@ -69,7 +109,7 @@
         <div class="search-row">
           <input id="termInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abandon, take off, in terms of" />
           <button id="clearSearch" class="secondary-button" type="button" aria-label="Clear search">Clear</button>
-          <button id="appMenuButton" class="icon-button secondary-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="appMenu">...</button>
+          <button id="appMenuButton" class="icon-button secondary-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="appMenu">&#8942;</button>
         </div>
         <div id="recentSearchPopover" class="recent-popover" hidden></div>
         <div id="suggestions" class="suggestions" aria-live="polite"></div>
@@ -119,12 +159,34 @@
         <div id="vocabularyList" class="vocabulary-list"></div>
       </section>
 
-      <section class="panel word-prompt" id="wordPromptPanel" hidden>
-        <div>
-          <h2>Explore next</h2>
-          <p id="wordPromptText" class="muted">Loading suggestion...</p>
+      <section class="panel history-panel">
+        <div class="panel-head">
+          <div>
+            <h2>WordLover history</h2>
+            <p id="historyChartSummary" class="muted">Activity over time.</p>
+          </div>
         </div>
-        <button id="exploreWord" class="secondary-button" type="button">Open</button>
+        <div class="history-controls">
+          <div class="history-granularity" role="tablist" aria-label="History range">
+            <button type="button" data-history-granularity="days" aria-selected="true">Days</button>
+            <button type="button" data-history-granularity="weeks" aria-selected="false">Weeks</button>
+            <button type="button" data-history-granularity="months" aria-selected="false">Months</button>
+          </div>
+          <div class="history-pager">
+            <button id="historyPrev" class="secondary-button" type="button" aria-label="Earlier period">&larr;</button>
+            <input id="historyAnchorInput" type="date" aria-label="Pick history end date" />
+            <button id="historyNext" class="secondary-button" type="button" aria-label="Later period" disabled>&rarr;</button>
+            <button id="historyToday" class="secondary-button" type="button">Today</button>
+          </div>
+        </div>
+        <p id="historyRangeLabel" class="small history-range-label">Last 7 days</p>
+        <div id="historyChart" class="history-chart" aria-live="polite"></div>
+        <div class="history-legend" aria-hidden="true">
+          <span><i class="dot dot-new"></i>New</span>
+          <span><i class="dot dot-reviewed"></i>Reviewed</span>
+          <span><i class="dot dot-up"></i>Level up</span>
+          <span><i class="dot dot-down"></i>Level down</span>
+        </div>
       </section>
 
       <ol id="history" class="history-list" hidden></ol>
@@ -140,7 +202,7 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260525-13"></script>
-    <script type="module" src="/app.js?v=20260525-13"></script>
+    <script src="/wordlover-config.js?v=20260527-40"></script>
+    <script type="module" src="/app.js?v=20260527-40"></script>
   </body>
 </html>

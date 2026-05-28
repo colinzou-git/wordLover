@@ -253,8 +253,10 @@ If the iPhone keeps an old cached shell:
 2. Open the cache-busting URL in Safari while online:
 
 ```text
-https://192.168.1.73:8443/?fresh=v31
+https://192.168.1.73:8443/?fresh=v34
 ```
+
+If WordLover asks to unlock encrypted local data after the upgrade, enter the same passphrase used on that iPhone before. For older local Windows-only builds that never asked for one, the legacy localhost passphrase was `wordlover-localhost-development-passphrase`; iPhone HTTPS installs normally use the passphrase you entered in the app.
 
 3. Tap **Menu > Check update > Apply update**.
 4. Reopen the Home Screen app.

@@ -16,7 +16,13 @@ class WordLoverHandler(http.server.SimpleHTTPRequestHandler):
     }
 
     def end_headers(self):
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        # "same-origin-allow-popups" (NOT "same-origin") is required for Google sign-in:
+        # COOP:same-origin nulls window.opener for the cross-origin accounts.google.com
+        # popup, so the OAuth token can never post back and sign-in silently hangs. The
+        # allow-popups variant keeps cross-origin isolation for the page while letting the
+        # popups it opens communicate back. The shipping sql.js engine does not need full
+        # crossOriginIsolated; revisit if/when the threaded wa-sqlite engine lands.
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         super().end_headers()
 
