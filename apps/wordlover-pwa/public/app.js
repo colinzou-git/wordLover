@@ -58,7 +58,11 @@ const statReviewed = document.querySelector("#statReviewed");
 const statMastered = document.querySelector("#statMastered");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
+const startSpellingReviewButton = document.querySelector("#startSpellingReview");
 const quizPanel = document.querySelector("#quizPanel");
+const spellingReviewPanel = document.querySelector("#spellingReviewPanel");
+const todayTrackTabs = document.querySelectorAll("[data-today-track]");
+const vocabularyTrackTabs = document.querySelectorAll("[data-vocab-track]");
 const historyChart = document.querySelector("#historyChart");
 const historyChartSummary = document.querySelector("#historyChartSummary");
 const historyRangeLabel = document.querySelector("#historyRangeLabel");
@@ -2342,6 +2346,17 @@ function ensureVocabularyReviewStates() {
   }));
 }
 
+function getDueSpellingItems() {
+  const now = appNowMs();
+  const cutoff = now + REVIEW_GRACE_WINDOW_MS;
+  return spellingItems
+    .filter((item) => {
+      if (item.archivedAt || item.review?.masteredAt) return false;
+      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= cutoff;
+    })
+    .sort((left, right) => (Date.parse(left.review?.dueAt ?? "0") || 0) - (Date.parse(right.review?.dueAt ?? "0") || 0));
+}
+
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
@@ -2349,18 +2364,46 @@ function getTodayStats() {
   return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
+function getSpellingTodayStats() {
+  const newSaved = spellingItems.filter((item) => isToday(item.savedAt)).length;
+  const reviewed = spellingEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
+  const mastered = spellingItems.filter((item) => isToday(item.review?.masteredAt)).length;
+  return { newSaved, reviewed, mastered, dueCount: getDueSpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
+}
+
 function renderStudyStats() {
-  const stats = getTodayStats();
+  for (const tab of todayTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.todayTrack === todayTrack));
+  }
+  const isSpelling = todayTrack === "spelling";
+  const stats = isSpelling ? getSpellingTodayStats() : getTodayStats();
   statNewSaved.textContent = String(stats.newSaved);
   statReviewed.textContent = String(stats.reviewed);
   statMastered.textContent = String(stats.mastered);
-  startReviewButton.disabled = stats.activeCount === 0;
-  startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
-  studySummary.textContent = stats.dueCount
-    ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
-    : stats.activeCount
-      ? "No words are due right now. You can still practice saved words."
-      : "No saved words to review yet.";
+
+  startReviewButton.hidden = isSpelling;
+  studyNewWordButton.hidden = isSpelling;
+  if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
+
+  if (isSpelling) {
+    if (startSpellingReviewButton) {
+      startSpellingReviewButton.disabled = stats.dueCount === 0;
+      startSpellingReviewButton.textContent = stats.dueCount ? `Spelling Review (${stats.dueCount})` : "No spelling due";
+    }
+    studySummary.textContent = stats.dueCount
+      ? `${stats.dueCount} spelling word${stats.dueCount === 1 ? " is" : "s are"} due today.`
+      : stats.activeCount
+        ? "No spelling words are due right now."
+        : "Add words to the spelling list to start.";
+  } else {
+    startReviewButton.disabled = stats.activeCount === 0;
+    startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
+    studySummary.textContent = stats.dueCount
+      ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
+      : stats.activeCount
+        ? "No words are due right now. You can still practice saved words."
+        : "No saved words to review yet.";
+  }
 }
 
 function refreshReviewScheduleViews() {
@@ -2724,6 +2767,176 @@ function hideQuiz() {
   quizPanel.innerHTML = "";
 }
 
+// --- Spelling review engine ---
+// Per word: 3 consecutive correct spellings complete it; the session rating is derived from how
+// many wrong attempts (retries) it took. Strict check: exact, case-sensitive, no trimming.
+function ratingFromRetries(retries) {
+  if (retries <= 0) return "easy";
+  if (retries === 1) return "good";
+  if (retries === 2) return "hard";
+  return "again";
+}
+
+function spellingMeaningHint(item) {
+  return {
+    en: summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings),
+    zh: summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings),
+  };
+}
+
+function currentSpellingItem() {
+  return activeSpellingSession?.queue[activeSpellingSession.index] ?? null;
+}
+
+function startSpellingReview() {
+  const queue = getDueSpellingItems();
+  spellingReviewPanel.hidden = false;
+  if (!queue.length) {
+    activeSpellingSession = null;
+    spellingReviewPanel.innerHTML = `<p class="muted">No spelling words are due today.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+    return;
+  }
+  activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false };
+  quizPanel.hidden = true;
+  renderSpellingPrompt();
+}
+
+function renderSpellingPrompt() {
+  const item = currentSpellingItem();
+  if (!item) {
+    finishSpellingSession();
+    return;
+  }
+  activeSpellingSession.awaitingRetry = false;
+  const hint = spellingMeaningHint(item);
+  spellingReviewPanel.hidden = false;
+  spellingReviewPanel.innerHTML = `
+    <div class="spelling-review">
+      <p class="spelling-progress">Word ${activeSpellingSession.index + 1} of ${activeSpellingSession.queue.length} · ${activeSpellingSession.consecutive}/3 correct in a row</p>
+      <p class="spelling-hint-zh">${escapeHtml(hint.zh)}</p>
+      <p class="spelling-hint-en">${escapeHtml(hint.en)}</p>
+      <div class="spelling-controls">
+        ${renderSpeakerButton(item.term)}
+        <input type="text" id="spellingInput" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="type what you hear" />
+      </div>
+      <p class="spelling-feedback" id="spellingFeedback" aria-live="polite"></p>
+      <div class="quiz-actions">
+        <button class="secondary-button" type="button" data-spelling-close="1">End session</button>
+      </div>
+    </div>
+  `;
+  const input = spellingReviewPanel.querySelector("#spellingInput");
+  input?.focus();
+  speakTerm(item.term);
+}
+
+function updateSpellingProgress() {
+  const progress = spellingReviewPanel.querySelector(".spelling-progress");
+  if (progress && activeSpellingSession) {
+    progress.textContent = `Word ${activeSpellingSession.index + 1} of ${activeSpellingSession.queue.length} · ${activeSpellingSession.consecutive}/3 correct in a row`;
+  }
+}
+
+function checkSpelling() {
+  const item = currentSpellingItem();
+  if (!item || !activeSpellingSession || activeSpellingSession.awaitingRetry) return;
+  const input = spellingReviewPanel.querySelector("#spellingInput");
+  const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
+  if (!input || !feedback) return;
+  const value = input.value; // strict: no trim, case-sensitive
+  if (value === item.term) {
+    activeSpellingSession.consecutive += 1;
+    feedback.textContent = "Correct!";
+    feedback.className = "spelling-feedback correct";
+    input.value = "";
+    input.classList.add("spelling-correct-flash");
+    window.setTimeout(() => input.classList.remove("spelling-correct-flash"), 1000);
+    if (activeSpellingSession.consecutive >= 3) {
+      void completeCurrentSpellingWord();
+    } else {
+      updateSpellingProgress();
+      window.setTimeout(() => { input.focus(); speakTerm(item.term); }, 1000);
+    }
+  } else {
+    activeSpellingSession.retries += 1;
+    activeSpellingSession.consecutive = 0;
+    activeSpellingSession.awaitingRetry = true;
+    feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span>`;
+    feedback.className = "spelling-feedback wrong";
+    input.disabled = true;
+    const actions = spellingReviewPanel.querySelector(".quiz-actions");
+    if (actions && !actions.querySelector("[data-spelling-retry]")) {
+      actions.insertAdjacentHTML("afterbegin", `<button type="button" data-spelling-retry="1">Retry</button>`);
+    }
+  }
+}
+
+function retrySpelling() {
+  if (!currentSpellingItem()) return;
+  renderSpellingPrompt();
+}
+
+async function completeCurrentSpellingWord() {
+  const item = currentSpellingItem();
+  if (!item) return;
+  const rating = ratingFromRetries(activeSpellingSession.retries);
+  await recordSpellingReview(item, rating, activeSpellingSession.retries);
+  activeSpellingSession.completed += 1;
+  activeSpellingSession.index += 1;
+  activeSpellingSession.retries = 0;
+  activeSpellingSession.consecutive = 0;
+  if (activeSpellingSession.index >= activeSpellingSession.queue.length) {
+    finishSpellingSession();
+  } else {
+    window.setTimeout(() => renderSpellingPrompt(), 600);
+  }
+}
+
+async function recordSpellingReview(item, rating, retries) {
+  const schedule = scheduleFromFsrsRating(item.review ?? {}, rating);
+  const reviewedAt = nowIso();
+  item.review = {
+    ...(item.review ?? {}),
+    lastRating: rating,
+    intervalDays: schedule.intervalDays,
+    dueAt: schedule.dueAt,
+    masteredAt: schedule.masteredAt,
+    lastReviewedAt: reviewedAt,
+    reviewCount: (item.review?.reviewCount ?? 0) + 1,
+    fsrsCard: schedule.fsrsCard,
+  };
+  item.updatedAt = reviewedAt;
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  const event = markDebugRecord({
+    id: crypto.randomUUID ? crypto.randomUUID() : `spelling-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type: "review",
+    term: item.term,
+    normalizedTerm: item.normalizedTerm,
+    rating,
+    retries,
+    mastered: Boolean(schedule.masteredAt),
+    occurredAt: reviewedAt,
+    deviceId,
+  });
+  spellingEvents.push(event);
+  await saveRecordValue(SPELLING_STORE, item.normalizedTerm, item);
+  await persistSpellingEvent(event);
+}
+
+function finishSpellingSession() {
+  const completed = activeSpellingSession?.completed ?? 0;
+  activeSpellingSession = null;
+  spellingReviewPanel.hidden = false;
+  spellingReviewPanel.innerHTML = `<p class="muted">Spelling session done. ${completed} word${completed === 1 ? "" : "s"} reviewed.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+  renderStudyStats();
+}
+
+function hideSpellingReview() {
+  activeSpellingSession = null;
+  spellingReviewPanel.hidden = true;
+  spellingReviewPanel.innerHTML = "";
+}
 
 function meaningPreviewFromEntry(entry) {
   return topLines(entry.translation, 1)[0] ?? topLines(entry.definition, 1)[0] ?? "No meaning available";
@@ -5255,6 +5468,49 @@ studyNewWordButton.addEventListener("click", () => {
   void startNewWordStudy();
 });
 
+startSpellingReviewButton?.addEventListener("click", () => {
+  startSpellingReview();
+});
+
+for (const tab of todayTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.todayTrack;
+    if (!next || next === todayTrack) return;
+    todayTrack = next;
+    hideQuiz();
+    hideSpellingReview();
+    renderStudyStats();
+  });
+}
+
+for (const tab of vocabularyTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.vocabTrack;
+    if (!next || next === vocabularyView.track) return;
+    vocabularyView = { ...vocabularyView, track: next, filter: "summary", page: 0, selectedTerm: null };
+    renderVocabulary();
+  });
+}
+
+spellingReviewPanel.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.id === "spellingInput") {
+    event.preventDefault();
+    checkSpelling();
+  }
+});
+
+spellingReviewPanel.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  if (target.closest("[data-spelling-retry]")) {
+    retrySpelling();
+    return;
+  }
+  if (target.closest("[data-spelling-close]")) {
+    hideSpellingReview();
+  }
+});
+
 quizPanel.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
@@ -5610,6 +5866,46 @@ window.WordLoverApp = {
   getSpellingEvents: () => spellingEvents,
   getUserDictionary: () => userDictionaryEntries,
   addUserDictionaryEntry: showAddToDictionaryDialog,
+  getDueSpellingItems,
+  spelling: {
+    ratingFromRetries,
+    getDue: getDueSpellingItems,
+    start: startSpellingReview,
+    retry: retrySpelling,
+    close: hideSpellingReview,
+    // Test/programmatic answer: types into the field and submits a strict check.
+    answer: (text) => {
+      const input = spellingReviewPanel.querySelector("#spellingInput");
+      if (!input || input.disabled) return false;
+      input.value = String(text);
+      checkSpelling();
+      return true;
+    },
+    state: () => activeSpellingSession ? {
+      index: activeSpellingSession.index,
+      retries: activeSpellingSession.retries,
+      consecutive: activeSpellingSession.consecutive,
+      completed: activeSpellingSession.completed,
+      queueLength: activeSpellingSession.queue.length,
+      currentTerm: currentSpellingItem()?.term ?? null,
+      awaitingRetry: activeSpellingSession.awaitingRetry,
+    } : null,
+    // Directly seed a spelling item for tests (bypasses dictionary lookup).
+    addItemForTest: async (term, english, chinese) => {
+      await saveSpellingItem({
+        status: "found",
+        term,
+        entryType: term.includes(" ") ? "phrase" : "word",
+        phonetic: "",
+        englishMeanings: [english ?? ("meaning of " + term)],
+        englishMeaningSource: "test",
+        chineseMeanings: [chinese ?? ("中文" + term)],
+        tags: [],
+      }, "test");
+      return getSpellingItem(term);
+    },
+    setTodayTrack: (track) => { todayTrack = track === "spelling" ? "spelling" : "vocabulary"; renderStudyStats(); },
+  },
   runAutomatedSearchSmoke,
   applyTheme: (next) => {
     applyTheme(next);

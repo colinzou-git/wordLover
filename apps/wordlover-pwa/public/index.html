@@ -143,7 +143,12 @@
           <div class="study-actions">
             <button id="startReview" type="button" disabled>Review due</button>
             <button id="studyNewWord" class="secondary-button" type="button">Study one more</button>
+            <button id="startSpellingReview" type="button" hidden disabled>Spelling Review</button>
           </div>
+        </div>
+        <div class="track-tabs" id="todayTrackTabs" role="tablist" aria-label="Memorize or spelling">
+          <button type="button" data-today-track="vocabulary" aria-selected="true">Memorize</button>
+          <button type="button" data-today-track="spelling" aria-selected="false">Spelling</button>
         </div>
         <div class="stats-grid">
           <div><span>New</span><strong id="statNewSaved">0</strong></div>
@@ -151,6 +156,7 @@
           <div><span>Mastered</span><strong id="statMastered">0</strong></div>
         </div>
         <div id="quizPanel" class="quiz-panel" hidden></div>
+        <div id="spellingReviewPanel" class="quiz-panel spelling-review-panel" hidden></div>
       </section>
 
       <button id="loadDictionary" type="button" hidden>Install/load dictionary</button>
