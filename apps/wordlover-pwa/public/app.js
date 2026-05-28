@@ -48,6 +48,8 @@ const dictionarySource = document.querySelector("#dictionarySource");
 const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
 const autosaveToggle = document.querySelector("#autosaveToggle");
+const onReturnSelect = document.querySelector("#onReturnSelect");
+const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
@@ -75,6 +77,9 @@ const FILE_STORE = "files";
 const KEY_STORE = "keys";
 const VOCABULARY_STORE = "vocabularyRecords";
 const STUDY_EVENT_STORE = "studyEventRecords";
+const SPELLING_STORE = "spellingRecords";
+const SPELLING_EVENT_STORE = "spellingEventRecords";
+const USER_DICTIONARY_STORE = "userDictionary";
 const CHECKPOINT_STORE = "checkpoints";
 const DICTIONARY_KEY = "dictionary.sqlite";
 const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
@@ -156,19 +161,29 @@ let ftsSearchAvailable = null;
 let currentResult = null;
 let vocabularyItems = [];
 let studyEvents = [];
+let spellingItems = [];
+let spellingEvents = [];
+let userDictionaryEntries = [];
 let autosaveEnabled = true;
+// "vocabulary" | "spelling" | "none" — what pressing Return saves (replaces the autosave toggle).
+let onReturnAction = "vocabulary";
+let speakOnReturn = false;
 let deviceId = null;
 let activeQuiz = null;
+let activeSpellingSession = null;
 let theme = DEFAULT_THEME;
 let vocabularyView = {
   filter: "summary",
   page: 0,
   selectedTerm: null,
   query: "",
+  track: "vocabulary",
 };
+let todayTrack = "vocabulary";
 let historyView = {
   granularity: "days",
   anchorMs: null,
+  track: "vocabulary",
 };
 let debugMode = {
   enabled: false,
@@ -351,7 +366,7 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 5);
+    const request = indexedDB.open(DB_NAME, 6);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
@@ -359,6 +374,9 @@ function openUserDb() {
       if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE);
       if (!db.objectStoreNames.contains(VOCABULARY_STORE)) db.createObjectStore(VOCABULARY_STORE);
       if (!db.objectStoreNames.contains(STUDY_EVENT_STORE)) db.createObjectStore(STUDY_EVENT_STORE);
+      if (!db.objectStoreNames.contains(SPELLING_STORE)) db.createObjectStore(SPELLING_STORE);
+      if (!db.objectStoreNames.contains(SPELLING_EVENT_STORE)) db.createObjectStore(SPELLING_EVENT_STORE);
+      if (!db.objectStoreNames.contains(USER_DICTIONARY_STORE)) db.createObjectStore(USER_DICTIONARY_STORE);
       if (!db.objectStoreNames.contains(CHECKPOINT_STORE)) db.createObjectStore(CHECKPOINT_STORE);
     };
     request.onsuccess = () => resolve(request.result);
@@ -1613,10 +1631,42 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
       localSnapshot.studyEvents ?? [],
       remoteSnapshot?.studyEvents ?? [],
     ),
+    spellingItems: mergeVocabularySources(
+      localSnapshot.spellingItems ?? [],
+      remoteSnapshot?.spellingItems ?? [],
+    ),
+    spellingEvents: mergeStudyEventSources(
+      localSnapshot.spellingEvents ?? [],
+      remoteSnapshot?.spellingEvents ?? [],
+    ),
+    userDictionary: mergeUserDictionarySources(
+      localSnapshot.userDictionary ?? [],
+      remoteSnapshot?.userDictionary ?? [],
+    ),
     autosaveEnabled: newer.autosaveEnabled ?? localSnapshot.autosaveEnabled ?? true,
+    onReturnAction: newer.onReturnAction ?? localSnapshot.onReturnAction ?? (newer.autosaveEnabled === false ? "none" : "vocabulary"),
+    speakOnReturn: newer.speakOnReturn ?? localSnapshot.speakOnReturn ?? false,
     theme: newer.theme ?? localSnapshot.theme,
     lastMetrics: newer.lastMetrics ?? localSnapshot.lastMetrics,
   };
+}
+
+function mergeUserDictionarySources(localEntries, remoteEntries) {
+  const byTerm = new Map();
+  for (const entry of [...(remoteEntries ?? []), ...(localEntries ?? [])]) {
+    if (!entry?.normalizedTerm && !entry?.word) continue;
+    const normalizedTerm = entry.normalizedTerm ?? normalizeTerm(entry.word);
+    const incoming = { ...entry, normalizedTerm };
+    const existing = byTerm.get(normalizedTerm);
+    if (!existing) {
+      byTerm.set(normalizedTerm, incoming);
+      continue;
+    }
+    const existingUpdated = Date.parse(existing.updatedAt ?? existing.createdAt ?? 0) || 0;
+    const incomingUpdated = Date.parse(incoming.updatedAt ?? incoming.createdAt ?? 0) || 0;
+    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? incoming : existing);
+  }
+  return [...byTerm.values()];
 }
 
 async function persistVocabulary() {
@@ -1640,6 +1690,73 @@ async function deleteVocabularyRecord(item) {
 async function persistStudyEvent(event) {
   await saveRecordValue(STUDY_EVENT_STORE, event.id, event);
   renderStudyStats();
+}
+
+// --- Spelling track persistence (mirrors the vocabulary track) ---
+async function persistSpelling() {
+  await Promise.all(spellingItems.map((item) => saveRecordValue(SPELLING_STORE, item.normalizedTerm, item)));
+  renderSpellingViews();
+}
+
+async function persistSpellingItem(item) {
+  await saveRecordValue(SPELLING_STORE, item.normalizedTerm, item);
+  renderSpellingViews();
+}
+
+async function deleteSpellingRecord(item) {
+  await deleteRecordValue(SPELLING_STORE, item.normalizedTerm);
+}
+
+async function persistSpellingEvent(event) {
+  await saveRecordValue(SPELLING_EVENT_STORE, event.id, event);
+  renderSpellingViews();
+}
+
+async function persistSpellingEvents() {
+  await Promise.all(spellingEvents.map((event) => saveRecordValue(SPELLING_EVENT_STORE, event.id, event)));
+  renderSpellingViews();
+}
+
+// Re-render every spelling-aware surface after spelling data changes.
+function renderSpellingViews() {
+  renderStudyStats();
+  renderVocabulary();
+  renderHistoryChart();
+}
+
+function getSpellingItem(term) {
+  const normalizedTerm = normalizeTerm(term);
+  return spellingItems.find((item) => item.normalizedTerm === normalizedTerm) ?? null;
+}
+
+// --- User dictionary (additive overlay on the read-only sql.js dictionary) ---
+async function persistUserDictionaryEntry(entry) {
+  await saveRecordValue(USER_DICTIONARY_STORE, entry.normalizedTerm, entry);
+}
+
+function getUserDictionaryEntry(term) {
+  const normalizedTerm = normalizeTerm(term);
+  return userDictionaryEntries.find((entry) => entry.normalizedTerm === normalizedTerm) ?? null;
+}
+
+function userDictionaryToResult(entry, queryMs = 0) {
+  return {
+    status: "found",
+    term: entry.word,
+    entryType: entry.word.includes(" ") ? "phrase" : "word",
+    phonetic: entry.phonetic ?? "",
+    englishMeanings: entry.englishMeanings ?? [],
+    englishMeaningSource: "user dictionary",
+    chineseMeanings: entry.chineseMeanings ?? [],
+    tags: ["user"],
+    queryMs,
+    source: "user-dictionary",
+  };
+}
+
+function resultToTrackItem(data) {
+  // Spelling items share the vocabulary item shape so all FSRS/stat helpers work unchanged.
+  return resultToVocabularyItem(data);
 }
 
 function resultToVocabularyItem(data) {
@@ -3226,7 +3343,12 @@ function buildUserDataSnapshot() {
     historyItems,
     vocabularyItems,
     studyEvents,
-    autosaveEnabled,
+    spellingItems,
+    spellingEvents,
+    userDictionary: userDictionaryEntries,
+    autosaveEnabled: onReturnAction === "vocabulary",
+    onReturnAction,
+    speakOnReturn,
     theme,
     lastMetrics,
   };
@@ -3398,19 +3520,20 @@ async function deleteAllLocalUserData() {
   return true;
 }
 
-async function replaceUserDataAtomically({ nextVocabularyItems, nextStudyEvents, kvValues }) {
-  const encryptedVocabulary = await Promise.all(
-    nextVocabularyItems.map(async (item) => ({
-      key: item.normalizedTerm,
-      value: await encryptValue(item),
-    })),
-  );
-  const encryptedEvents = await Promise.all(
-    nextStudyEvents.map(async (event) => ({
-      key: event.id,
-      value: await encryptValue(event),
-    })),
-  );
+async function replaceUserDataAtomically({
+  nextVocabularyItems,
+  nextStudyEvents,
+  nextSpellingItems = [],
+  nextSpellingEvents = [],
+  nextUserDictionary = [],
+  kvValues,
+}) {
+  const encrypt = (records, keyOf) => Promise.all(records.map(async (record) => ({ key: keyOf(record), value: await encryptValue(record) })));
+  const encryptedVocabulary = await encrypt(nextVocabularyItems, (item) => item.normalizedTerm);
+  const encryptedEvents = await encrypt(nextStudyEvents, (event) => event.id);
+  const encryptedSpelling = await encrypt(nextSpellingItems, (item) => item.normalizedTerm);
+  const encryptedSpellingEvents = await encrypt(nextSpellingEvents, (event) => event.id);
+  const encryptedUserDictionary = await encrypt(nextUserDictionary, (entry) => entry.normalizedTerm);
   const encryptedKv = await Promise.all(
     Object.entries(kvValues).map(async ([key, value]) => ({
       key,
@@ -3419,14 +3542,26 @@ async function replaceUserDataAtomically({ nextVocabularyItems, nextStudyEvents,
   );
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction([VOCABULARY_STORE, STUDY_EVENT_STORE, STORE], "readwrite");
+    const tx = db.transaction(
+      [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, STORE],
+      "readwrite",
+    );
     const vocabularyStore = tx.objectStore(VOCABULARY_STORE);
     const eventStore = tx.objectStore(STUDY_EVENT_STORE);
+    const spellingStore = tx.objectStore(SPELLING_STORE);
+    const spellingEventStore = tx.objectStore(SPELLING_EVENT_STORE);
+    const userDictStore = tx.objectStore(USER_DICTIONARY_STORE);
     const kvStore = tx.objectStore(STORE);
     vocabularyStore.clear();
     eventStore.clear();
+    spellingStore.clear();
+    spellingEventStore.clear();
+    userDictStore.clear();
     encryptedVocabulary.forEach((record) => vocabularyStore.put(record.value, record.key));
     encryptedEvents.forEach((record) => eventStore.put(record.value, record.key));
+    encryptedSpelling.forEach((record) => spellingStore.put(record.value, record.key));
+    encryptedSpellingEvents.forEach((record) => spellingEventStore.put(record.value, record.key));
+    encryptedUserDictionary.forEach((record) => userDictStore.put(record.value, record.key));
     encryptedKv.forEach((record) => kvStore.put(record.value, record.key));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -3609,16 +3744,24 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   const nextHistoryItems = Array.isArray(snapshot.historyItems) ? snapshot.historyItems : [];
   const nextVocabularyItems = mergeVocabularySources(Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [], []);
   const nextStudyEvents = mergeStudyEventSources(Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents : [], []);
-  const nextAutosaveEnabled = Boolean(snapshot.autosaveEnabled ?? true);
+  const nextSpellingItems = mergeVocabularySources(Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems : [], []);
+  const nextSpellingEvents = mergeStudyEventSources(Array.isArray(snapshot.spellingEvents) ? snapshot.spellingEvents : [], []);
+  const nextUserDictionary = mergeUserDictionarySources(Array.isArray(snapshot.userDictionary) ? snapshot.userDictionary : [], []);
+  const nextOnReturnAction = normalizeOnReturnAction(snapshot.onReturnAction ?? (snapshot.autosaveEnabled === false ? "none" : "vocabulary"));
+  const nextSpeakOnReturn = Boolean(snapshot.speakOnReturn ?? false);
   const nextTheme = THEME_IDS.includes(snapshot.theme) ? snapshot.theme : DEFAULT_THEME;
   const nextLastMetrics = snapshot.lastMetrics ?? lastMetrics;
 
   await replaceUserDataAtomically({
     nextVocabularyItems,
     nextStudyEvents,
+    nextSpellingItems,
+    nextSpellingEvents,
+    nextUserDictionary,
     kvValues: {
       history: nextHistoryItems,
-      autosaveEnabled: nextAutosaveEnabled,
+      onReturnAction: nextOnReturnAction,
+      speakOnReturn: nextSpeakOnReturn,
       theme: nextTheme,
       lastMetrics: nextLastMetrics,
     },
@@ -3627,11 +3770,15 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   historyItems = nextHistoryItems;
   vocabularyItems = nextVocabularyItems;
   studyEvents = nextStudyEvents;
-  autosaveEnabled = nextAutosaveEnabled;
+  spellingItems = nextSpellingItems;
+  spellingEvents = nextSpellingEvents;
+  userDictionaryEntries = nextUserDictionary;
+  onReturnAction = nextOnReturnAction;
+  speakOnReturn = nextSpeakOnReturn;
   theme = nextTheme;
   lastMetrics = nextLastMetrics;
 
-  autosaveToggle.checked = autosaveEnabled;
+  syncSettingsControls();
   applyTheme(theme);
   renderHistory();
   renderVocabulary();
@@ -3639,6 +3786,16 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   renderHistoryChart();
   renderMetrics();
   renderAppMenu();
+}
+
+function normalizeOnReturnAction(value) {
+  return ["vocabulary", "spelling", "none"].includes(value) ? value : "vocabulary";
+}
+
+// Reflect current settings state into the menu controls (guarded — controls may not exist yet).
+function syncSettingsControls() {
+  if (onReturnSelect) onReturnSelect.value = onReturnAction;
+  if (speakOnReturnToggle) speakOnReturnToggle.checked = speakOnReturn;
 }
 
 async function restoreFromGoogleDrive() {
@@ -4731,8 +4888,21 @@ async function init() {
   const legacyStudyEvents = await loadValue("studyEvents", []);
   studyEvents = mergeStudyEventSources(studyEventRecords, legacyStudyEvents);
   if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await persistStudyEvents();
-  autosaveEnabled = await loadValue("autosaveEnabled", true);
-  autosaveToggle.checked = autosaveEnabled;
+  spellingItems = mergeVocabularySources(await loadAllRecordValues(SPELLING_STORE), []);
+  spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
+  userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
+  // Migrate the old autosave toggle into the new On Return action.
+  const storedOnReturn = await loadValue("onReturnAction", null);
+  if (storedOnReturn) {
+    onReturnAction = normalizeOnReturnAction(storedOnReturn);
+  } else {
+    const legacyAutosave = await loadValue("autosaveEnabled", true);
+    onReturnAction = legacyAutosave ? "vocabulary" : "none";
+    await saveValue("onReturnAction", onReturnAction);
+  }
+  speakOnReturn = Boolean(await loadValue("speakOnReturn", false));
+  autosaveEnabled = onReturnAction === "vocabulary";
+  syncSettingsControls();
   lastMetrics = await loadValue("lastMetrics", null);
   await ensureDailyCheckpoint();
   renderHistory();
