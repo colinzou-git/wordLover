@@ -95,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v53";
+const APP_VERSION = "0.6.2-product.20260528-v54";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v53";
+const SHELL_CACHE_VERSION = "wordlover-shell-v54";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -696,7 +696,8 @@ function renderAppMenu() {
   appVersion.textContent = APP_VERSION;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
   dictionaryEngine.textContent = DICTIONARY_ENGINE;
-  syncStatus.textContent = !googleAuth.accessToken
+  const signedInOrGranted = Boolean(googleAuth.accessToken) || hasGoogleGrant();
+  syncStatus.textContent = !signedInOrGranted
     ? "Local only"
     : !navigator.onLine
       ? "Offline"
@@ -707,13 +708,20 @@ function renderAppMenu() {
           : "Pending sync";
   if (syncDetails) {
     if (lastSyncSummary?.at) {
-      syncDetails.textContent =
-        `Last sync ${formatSyncTime(lastSyncSummary.at)} · ${lastSyncSummary.words} word(s) · ${formatBytes(lastSyncSummary.sizeBytes)} on Drive` +
-        (driveSyncState === "error" && lastSyncInfo?.error ? ` · last attempt failed: ${lastSyncInfo.error}` : "");
-    } else if (googleAuth.accessToken) {
+      const s = lastSyncSummary;
+      const when = formatSyncTime(s.at);
+      const lines = [
+        `Last sync: ${when}`,
+        `Vocabulary: ${s.vocabWords ?? s.words ?? 0} word(s) · ${formatBytes(s.vocabBytes)}`,
+        `Spelling: ${s.spellingWords ?? 0} word(s) · ${formatBytes(s.spellingBytes)}`,
+        `Drive backup: ${formatBytes(s.driveBytes ?? s.sizeBytes)} total`,
+      ];
+      if (driveSyncState === "error" && lastSyncInfo?.error) lines.push(`Last attempt failed: ${lastSyncInfo.error}`);
+      syncDetails.innerHTML = lines.map((line) => escapeHtml(line)).join("<br>");
+    } else if (signedInOrGranted) {
       syncDetails.textContent = driveSyncState === "error" && lastSyncInfo?.error
         ? `Not synced yet · last attempt failed: ${lastSyncInfo.error}`
-        : "Not synced yet on this device.";
+        : "Not synced yet on this device. Tap Sync now.";
     } else {
       syncDetails.textContent = "";
     }
@@ -731,9 +739,13 @@ function renderAppMenu() {
         ? "Ready to connect Google."
         : "Tap Sign in with Google to add your OAuth client ID.";
   googleSignInButton.disabled = Boolean(googleAuth.accessToken);
-  googleSyncNowButton.disabled = !googleAuth.accessToken;
-  googleRestoreButton.disabled = !googleAuth.accessToken;
-  googleSignOutButton.disabled = !googleAuth.accessToken;
+  // Sync/Restore stay available whenever an OAuth client is configured: clicking them will
+  // silently refresh (or prompt) the Google session as needed, so the user never has to manually
+  // re-sign-in first.
+  const canSync = Boolean(getGoogleClientId());
+  googleSyncNowButton.disabled = !canSync;
+  googleRestoreButton.disabled = !canSync;
+  googleSignOutButton.disabled = !(googleAuth.accessToken || hasGoogleGrant());
   themeSelect.value = theme;
   void listCheckpoints().then(([latest]) => {
     rollbackCheckpointButton.disabled = !latest;
@@ -2832,6 +2844,8 @@ function hideQuiz() {
 // missed it at least once, they must spell it correctly 3 times in a row to complete it. The
 // session rating is derived from how many wrong attempts (retries) it took. Strict check:
 // exact, case-sensitive, no trimming.
+const SPELLING_FEEDBACK_PAUSE_MS = 1000;
+
 function spellingThreshold() {
   return (activeSpellingSession?.retries ?? 0) === 0 ? 1 : 3;
 }
@@ -2931,25 +2945,36 @@ function updateSpellingProgress() {
 
 function checkSpelling() {
   const item = currentSpellingItem();
-  if (!item || !activeSpellingSession || activeSpellingSession.awaitingRetry) return;
+  if (!item || !activeSpellingSession || activeSpellingSession.awaitingRetry || activeSpellingSession.pausing) return;
   const input = spellingReviewPanel.querySelector("#spellingInput");
   const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
   if (!input || !feedback) return;
   const value = input.value; // strict: no trim, case-sensitive
   if (value === item.term) {
     activeSpellingSession.consecutive += 1;
-    feedback.textContent = "Correct!";
+    // Show the result (with the correct word) and keep the typed text on screen for a beat so the
+    // user can see what they entered before it clears / advances.
+    feedback.innerHTML = `<span class="spelling-correct-label">Correct!</span><span class="spelling-answer-correct">${escapeHtml(item.term)}</span>`;
     feedback.className = "spelling-feedback correct";
-    input.value = "";
     input.classList.add("spelling-correct-flash");
-    window.setTimeout(() => input.classList.remove("spelling-correct-flash"), 1000);
-    // First-try correct completes immediately; after a miss, require 3 in a row.
-    if (activeSpellingSession.consecutive >= spellingThreshold()) {
-      void completeCurrentSpellingWord();
-    } else {
-      updateSpellingProgress();
-      window.setTimeout(() => { input.focus(); speakTerm(item.term); }, 1000);
-    }
+    const reachedThreshold = activeSpellingSession.consecutive >= spellingThreshold();
+    activeSpellingSession.pausing = true;
+    window.setTimeout(() => {
+      input.classList.remove("spelling-correct-flash");
+      if (!activeSpellingSession) return;
+      activeSpellingSession.pausing = false;
+      // First-try correct completes immediately; after a miss, require 3 in a row.
+      if (reachedThreshold) {
+        void completeCurrentSpellingWord();
+      } else {
+        input.value = "";
+        feedback.textContent = "";
+        feedback.className = "spelling-feedback";
+        updateSpellingProgress();
+        input.focus();
+        speakTerm(item.term);
+      }
+    }, SPELLING_FEEDBACK_PAUSE_MS);
   } else {
     activeSpellingSession.retries += 1;
     activeSpellingSession.consecutive = 0;
@@ -2983,7 +3008,8 @@ async function completeCurrentSpellingWord() {
   if (activeSpellingSession.index >= activeSpellingSession.queue.length) {
     finishSpellingSession();
   } else {
-    window.setTimeout(() => renderSpellingPrompt(), 600);
+    // The 1s feedback pause already elapsed in checkSpelling; advance to the next word now.
+    renderSpellingPrompt();
   }
 }
 
@@ -3990,12 +4016,27 @@ function driveNameQuery(fileName) {
   return encodeURIComponent(`name = '${String(fileName).replace(/'/g, "\\'")}' and trashed = false`);
 }
 
+function jsonByteLength(value) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value ?? [])).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function recordSyncSummary(driveResult) {
+  const driveBytes = Number(driveResult?.size ?? 0) || 0;
   lastSyncSummary = {
     at: nowIso(),
-    words: vocabularyItems.length,
-    sizeBytes: Number(driveResult?.size ?? 0) || 0,
+    vocabWords: vocabularyItems.length,
+    spellingWords: spellingItems.length,
+    vocabBytes: jsonByteLength(vocabularyItems),
+    spellingBytes: jsonByteLength(spellingItems),
+    driveBytes,
     driveModifiedTime: driveResult?.modifiedTime ?? null,
+    // Legacy fields kept for back-compat with older readers.
+    words: vocabularyItems.length,
+    sizeBytes: driveBytes,
   };
   await saveValue("lastSyncSummary", lastSyncSummary).catch(() => {});
 }
@@ -6023,6 +6064,7 @@ window.WordLoverApp = {
       queueLength: activeSpellingSession.queue.length,
       currentTerm: currentSpellingItem()?.term ?? null,
       awaitingRetry: activeSpellingSession.awaitingRetry,
+      pausing: Boolean(activeSpellingSession.pausing),
     } : null,
     // Directly seed a spelling item for tests (bypasses dictionary lookup).
     addItemForTest: async (term, english, chinese) => {

@@ -103,11 +103,16 @@ def main() -> int:
             failures.append("pressing Return again did not act like Retry (still awaiting)")
 
         # After a miss, 3 correct in a row are required to complete -> rating 'good'.
+        # Each correct answer triggers a ~1s feedback pause; wait for it to clear between answers.
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         if st is None or st.get("currentTerm") != first_term or st.get("consecutive") != 1:
             failures.append(f"after a miss, 1 correct should NOT complete the word: {st}")
+        if not st.get("pausing"):
+            failures.append("correct answer did not enter the 1s feedback pause")
+        wait_state(page, "() => { const s = window.WordLoverApp.spelling.state(); return !s || !s.pausing; }", 3.0)
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
+        wait_state(page, "() => { const s = window.WordLoverApp.spelling.state(); return !s || !s.pausing; }", 3.0)
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
         wait_state(page, "() => { const s = window.WordLoverApp.spelling.state(); return !s || s.currentTerm !== %r; }" % first_term, 4.0)
         events = page.evaluate("() => window.WordLoverApp.getSpellingEvents()")
@@ -127,7 +132,7 @@ def main() -> int:
         events_before = page.evaluate("() => window.WordLoverApp.getSpellingEvents().length")
         if second_term:
             page.evaluate(f"() => window.WordLoverApp.spelling.answer({second_term!r})")  # single correct attempt
-            wait_state(page, f"() => window.WordLoverApp.getSpellingEvents().length > {events_before}", 4.0)
+            wait_state(page, f"() => window.WordLoverApp.getSpellingEvents().length > {events_before}", 5.0)
             events = page.evaluate("() => window.WordLoverApp.getSpellingEvents()")
             second_event = next((e for e in events if e.get("term") == second_term), None)
             print(f"word2 event (one correct attempt): {second_event}", flush=True)

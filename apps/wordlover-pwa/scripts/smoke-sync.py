@@ -283,14 +283,18 @@ def main() -> int:
         )
         print(f"device B sync report: {report}", flush=True)
         summary = report.get("summary") or {}
-        if summary.get("words") != 9:
-            failures.append(f"sync summary words should be 9, got {summary.get('words')}")
-        if not summary.get("sizeBytes"):
-            failures.append(f"sync summary should record Drive size, got {summary.get('sizeBytes')}")
+        if summary.get("vocabWords") != 9:
+            failures.append(f"sync summary vocabWords should be 9, got {summary.get('vocabWords')}")
+        if summary.get("spellingWords") != 2:
+            failures.append(f"sync summary spellingWords should be 2, got {summary.get('spellingWords')}")
+        if not summary.get("vocabBytes") or not summary.get("spellingBytes"):
+            failures.append(f"sync summary should record per-list sizes, got vocab={summary.get('vocabBytes')} spelling={summary.get('spellingBytes')}")
+        if not summary.get("driveBytes"):
+            failures.append(f"sync summary should record Drive size, got {summary.get('driveBytes')}")
         if not summary.get("at"):
             failures.append("sync summary should record a timestamp")
         details = report.get("details") or ""
-        for token in ("Last sync", "9 word", "on Drive"):
+        for token in ("Last sync", "Vocabulary: 9 word", "Spelling: 2 word", "Drive backup"):
             if token not in details:
                 failures.append(f"sync details missing '{token}': {details!r}")
         ctx_b.close()

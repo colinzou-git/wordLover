@@ -356,6 +356,15 @@ body[data-ai-chat-open="true"] {
   font-weight: 700;
 }
 
+.spelling-feedback.correct .spelling-correct-label {
+  margin-right: 8px;
+}
+
+.spelling-feedback.correct .spelling-answer-correct {
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+}
+
 .spelling-feedback.wrong .spelling-wrong-label {
   display: block;
   color: var(--muted);
