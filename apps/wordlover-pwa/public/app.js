@@ -95,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v57";
+const APP_VERSION = "0.6.2-product.20260528-v58";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v57";
+const SHELL_CACHE_VERSION = "wordlover-shell-v58";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3411,6 +3411,14 @@ async function handleReturnKey() {
       // Non-dictionary word can't go to the spelling list (dictionary words only): flag it red.
       flagSearchInputInvalid();
     }
+  } else if (onReturnAction === "both") {
+    if (data?.status === "found") {
+      await saveVocabularyItem(data, "return");
+      await saveSpellingItem(data, "return");
+    } else {
+      // Spelling requires a dictionary word, so "both" can't fully apply: flag it red.
+      flagSearchInputInvalid();
+    }
   }
 }
 
@@ -3785,7 +3793,7 @@ function buildUserDataSnapshot() {
     spellingItems,
     spellingEvents,
     userDictionary: userDictionaryEntries,
-    autosaveEnabled: onReturnAction === "vocabulary",
+    autosaveEnabled: onReturnAction === "vocabulary" || onReturnAction === "both",
     onReturnAction,
     speakOnReturn,
     theme,
@@ -4243,7 +4251,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
 }
 
 function normalizeOnReturnAction(value) {
-  return ["vocabulary", "spelling", "none"].includes(value) ? value : "vocabulary";
+  return ["vocabulary", "spelling", "both", "none"].includes(value) ? value : "vocabulary";
 }
 
 // Reflect current settings state into the menu controls (guarded — controls may not exist yet).
@@ -5360,7 +5368,7 @@ async function init() {
     await saveValue("onReturnAction", onReturnAction);
   }
   speakOnReturn = Boolean(await loadValue("speakOnReturn", false));
-  autosaveEnabled = onReturnAction === "vocabulary";
+  autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
   syncSettingsControls();
   lastMetrics = await loadValue("lastMetrics", null);
   await ensureDailyCheckpoint();
@@ -5593,7 +5601,7 @@ clearSearchButton.addEventListener("click", () => {
 
 onReturnSelect?.addEventListener("change", async () => {
   onReturnAction = normalizeOnReturnAction(onReturnSelect.value);
-  autosaveEnabled = onReturnAction === "vocabulary";
+  autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
   await saveValue("onReturnAction", onReturnAction);
 });
 
@@ -6011,7 +6019,7 @@ window.WordLoverApp = {
   },
   setOnReturnAction: async (action) => {
     onReturnAction = normalizeOnReturnAction(action);
-    autosaveEnabled = onReturnAction === "vocabulary";
+    autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
     syncSettingsControls();
     await saveValue("onReturnAction", onReturnAction);
   },

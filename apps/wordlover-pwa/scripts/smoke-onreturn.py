@@ -61,15 +61,15 @@ def main() -> int:
         page.evaluate("async () => await window.WordLoverApp.ensureDictionaryLoaded()")
         page.wait_for_function("() => window.WordLoverApp.getState().loaded === true", timeout=90000)
 
-        # Pick three real dictionary words.
+        # Pick four real dictionary words.
         words = page.evaluate(
-            """() => ['abandon','ability','able'].filter(w => { try { return window.WordLoverApp.lookupTerm(w).status === 'found'; } catch { return false; } })"""
+            """() => ['abandon','ability','able','about'].filter(w => { try { return window.WordLoverApp.lookupTerm(w).status === 'found'; } catch { return false; } })"""
         )
         print(f"usable dictionary words: {words}", flush=True)
-        if len(words) < 3:
-            failures.append(f"need 3 dictionary words for the test, found {words}")
-            words = (words + ["abandon", "ability", "able"])[:3]
-        w_vocab, w_spell, w_none = words[0], words[1], words[2]
+        if len(words) < 4:
+            failures.append(f"need 4 dictionary words for the test, found {words}")
+            words = (words + ["abandon", "ability", "able", "about"])[:4]
+        w_vocab, w_spell, w_none, w_both = words[0], words[1], words[2], words[3]
 
         # On Return = vocabulary
         page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('vocabulary')")
@@ -103,6 +103,22 @@ def main() -> int:
             failures.append("On Return=none saved something")
         if state.get("spellHasVocab"):
             failures.append("vocabulary word leaked into spelling list (not independent)")
+
+        # On Return = both -> the word lands in BOTH the vocabulary and spelling lists.
+        page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('both')")
+        press_return(page, w_both)
+        time.sleep(0.8)
+        both_state = page.evaluate(
+            f"""() => ({{
+                inVocab: window.WordLoverApp.getVocabulary().some(i => i.term === {w_both!r}),
+                inSpell: window.WordLoverApp.getSpelling().some(i => i.term === {w_both!r}),
+            }})"""
+        )
+        print(f"both mode ({w_both}): {both_state}", flush=True)
+        if not both_state.get("inVocab"):
+            failures.append("On Return=both did not save to vocabulary")
+        if not both_state.get("inSpell"):
+            failures.append("On Return=both did not save to spelling")
 
         # On Return = spelling with a non-dictionary word -> input flagged red, nothing saved.
         page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('spelling')")

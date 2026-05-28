@@ -623,9 +623,20 @@ body[data-ai-chat-open="true"] {
 }
 
 .settings-grid label {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin: 0;
+}
+
+/* Dropdown rows: label on the left, control filling the rest beside it. */
+.settings-grid label select {
+  flex: 1 1 auto;
+}
+
+/* Checkbox rows: keep the checkbox and its label adjacent on the left. */
+.settings-grid label.toggle-row {
+  justify-content: flex-start;
 }
 
 select {
