@@ -50,6 +50,18 @@
               <option value="rose">Bright red</option>
             </select>
           </label>
+          <label>
+            <span>On Return</span>
+            <select id="onReturnSelect">
+              <option value="vocabulary">Save to vocabulary</option>
+              <option value="spelling">Save to spelling list</option>
+              <option value="none">Do nothing</option>
+            </select>
+          </label>
+          <label class="toggle-row">
+            <input id="speakOnReturnToggle" type="checkbox" />
+            <span>Speak word on Return</span>
+          </label>
         </div>
         <div class="auth-panel">
           <div>
@@ -151,10 +163,10 @@
             <h2>Vocabulary</h2>
             <p id="vocabularySummary" class="muted">No saved terms yet.</p>
           </div>
-          <label class="toggle-row">
-            <input id="autosaveToggle" type="checkbox" checked />
-            <span>Autosave</span>
-          </label>
+        </div>
+        <div class="track-tabs" id="vocabularyTrackTabs" role="tablist" aria-label="Vocabulary or spelling list">
+          <button type="button" data-vocab-track="vocabulary" aria-selected="true">Vocabulary</button>
+          <button type="button" data-vocab-track="spelling" aria-selected="false">Spelling</button>
         </div>
         <div id="vocabularyList" class="vocabulary-list"></div>
       </section>

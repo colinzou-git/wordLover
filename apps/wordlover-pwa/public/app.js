@@ -921,6 +921,7 @@ function renderResult(data) {
       ${canSaveAnyway ? `
         <div class="result-actions">
           <button id="saveUnknownTerm" type="button" data-typed-term="${escapeHtml(typed)}">Save anyway with my own meaning</button>
+          <button id="addToDictionary" class="secondary-button" type="button" data-typed-term="${escapeHtml(typed)}">Add to dictionary</button>
         </div>
       ` : ""}
     `;
@@ -938,6 +939,8 @@ function renderResult(data) {
   currentResult = data;
   const vocabularyItem = getVocabularyItem(data.term);
   const isActiveSaved = Boolean(vocabularyItem && !vocabularyItem.archivedAt);
+  const spellingItem = getSpellingItem(data.term);
+  const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
   result.innerHTML = `
     <div class="result-head">
       <div class="result-title-row">
@@ -961,6 +964,7 @@ function renderResult(data) {
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button" ${isActiveSaved ? "disabled" : ""}>${isActiveSaved ? "Saved" : "Save to vocabulary"}</button>
+      <button id="addToSpelling" class="secondary-button" type="button" ${isInSpelling ? "disabled" : ""}>${isInSpelling ? "In spelling list" : "Add to spelling list"}</button>
       <button id="showAiDetails" class="secondary-button" type="button">Gemini details</button>
       ${vocabularyItem ? `<button id="editCurrentTerm" class="secondary-button" type="button">Edit saved meaning</button>` : ""}
     </div>
@@ -1231,6 +1235,9 @@ function lookupTerm(input) {
   const normalized = normalizeTerm(input);
   if (isChineseInput(input)) return lookupChineseTerm(input);
   if (!TERM_RE.test(normalized)) return { status: "invalid_input", term: input };
+  // User dictionary overlay: words the user added themselves resolve without the sql.js DB.
+  const userEntry = getUserDictionaryEntry(input);
+  if (userEntry) return userDictionaryToResult(userEntry);
   if (!dictionaryDb) throw new Error("Dictionary is not loaded yet.");
 
   const start = performance.now();
@@ -1825,6 +1832,33 @@ async function saveVocabularyItem(data, reason = "manual") {
   return getVocabularyItem(data.term);
 }
 
+// Add a dictionary (or user-dictionary) word to the separate spelling list.
+async function saveSpellingItem(data, reason = "manual") {
+  if (!data || data.status !== "found") return null;
+  await getDeviceId();
+  const normalizedTerm = normalizeTerm(data.term);
+  const existing = getSpellingItem(data.term);
+  const now = nowIso();
+  if (existing) {
+    existing.archivedAt = null;
+    existing.updatedAt = now;
+    existing.syncVersion = (existing.syncVersion ?? 0) + 1;
+    existing.isSynced = false;
+    existing.lastSaveReason = reason;
+    existing.review = normalizeReviewState(existing.review ?? { dueAt: now });
+  } else {
+    const item = resultToTrackItem(data);
+    item.lastSaveReason = reason;
+    spellingItems = [item, ...spellingItems];
+  }
+  spellingItems = spellingItems
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
+    .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
+  await persistSpelling();
+  if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
+  return getSpellingItem(data.term);
+}
+
 async function showUnknownTermDialog(typedTerm) {
   const initial = (typedTerm ?? "").trim();
   const values = await showModal({
@@ -1879,6 +1913,58 @@ async function showUnknownTermDialog(typedTerm) {
     chinese,
     phonetic: values.phonetic.trim(),
   });
+}
+
+// Add a brand-new word to the additive user dictionary (must not already exist in the dictionary).
+async function showAddToDictionaryDialog(typedTerm) {
+  const initial = (typedTerm ?? "").trim();
+  const values = await showModal({
+    title: "Add a word to the dictionary",
+    body: "Add a new word so it becomes searchable and eligible for the spelling list. The word must not already exist in the dictionary.",
+    fields: [
+      { id: "term", label: "Word", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
+      { id: "phonetic", label: "Pronunciation / IPA (optional)", value: "" },
+      { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "", required: true },
+      { id: "chinese", label: "Chinese meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
+    ],
+    submitText: "Add to dictionary",
+    cancelText: "Cancel",
+  });
+  if (!values) return null;
+  const term = values.term.trim();
+  const normalizedTerm = normalizeTerm(term);
+  if (!normalizedTerm || !TERM_RE.test(normalizedTerm)) {
+    await showModal({ title: "Word cannot be added", body: "Use English letters, spaces, hyphens, or apostrophes, up to 6 words.", submitText: "OK", allowCancel: false });
+    return null;
+  }
+  // Reject words that already exist (shipped dictionary or user dictionary).
+  if (getUserDictionaryEntry(term) || (loaded && lookupTerm(term)?.status === "found")) {
+    await showModal({ title: "Word already exists", body: `"${term}" is already in the dictionary. Search it directly.`, submitText: "OK", allowCancel: false });
+    return null;
+  }
+  const english = values.english.split(";").map((line) => line.trim()).filter(Boolean);
+  const chinese = values.chinese.split(";").map((line) => line.trim()).filter(Boolean);
+  if (!english.length) {
+    await showModal({ title: "English meaning required", body: "Add at least one English meaning.", submitText: "OK", allowCancel: false });
+    return null;
+  }
+  const now = nowIso();
+  const entry = {
+    normalizedTerm,
+    word: term,
+    phonetic: values.phonetic.trim(),
+    englishMeanings: english,
+    chineseMeanings: chinese,
+    createdAt: now,
+    updatedAt: now,
+    syncVersion: 1,
+  };
+  userDictionaryEntries = [entry, ...userDictionaryEntries.filter((e) => e.normalizedTerm !== normalizedTerm)];
+  await persistUserDictionaryEntry(entry);
+  // Show the freshly added word as a normal result.
+  termInput.value = term;
+  renderResult(userDictionaryToResult(entry));
+  return entry;
 }
 
 async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese, phonetic }) {
@@ -1942,14 +2028,10 @@ async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese
   return getVocabularyItem(term);
 }
 
-function scheduleAutosave(data) {
+// Dwell-based autosave was replaced by the explicit "On Return" setting (see handleReturnKey).
+// Kept as a no-op so existing call sites stay simple.
+function scheduleAutosave() {
   window.clearTimeout(autosaveHandle);
-  if (!autosaveEnabled || !data || data.status !== "found" || getVocabularyItem(data.term)) return;
-  autosaveHandle = window.setTimeout(() => {
-    if (currentResult && normalizeTerm(currentResult.term) === normalizeTerm(data.term)) {
-      void saveVocabularyItem(data, "autosave");
-    }
-  }, AUTOSAVE_DWELL_MS);
 }
 
 async function editVocabularyItem(term) {
@@ -2970,8 +3052,35 @@ async function runLookup({ commit = false } = {}) {
     if (commit && data.status === "found") {
       await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
     }
+    return data;
   } catch (error) {
     result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+    return null;
+  }
+}
+
+let invalidFlagHandle = 0;
+function flagSearchInputInvalid() {
+  termInput.classList.add("input-invalid");
+  window.clearTimeout(invalidFlagHandle);
+  invalidFlagHandle = window.setTimeout(() => termInput.classList.remove("input-invalid"), 1500);
+}
+
+// Return key: always search; then apply the configured "On Return" save action + optional speak.
+async function handleReturnKey() {
+  const value = termInput.value;
+  if (!value.trim()) return;
+  const data = await runLookup({ commit: true });
+  if (speakOnReturn) speakTerm(data?.status === "found" ? data.term : value);
+  if (onReturnAction === "vocabulary") {
+    if (data?.status === "found") await saveVocabularyItem(data, "return");
+  } else if (onReturnAction === "spelling") {
+    if (data?.status === "found") {
+      await saveSpellingItem(data, "return");
+    } else {
+      // Non-dictionary word can't go to the spelling list (dictionary words only): flag it red.
+      flagSearchInputInvalid();
+    }
   }
 }
 
@@ -4982,8 +5091,12 @@ termInput.addEventListener("keydown", (event) => {
     window.clearTimeout(debounceHandle);
     hideRecentSearchPopover();
     renderSuggestions([]);
-    void runLookup({ commit: true });
+    void handleReturnKey();
   }
+});
+
+termInput.addEventListener("input", () => {
+  termInput.classList.remove("input-invalid");
 });
 
 termInput.addEventListener("focus", () => {
@@ -5014,6 +5127,15 @@ recentSearchPopover.addEventListener("click", (event) => {
 result.addEventListener("click", (event) => {
   if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm") {
     void saveVocabularyItem(currentResult, "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "addToSpelling" && currentResult) {
+    void saveSpellingItem(currentResult, "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "addToDictionary") {
+    const typed = event.target.dataset.typedTerm ?? termInput.value;
+    void showAddToDictionaryDialog(typed);
     return;
   }
   if (event.target instanceof HTMLButtonElement && event.target.id === "showAiDetails" && currentResult) {
@@ -5114,11 +5236,15 @@ clearSearchButton.addEventListener("click", () => {
   renderRecentSearchPopover();
 });
 
-autosaveToggle.addEventListener("change", async () => {
-  autosaveEnabled = autosaveToggle.checked;
-  await saveValue("autosaveEnabled", autosaveEnabled);
-  if (!autosaveEnabled) scheduleAutosave(null);
-  if (currentResult) renderResult(currentResult);
+onReturnSelect?.addEventListener("change", async () => {
+  onReturnAction = normalizeOnReturnAction(onReturnSelect.value);
+  autosaveEnabled = onReturnAction === "vocabulary";
+  await saveValue("onReturnAction", onReturnAction);
+});
+
+speakOnReturnToggle?.addEventListener("change", async () => {
+  speakOnReturn = speakOnReturnToggle.checked;
+  await saveValue("speakOnReturn", speakOnReturn);
 });
 
 startReviewButton.addEventListener("click", () => {
@@ -5463,10 +5589,27 @@ window.WordLoverApp = {
   setDebugMode,
   getDueVocabularyItems,
   setAutosaveEnabled: async (enabled) => {
+    onReturnAction = enabled ? "vocabulary" : "none";
     autosaveEnabled = Boolean(enabled);
-    autosaveToggle.checked = autosaveEnabled;
-    await saveValue("autosaveEnabled", autosaveEnabled);
+    syncSettingsControls();
+    await saveValue("onReturnAction", onReturnAction);
   },
+  setOnReturnAction: async (action) => {
+    onReturnAction = normalizeOnReturnAction(action);
+    autosaveEnabled = onReturnAction === "vocabulary";
+    syncSettingsControls();
+    await saveValue("onReturnAction", onReturnAction);
+  },
+  setSpeakOnReturn: async (enabled) => {
+    speakOnReturn = Boolean(enabled);
+    syncSettingsControls();
+    await saveValue("speakOnReturn", speakOnReturn);
+  },
+  saveSpellingItem,
+  getSpelling: () => spellingItems,
+  getSpellingEvents: () => spellingEvents,
+  getUserDictionary: () => userDictionaryEntries,
+  addUserDictionaryEntry: showAddToDictionaryDialog,
   runAutomatedSearchSmoke,
   applyTheme: (next) => {
     applyTheme(next);
