@@ -138,6 +138,37 @@ def main() -> int:
         if final is not None:
             failures.append(f"session should be finished, state={final}")
 
+        # --- Spelling tabs reflect the spelling track, independent of vocabulary ---
+        tabs = page.evaluate(
+            """() => {
+                document.querySelector('[data-vocab-track="spelling"]').click();
+                const vocabPanel = document.querySelector('#vocabularyList').textContent;
+                document.querySelector('[data-history-track="spelling"]').click();
+                document.querySelector('[data-today-track="spelling"]').click();
+                return {
+                    vocabCount: window.WordLoverApp.getVocabulary().length,
+                    spellingCount: window.WordLoverApp.getSpelling().length,
+                    vocabPanel,
+                    historySummary: document.querySelector('#historyChartSummary').textContent,
+                    todayReviewed: document.querySelector('#statReviewed').textContent,
+                    todayNew: document.querySelector('#statNewSaved').textContent,
+                };
+            }"""
+        )
+        print(f"tabs: {tabs}", flush=True)
+        if tabs.get("vocabCount") != 0:
+            failures.append(f"vocabulary list should be empty (independent of spelling), got {tabs.get('vocabCount')}")
+        if tabs.get("spellingCount") != 2:
+            failures.append(f"spelling list should have 2 items, got {tabs.get('spellingCount')}")
+        if "Total" not in (tabs.get("vocabPanel") or "") or "2" not in (tabs.get("vocabPanel") or ""):
+            failures.append(f"spelling stats tab did not show Total 2: {tabs.get('vocabPanel')!r}")
+        if "2 new" not in (tabs.get("historySummary") or "") or "2 reviewed" not in (tabs.get("historySummary") or ""):
+            failures.append(f"spelling history summary wrong: {tabs.get('historySummary')!r}")
+        if tabs.get("todayReviewed") != "2":
+            failures.append(f"today spelling 'reviewed' should be 2, got {tabs.get('todayReviewed')}")
+        if tabs.get("todayNew") != "2":
+            failures.append(f"today spelling 'new' should be 2, got {tabs.get('todayNew')}")
+
         browser.close()
 
     if failures:

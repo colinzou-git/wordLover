@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=20260527-40" />
+    <link rel="stylesheet" href="/styles.css?v=20260528-41" />
     <title>WordLover</title>
   </head>
   <body>
@@ -184,6 +184,10 @@
             <p id="historyChartSummary" class="muted">Activity over time.</p>
           </div>
         </div>
+        <div class="track-tabs" id="historyTrackTabs" role="tablist" aria-label="Vocabulary or spelling history">
+          <button type="button" data-history-track="vocabulary" aria-selected="true">Vocabulary</button>
+          <button type="button" data-history-track="spelling" aria-selected="false">Spelling</button>
+        </div>
         <div class="history-controls">
           <div class="history-granularity" role="tablist" aria-label="History range">
             <button type="button" data-history-granularity="days" aria-selected="true">Days</button>
@@ -220,7 +224,7 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260527-40"></script>
-    <script type="module" src="/app.js?v=20260527-40"></script>
+    <script src="/wordlover-config.js?v=20260528-41"></script>
+    <script type="module" src="/app.js?v=20260528-41"></script>
   </body>
 </html>

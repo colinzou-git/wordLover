@@ -71,6 +71,7 @@ const historyNextButton = document.querySelector("#historyNext");
 const historyTodayButton = document.querySelector("#historyToday");
 const historyAnchorInput = document.querySelector("#historyAnchorInput");
 const historyGranularityButtons = Array.from(document.querySelectorAll("[data-history-granularity]"));
+const historyTrackTabs = document.querySelectorAll("[data-history-track]");
 const debugModeToggle = document.querySelector("#debugModeToggle");
 const runReviewAutomationButton = document.querySelector("#runReviewAutomation");
 const debugStatus = document.querySelector("#debugStatus");
@@ -93,9 +94,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260527-v51";
+const APP_VERSION = "0.6.2-product.20260528-v52";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v51";
+const SHELL_CACHE_VERSION = "wordlover-shell-v52";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -2039,7 +2040,10 @@ function scheduleAutosave() {
 }
 
 async function editVocabularyItem(term) {
-  const item = getVocabularyItem(term);
+  return editVocabularyItemGeneric(getVocabularyItem(term), persistVocabularyItem);
+}
+
+async function editVocabularyItemGeneric(item, persistFn) {
   if (!item) return;
   const values = await showModal({
     title: `Edit ${item.term}`,
@@ -2058,7 +2062,7 @@ async function editVocabularyItem(term) {
   item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  await persistVocabularyItem(item);
+  await persistFn(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
 }
 
@@ -2071,6 +2075,28 @@ async function setVocabularyArchived(term, archived) {
   item.isSynced = false;
   await persistVocabularyItem(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function setSpellingArchived(term, archived) {
+  const item = getSpellingItem(term);
+  if (!item) return;
+  item.archivedAt = archived ? nowIso() : null;
+  item.updatedAt = nowIso();
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  await persistSpellingItem(item);
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+// Browser action wrappers route to the track currently shown in the vocabulary panel.
+function archiveBrowserItem(term, archived) {
+  return vocabularyView.track === "spelling" ? setSpellingArchived(term, archived) : setVocabularyArchived(term, archived);
+}
+
+async function editBrowserItem(term) {
+  if (vocabularyView.track !== "spelling") return editVocabularyItem(term);
+  // Spelling items inherit the dictionary meaning; offer a light edit of the user meaning hint.
+  return editVocabularyItemGeneric(getSpellingItem(term), persistSpellingItem);
 }
 
 function getVocabularyRating(item) {
@@ -2116,9 +2142,18 @@ function speakTerm(term) {
   }
 }
 
-function getVocabularyStats() {
-  const active = vocabularyItems.filter((item) => !item.archivedAt);
-  const archived = vocabularyItems.filter((item) => item.archivedAt);
+// The vocabulary browser is shared by the vocabulary and spelling tracks.
+function activeBrowserItems() {
+  return vocabularyView.track === "spelling" ? spellingItems : vocabularyItems;
+}
+
+function getBrowserItem(term) {
+  return vocabularyView.track === "spelling" ? getSpellingItem(term) : getVocabularyItem(term);
+}
+
+function getVocabularyStats(items = activeBrowserItems()) {
+  const active = items.filter((item) => !item.archivedAt);
+  const archived = items.filter((item) => item.archivedAt);
   const counts = Object.fromEntries(FSRS_RATINGS.map((rating) => [rating, 0]));
   active.forEach((item) => {
     counts[getVocabularyRating(item)] += 1;
@@ -2224,7 +2259,7 @@ function renderVocabularyBrowser(stats) {
   if (vocabularyView.page < 0) vocabularyView.page = 0;
   const start = vocabularyView.page * VOCABULARY_PAGE_SIZE;
   const pageItems = items.slice(start, start + VOCABULARY_PAGE_SIZE);
-  const selectedItem = vocabularyView.selectedTerm ? getVocabularyItem(vocabularyView.selectedTerm) : null;
+  const selectedItem = vocabularyView.selectedTerm ? getBrowserItem(vocabularyView.selectedTerm) : null;
   const rangeStart = items.length ? start + 1 : 0;
   const rangeEnd = Math.min(start + VOCABULARY_PAGE_SIZE, items.length);
   const emptyMessage = query
@@ -2289,14 +2324,20 @@ function preserveVocabSearchFocus() {
 }
 
 function renderVocabulary() {
+  for (const tab of vocabularyTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.vocabTrack === vocabularyView.track));
+  }
+  const isSpelling = vocabularyView.track === "spelling";
   const stats = getVocabularyStats();
   if (!stats.active.length && !stats.archived.length) {
-    vocabularySummary.textContent = "No saved terms yet.";
-    vocabularyList.innerHTML = `<p class="muted">Search a word and save it here. Autosave can add valid searches after a short pause.</p>`;
+    vocabularySummary.textContent = isSpelling ? "No spelling words yet." : "No saved terms yet.";
+    vocabularyList.innerHTML = isSpelling
+      ? `<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
+      : `<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
     return;
   }
   if (vocabularyView.filter !== "summary" && vocabularyView.selectedTerm) {
-    const selected = getVocabularyItem(vocabularyView.selectedTerm);
+    const selected = getBrowserItem(vocabularyView.selectedTerm);
     if (!selected || selected.archivedAt) vocabularyView.selectedTerm = null;
   }
   const statsHtml = renderVocabularyStats(stats);
@@ -2490,12 +2531,15 @@ function computeHistoryBuckets(granularity, anchorDate) {
 }
 
 function summarizeHistoryBuckets(buckets) {
+  const isSpelling = historyView.track === "spelling";
+  const events = isSpelling ? spellingEvents : studyEvents;
+  const items = isSpelling ? spellingItems : vocabularyItems;
   const previousRatingByTerm = new Map();
-  const sortedReviews = studyEvents
+  const sortedReviews = events
     .filter((event) => event?.type === "review" && event.normalizedTerm && event.rating)
     .slice()
     .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
-  const newWordSavedAt = vocabularyItems.map((item) => Date.parse(item.savedAt)).filter(Number.isFinite);
+  const newWordSavedAt = items.map((item) => Date.parse(item.savedAt)).filter(Number.isFinite);
   return buckets.map((bucket) => {
     const startMs = bucket.start.getTime();
     const endMs = bucket.end.getTime();
@@ -2636,6 +2680,9 @@ function renderHistoryChart() {
   for (const button of historyGranularityButtons) {
     const selected = button.dataset.historyGranularity === historyView.granularity;
     button.setAttribute("aria-selected", String(selected));
+  }
+  for (const tab of historyTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.historyTrack === historyView.track));
   }
 }
 
@@ -5383,6 +5430,7 @@ vocabularyList.addEventListener("click", (event) => {
   const action = button.dataset.action;
   if (action === "vocab-filter") {
     vocabularyView = {
+      ...vocabularyView,
       filter: button.dataset.filter ?? "all",
       page: 0,
       selectedTerm: null,
@@ -5392,7 +5440,7 @@ vocabularyList.addEventListener("click", (event) => {
     return;
   }
   if (action === "vocab-summary") {
-    vocabularyView = { filter: "summary", page: 0, selectedTerm: null, query: "" };
+    vocabularyView = { ...vocabularyView, filter: "summary", page: 0, selectedTerm: null, query: "" };
     renderVocabulary();
     return;
   }
@@ -5419,12 +5467,12 @@ vocabularyList.addEventListener("click", (event) => {
     renderSuggestions([]);
     void runLookup({ commit: true });
   }
-  if (action === "edit") void editVocabularyItem(term);
+  if (action === "edit") void editBrowserItem(term);
   if (action === "archive") {
     vocabularyView.selectedTerm = null;
-    void setVocabularyArchived(term, true);
+    void archiveBrowserItem(term, true);
   }
-  if (action === "restore") void setVocabularyArchived(term, false);
+  if (action === "restore") void archiveBrowserItem(term, false);
 });
 
 vocabularyList.addEventListener("input", (event) => {
@@ -5734,6 +5782,15 @@ for (const button of historyGranularityButtons) {
   });
 }
 
+for (const tab of historyTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.historyTrack;
+    if (!next || next === historyView.track) return;
+    historyView = { ...historyView, track: next };
+    renderHistoryChart();
+  });
+}
+
 historyPrevButton.addEventListener("click", () => {
   shiftHistoryAnchor(-1);
 });
@@ -5866,6 +5923,22 @@ window.WordLoverApp = {
   getSpellingEvents: () => spellingEvents,
   getUserDictionary: () => userDictionaryEntries,
   addUserDictionaryEntry: showAddToDictionaryDialog,
+  addUserDictionaryEntryForTest: async (word, english, chinese) => {
+    const now = nowIso();
+    const entry = {
+      normalizedTerm: normalizeTerm(word),
+      word,
+      phonetic: "",
+      englishMeanings: [english ?? ("meaning of " + word)],
+      chineseMeanings: [chinese ?? ("中文" + word)],
+      createdAt: now,
+      updatedAt: now,
+      syncVersion: 1,
+    };
+    userDictionaryEntries = [entry, ...userDictionaryEntries.filter((e) => e.normalizedTerm !== entry.normalizedTerm)];
+    await persistUserDictionaryEntry(entry);
+    return entry;
+  },
   getDueSpellingItems,
   spelling: {
     ratingFromRetries,

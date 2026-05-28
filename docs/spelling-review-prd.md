@@ -1,6 +1,6 @@
 # Spelling Review & Quiz — PRD
 
-Status: **Draft (not started)** · Owner: Colin · Created: 2026-05-28
+Status: **Implemented in v52** · Owner: Colin · Created: 2026-05-28
 
 This document tracks the requirements for a **Spelling** practice track that runs in
 parallel to the existing **Vocabulary memorization** track. Implementation has not
@@ -155,14 +155,14 @@ by this PRD.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| SP-1 | "Add to spelling list" button on dictionary results | open |
-| SP-2 | "On Return" 3-way setting (replaces Autosave) + migration; non-dictionary word shows red | open |
-| SP-2b | "Speak word on Return" setting (default off) | open |
-| SP-3 | "Add to dictionary" + user-dictionary overlay | open |
-| SP-4 | Spelling review engine (audio, hint, retry, 3-in-a-row, auto-advance) | open |
-| SP-5 | Rating derivation (retries → easy/good/hard/again) + FSRS scheduling | open |
-| SP-6 | Today section Spelling tab (new/reviewed/mastered) | open |
-| SP-7 | Vocabulary stats Spelling tab (total/again/hard/good/easy) | open |
-| SP-8 | History Spelling tab | open |
-| SP-9 | Data stores + snapshot/merge/restore + sync + checkpoints | open |
-| SP-10 | Automated smoke coverage | open |
+| SP-1 | "Add to spelling list" button on dictionary results | done (v52) |
+| SP-2 | "On Return" 3-way setting (replaces Autosave) + migration; non-dictionary word shows red | done (v52) |
+| SP-2b | "Speak word on Return" setting (default off) | done (v52) |
+| SP-3 | "Add to dictionary" + user-dictionary overlay | done (v52) |
+| SP-4 | Spelling review engine (audio, hint, retry, 3-in-a-row, auto-advance) | done (v52) |
+| SP-5 | Rating derivation (retries → easy/good/hard/again) + FSRS scheduling | done (v52) |
+| SP-6 | Today section Spelling tab (new/reviewed/mastered) | done (v52) |
+| SP-7 | Vocabulary stats Spelling tab (total/again/hard/good/easy) | done (v52) |
+| SP-8 | History Spelling tab | done (v52) |
+| SP-9 | Data stores + snapshot/merge/restore + sync + checkpoints | done (v52) |
+| SP-10 | Automated smoke coverage (smoke-spelling, smoke-onreturn, sync round-trip) | done (v52) |
