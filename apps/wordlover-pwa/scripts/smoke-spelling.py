@@ -83,6 +83,7 @@ def main() -> int:
         first_term = st.get("currentTerm")
 
         # --- Word 1: one wrong (retry), then 3 correct -> rating 'good' (1 retry) ---
+        # --- Word 1: a miss forces 3-in-a-row; also exercise Return-again-as-retry ---
         # strict case-sensitivity: a capitalized version must be WRONG.
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r}.toUpperCase())")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
@@ -93,17 +94,22 @@ def main() -> int:
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         if st.get("consecutive") != 0:
             failures.append(f"answer accepted while awaiting retry: {st}")
-        page.evaluate("() => window.WordLoverApp.spelling.retry()")
+        # Pressing Return again (in the input) must act like Retry.
+        page.evaluate(
+            "() => { const i = document.querySelector('#spellingInput'); i.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true})); }"
+        )
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         if st.get("awaitingRetry"):
-            failures.append("retry did not clear awaitingRetry")
+            failures.append("pressing Return again did not act like Retry (still awaiting)")
 
-        # 3 correct in a row.
-        for i in range(3):
-            page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
-            time.sleep(0.05)
-        # After the 3rd correct, the word completes asynchronously; wait for it.
-        wait_state(page, "() => { const s = window.WordLoverApp.spelling.state(); return !s || s.currentTerm !== %r || s.completed >= 1; }" % first_term, 4.0)
+        # After a miss, 3 correct in a row are required to complete -> rating 'good'.
+        page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
+        st = page.evaluate("() => window.WordLoverApp.spelling.state()")
+        if st is None or st.get("currentTerm") != first_term or st.get("consecutive") != 1:
+            failures.append(f"after a miss, 1 correct should NOT complete the word: {st}")
+        page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
+        page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
+        wait_state(page, "() => { const s = window.WordLoverApp.spelling.state(); return !s || s.currentTerm !== %r; }" % first_term, 4.0)
         events = page.evaluate("() => window.WordLoverApp.getSpellingEvents()")
         first_event = next((e for e in events if e.get("term") == first_term), None)
         print(f"word1 event: {first_event}", flush=True)
@@ -114,20 +120,21 @@ def main() -> int:
         elif first_event.get("retries") != 1:
             failures.append(f"event retries should be 1, got {first_event.get('retries')}")
 
-        # --- Word 2: 3 correct, zero retries -> rating 'easy' ---
+        # --- Word 2: first-try correct completes immediately (ONE answer) -> rating 'easy' ---
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         second_term = st.get("currentTerm") if st else None
         print(f"word2 term: {second_term}", flush=True)
+        events_before = page.evaluate("() => window.WordLoverApp.getSpellingEvents().length")
         if second_term:
-            for i in range(3):
-                page.evaluate(f"() => window.WordLoverApp.spelling.answer({second_term!r})")
-                time.sleep(0.05)
-            wait_state(page, "() => window.WordLoverApp.spelling.state() === null", 4.0)
+            page.evaluate(f"() => window.WordLoverApp.spelling.answer({second_term!r})")  # single correct attempt
+            wait_state(page, f"() => window.WordLoverApp.getSpellingEvents().length > {events_before}", 4.0)
             events = page.evaluate("() => window.WordLoverApp.getSpellingEvents()")
             second_event = next((e for e in events if e.get("term") == second_term), None)
-            print(f"word2 event: {second_event}", flush=True)
+            print(f"word2 event (one correct attempt): {second_event}", flush=True)
             if not second_event or second_event.get("rating") != "easy":
-                failures.append(f"0-retry word should rate 'easy', got {second_event.get('rating') if second_event else None}")
+                failures.append(f"first-try correct should complete immediately as 'easy', got {second_event.get('rating') if second_event else None}")
+            if second_event and second_event.get("retries") != 0:
+                failures.append(f"first-try word should have 0 retries, got {second_event.get('retries')}")
             # FSRS scheduled a future due date (not mastered on first easy).
             item = page.evaluate(f"() => window.WordLoverApp.getSpelling().find(i => i.term === {second_term!r})")
             if not item or not item.get("review", {}).get("dueAt"):
@@ -137,6 +144,26 @@ def main() -> int:
         final = page.evaluate("() => window.WordLoverApp.spelling.state()")
         if final is not None:
             failures.append(f"session should be finished, state={final}")
+
+        # --- Spelling Practice More: drills all active words even when none are due ---
+        practice = page.evaluate(
+            """() => {
+                const due = window.WordLoverApp.spelling.getDue().length;       // both just reviewed -> not due
+                const prac = window.WordLoverApp.spelling.getPractice().length; // all active
+                window.WordLoverApp.spelling.startPractice();
+                const st = window.WordLoverApp.spelling.state();
+                const q = st ? st.queueLength : 0;
+                window.WordLoverApp.spelling.close();
+                return { due, prac, q };
+            }"""
+        )
+        print(f"practice: {practice}", flush=True)
+        if practice.get("due") != 0:
+            failures.append(f"both reviewed words should not be due, got due={practice.get('due')}")
+        if practice.get("prac") != 2:
+            failures.append(f"practice should include all 2 active words, got {practice.get('prac')}")
+        if practice.get("q") != 2:
+            failures.append(f"practice session should queue 2 words, got {practice.get('q')}")
 
         # --- Spelling tabs reflect the spelling track, independent of vocabulary ---
         tabs = page.evaluate(

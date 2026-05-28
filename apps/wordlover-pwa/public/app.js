@@ -59,6 +59,7 @@ const statMastered = document.querySelector("#statMastered");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
 const startSpellingReviewButton = document.querySelector("#startSpellingReview");
+const startSpellingPracticeMoreButton = document.querySelector("#startSpellingPracticeMore");
 const quizPanel = document.querySelector("#quizPanel");
 const spellingReviewPanel = document.querySelector("#spellingReviewPanel");
 const todayTrackTabs = document.querySelectorAll("[data-today-track]");
@@ -94,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v52";
+const APP_VERSION = "0.6.2-product.20260528-v53";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v52";
+const SHELL_CACHE_VERSION = "wordlover-shell-v53";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -807,13 +808,21 @@ async function purgeDebugData() {
   const sessionId = debugMode.sessionId;
   const removedVocabulary = vocabularyItems.filter((item) => item.debugSessionId === sessionId);
   const removedEvents = studyEvents.filter((event) => event.debugSessionId === sessionId);
+  const removedSpelling = spellingItems.filter((item) => item.debugSessionId === sessionId);
+  const removedSpellingEvents = spellingEvents.filter((event) => event.debugSessionId === sessionId);
   vocabularyItems = vocabularyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
   studyEvents = studyEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
+  spellingItems = spellingItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
+  spellingEvents = spellingEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
   historyItems = historyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
   await Promise.all(removedVocabulary.map((item) => deleteVocabularyRecord(item)));
   await Promise.all(removedEvents.map((event) => deleteRecordValue(STUDY_EVENT_STORE, event.id)));
+  await Promise.all(removedSpelling.map((item) => deleteSpellingRecord(item)));
+  await Promise.all(removedSpellingEvents.map((event) => deleteRecordValue(SPELLING_EVENT_STORE, event.id)));
   await persistVocabulary();
   await persistStudyEvents();
+  await persistSpelling();
+  await persistSpellingEvents();
   await saveValue("history", historyItems);
   renderVocabulary();
   renderHistory();
@@ -2425,6 +2434,10 @@ function renderStudyStats() {
   startReviewButton.hidden = isSpelling;
   studyNewWordButton.hidden = isSpelling;
   if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
+  if (startSpellingPracticeMoreButton) {
+    startSpellingPracticeMoreButton.hidden = !isSpelling;
+    startSpellingPracticeMoreButton.disabled = !isSpelling || stats.activeCount === 0;
+  }
 
   if (isSpelling) {
     if (startSpellingReviewButton) {
@@ -2815,8 +2828,14 @@ function hideQuiz() {
 }
 
 // --- Spelling review engine ---
-// Per word: 3 consecutive correct spellings complete it; the session rating is derived from how
-// many wrong attempts (retries) it took. Strict check: exact, case-sensitive, no trimming.
+// A clean first-try spelling completes the word immediately (rating: easy). Once the user has
+// missed it at least once, they must spell it correctly 3 times in a row to complete it. The
+// session rating is derived from how many wrong attempts (retries) it took. Strict check:
+// exact, case-sensitive, no trimming.
+function spellingThreshold() {
+  return (activeSpellingSession?.retries ?? 0) === 0 ? 1 : 3;
+}
+
 function ratingFromRetries(retries) {
   if (retries <= 0) return "easy";
   if (retries === 1) return "good";
@@ -2835,17 +2854,37 @@ function currentSpellingItem() {
   return activeSpellingSession?.queue[activeSpellingSession.index] ?? null;
 }
 
-function startSpellingReview() {
-  const queue = getDueSpellingItems();
+function getPracticeSpellingItems() {
+  return spellingItems
+    .filter((item) => !item.archivedAt)
+    .sort((left, right) => {
+      const leftReviewed = left.review?.lastReviewedAt ?? "";
+      const rightReviewed = right.review?.lastReviewedAt ?? "";
+      if (leftReviewed !== rightReviewed) return leftReviewed.localeCompare(rightReviewed);
+      return (left.savedAt ?? "").localeCompare(right.savedAt ?? "");
+    });
+}
+
+function startSpellingSessionWith(queue, emptyMessage) {
   spellingReviewPanel.hidden = false;
   if (!queue.length) {
     activeSpellingSession = null;
-    spellingReviewPanel.innerHTML = `<p class="muted">No spelling words are due today.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+    spellingReviewPanel.innerHTML = `<p class="muted">${escapeHtml(emptyMessage)}</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
     return;
   }
   activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false };
   quizPanel.hidden = true;
   renderSpellingPrompt();
+}
+
+function startSpellingReview() {
+  startSpellingSessionWith(getDueSpellingItems(), "No spelling words are due today.");
+}
+
+// Practice mode: drill every active spelling word (least-recently-practiced first),
+// regardless of whether it is due.
+function startSpellingPractice() {
+  startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.");
 }
 
 function renderSpellingPrompt() {
@@ -2859,7 +2898,7 @@ function renderSpellingPrompt() {
   spellingReviewPanel.hidden = false;
   spellingReviewPanel.innerHTML = `
     <div class="spelling-review">
-      <p class="spelling-progress">Word ${activeSpellingSession.index + 1} of ${activeSpellingSession.queue.length} · ${activeSpellingSession.consecutive}/3 correct in a row</p>
+      <p class="spelling-progress">${escapeHtml(spellingProgressText())}</p>
       <p class="spelling-hint-zh">${escapeHtml(hint.zh)}</p>
       <p class="spelling-hint-en">${escapeHtml(hint.en)}</p>
       <div class="spelling-controls">
@@ -2877,11 +2916,17 @@ function renderSpellingPrompt() {
   speakTerm(item.term);
 }
 
+function spellingProgressText() {
+  const s = activeSpellingSession;
+  const base = `Word ${s.index + 1} of ${s.queue.length}`;
+  return s.retries === 0
+    ? `${base} · spell the word you hear`
+    : `${base} · ${s.consecutive}/3 correct in a row (after a miss)`;
+}
+
 function updateSpellingProgress() {
   const progress = spellingReviewPanel.querySelector(".spelling-progress");
-  if (progress && activeSpellingSession) {
-    progress.textContent = `Word ${activeSpellingSession.index + 1} of ${activeSpellingSession.queue.length} · ${activeSpellingSession.consecutive}/3 correct in a row`;
-  }
+  if (progress && activeSpellingSession) progress.textContent = spellingProgressText();
 }
 
 function checkSpelling() {
@@ -2898,7 +2943,8 @@ function checkSpelling() {
     input.value = "";
     input.classList.add("spelling-correct-flash");
     window.setTimeout(() => input.classList.remove("spelling-correct-flash"), 1000);
-    if (activeSpellingSession.consecutive >= 3) {
+    // First-try correct completes immediately; after a miss, require 3 in a row.
+    if (activeSpellingSession.consecutive >= spellingThreshold()) {
       void completeCurrentSpellingWord();
     } else {
       updateSpellingProgress();
@@ -2908,9 +2954,11 @@ function checkSpelling() {
     activeSpellingSession.retries += 1;
     activeSpellingSession.consecutive = 0;
     activeSpellingSession.awaitingRetry = true;
-    feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span>`;
+    feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span><span class="spelling-retry-hint">Press Return again (or Retry) to try once more.</span>`;
     feedback.className = "spelling-feedback wrong";
-    input.disabled = true;
+    // Keep the input enabled + focused so pressing Return again acts like Retry.
+    input.focus();
+    updateSpellingProgress();
     const actions = spellingReviewPanel.querySelector(".quiz-actions");
     if (actions && !actions.querySelector("[data-spelling-retry]")) {
       actions.insertAdjacentHTML("afterbegin", `<button type="button" data-spelling-retry="1">Retry</button>`);
@@ -5525,6 +5573,10 @@ startSpellingReviewButton?.addEventListener("click", () => {
   startSpellingReview();
 });
 
+startSpellingPracticeMoreButton?.addEventListener("click", () => {
+  startSpellingPractice();
+});
+
 for (const tab of todayTrackTabs) {
   tab.addEventListener("click", () => {
     const next = tab.dataset.todayTrack;
@@ -5548,7 +5600,9 @@ for (const tab of vocabularyTrackTabs) {
 spellingReviewPanel.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.id === "spellingInput") {
     event.preventDefault();
-    checkSpelling();
+    // After a wrong answer, a second Return acts like the Retry button.
+    if (activeSpellingSession?.awaitingRetry) retrySpelling();
+    else checkSpelling();
   }
 });
 
@@ -5948,7 +6002,9 @@ window.WordLoverApp = {
   spelling: {
     ratingFromRetries,
     getDue: getDueSpellingItems,
+    getPractice: getPracticeSpellingItems,
     start: startSpellingReview,
+    startPractice: startSpellingPractice,
     retry: retrySpelling,
     close: hideSpellingReview,
     // Test/programmatic answer: types into the field and submits a strict check.

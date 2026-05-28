@@ -370,6 +370,14 @@ body[data-ai-chat-open="true"] {
   letter-spacing: 0.02em;
 }
 
+.spelling-feedback.wrong .spelling-retry-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
 .track-tabs {
   display: flex;
   gap: 6px;
