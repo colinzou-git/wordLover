@@ -95,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v54";
+const APP_VERSION = "0.6.2-product.20260528-v55";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v54";
+const SHELL_CACHE_VERSION = "wordlover-shell-v55";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -479,7 +479,7 @@ function snapshotIntegrity(snapshot) {
 }
 
 function validateUserDataSnapshot(snapshot) {
-  if (snapshot?.app !== "wordlover") throw new Error("This is not a WordLover user-data snapshot.");
+  if (snapshot?.app !== "wordlover") throw new Error("This is not a WordFan user-data snapshot.");
   if (snapshot.userDataFormatVersion && snapshot.userDataFormatVersion !== USER_DATA_FORMAT_VERSION) {
     throw new Error(`User-data format ${snapshot.userDataFormatVersion} is not supported by this app format ${USER_DATA_FORMAT_VERSION}.`);
   }
@@ -899,8 +899,8 @@ function renderInstallContext() {
   }
   installBanner.hidden = false;
   installBanner.textContent = isSafari
-    ? "For long-term offline use on iPhone, add WordLover to the Home Screen from Safari after the dictionary is installed."
-    : "For iPhone offline install, open this address in Safari, then add WordLover to the Home Screen.";
+    ? "For long-term offline use on iPhone, add WordFan to the Home Screen from Safari after the dictionary is installed."
+    : "For iPhone offline install, open this address in Safari, then add WordFan to the Home Screen.";
 }
 
 function renderHistory() {
@@ -1889,7 +1889,7 @@ async function showUnknownTermDialog(typedTerm) {
   const initial = (typedTerm ?? "").trim();
   const values = await showModal({
     title: "Save term without dictionary match?",
-    body: "WordLover did not find an exact match. You can save anyway, edit the term, or cancel. Provide at least one meaning before saving.",
+    body: "WordFan did not find an exact match. You can save anyway, edit the term, or cancel. Provide at least one meaning before saving.",
     fields: [
       { id: "term", label: "Term", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
       { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
@@ -2640,7 +2640,7 @@ function renderHistoryChartSvg(rows) {
     })
     .join("");
   return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="WordLover history chart" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="WordFan history chart" preserveAspectRatio="xMidYMid meet">
       <defs>
         <pattern id="h-hatch-down" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
           <rect width="6" height="6" fill="#d55e00"></rect>
@@ -3893,7 +3893,7 @@ async function rollbackLatestCheckpoint() {
 
 async function deleteAllLocalUserData() {
   const confirmation = await showModal({
-    title: "Delete all local WordLover data?",
+    title: "Delete all local WordFan data?",
     body: "This removes your vocabulary, study progress, history, checkpoints, encrypted keys, and the installed dictionary from this device. Cloud backups are not touched. Type DELETE to confirm.",
     fields: [{ id: "confirm", label: "Type DELETE to confirm", value: "", required: true }],
     submitText: "Delete everything",
@@ -3902,7 +3902,7 @@ async function deleteAllLocalUserData() {
   });
   if (!confirmation || confirmation.confirm.trim().toUpperCase() !== "DELETE") return false;
 
-  checkpointStatus.textContent = "Deleting local WordLover data...";
+  checkpointStatus.textContent = "Deleting local WordFan data...";
   dictionaryDb?.close();
   dictionaryDb = null;
   loaded = false;
@@ -5262,9 +5262,9 @@ async function showLoginGateIfNeeded() {
     await saveValue("loginGateAcknowledged", true);
     return;
   }
-  const body = "Sign in with your Google account so WordLover can sync your vocabulary to Drive and unlock Gemini AI example sentences. You can skip and use the app locally only.";
+  const body = "Sign in with your Google account so WordFan can sync your vocabulary to Drive and unlock Gemini AI example sentences. You can skip and use the app locally only.";
   const choice = await showModal({
-    title: "Welcome to WordLover",
+    title: "Welcome to WordFan",
     body,
     submitText: "Sign in with Google",
     cancelText: "Skip sign-in for now",

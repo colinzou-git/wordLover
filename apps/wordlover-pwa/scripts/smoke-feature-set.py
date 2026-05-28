@@ -22,7 +22,7 @@ def main() -> int:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.on("pageerror", lambda e: print(f"PAGEERROR: {e}", flush=True))
-        page.goto(f"{base}/?fresh=v54", wait_until="domcontentloaded")
+        page.goto(f"{base}/?fresh=v55", wait_until="domcontentloaded")
         page.wait_for_function("window.WordLoverApp != null", timeout=15000)
 
         # Give SW controllerchange-reload a chance to settle.
@@ -46,7 +46,7 @@ def main() -> int:
             """async () => {
                 const overlay = document.querySelector('.modal-overlay');
                 const title = overlay?.querySelector('h2')?.textContent ?? '';
-                if (title === 'Welcome to WordLover') return 'visible';
+                if (title === 'Welcome to WordFan') return 'visible';
                 // Check IndexedDB for loginGateAcknowledged flag.
                 return await new Promise((resolve) => {
                     const req = indexedDB.open('wordlover-user');
@@ -105,10 +105,10 @@ def main() -> int:
         # Check 4: App version + cache version bumped.
         state = page.evaluate("() => window.WordLoverApp.getState()")
         print(f"appVersion={state.get('appVersion')} cache={state.get('shellCacheVersion')}", flush=True)
-        if state.get("appVersion") != "0.6.2-product.20260528-v54":
-            failures.append(f"appVersion not v54: {state.get('appVersion')}")
-        if state.get("shellCacheVersion") != "wordlover-shell-v54":
-            failures.append(f"shell cache version not v54: {state.get('shellCacheVersion')}")
+        if state.get("appVersion") != "0.6.2-product.20260528-v55":
+            failures.append(f"appVersion not v55: {state.get('appVersion')}")
+        if state.get("shellCacheVersion") != "wordlover-shell-v55":
+            failures.append(f"shell cache version not v55: {state.get('shellCacheVersion')}")
 
         # Check 5 (v44): all theme options present, including the new kid-friendly candy theme.
         theme_options = page.evaluate(

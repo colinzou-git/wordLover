@@ -1,6 +1,6 @@
 {
-  "name": "WordLover",
-  "short_name": "WordLover",
+  "name": "WordFan",
+  "short_name": "WordFan",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f4ec",
