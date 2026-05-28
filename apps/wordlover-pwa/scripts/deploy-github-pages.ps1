@@ -30,6 +30,9 @@ foreach ($required in @("index.html", "app.js", "sw.js", "manifest.webmanifest",
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("wordfan-pages-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 
 try {
+  # Clear any stale worktree entries left by a previous interrupted/locked run.
+  git worktree prune 2>$null | Out-Null
+
   $remoteHas = [bool](git ls-remote --heads origin $Branch)
   git show-ref --verify --quiet "refs/heads/$Branch"
   $localHas = ($LASTEXITCODE -eq 0)
@@ -69,5 +72,12 @@ try {
   Write-Host "Deployed to branch '$Branch' (domain: $Domain)."
   Write-Host "First time only: GitHub -> Settings -> Pages -> Source = '$Branch' /(root), Custom domain = $Domain, Enforce HTTPS."
 } finally {
-  if (Test-Path $work) { git worktree remove --force $work 2>$null | Out-Null }
+  # Best-effort cleanup. The repo's .git lives in OneDrive, which can briefly lock the
+  # worktree admin folder; deleting the temp worktree dir first lets `git worktree prune`
+  # drop the entry, and any locked admin folder is harmless (not listed, ignored next run).
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+  git worktree prune 2>$null | Out-Null
+  $ErrorActionPreference = $prev
 }
