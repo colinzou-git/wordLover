@@ -95,9 +95,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v55";
+const APP_VERSION = "0.6.2-product.20260528-v56";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v55";
+const SHELL_CACHE_VERSION = "wordlover-shell-v56";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -5383,11 +5383,14 @@ async function init() {
     dictionaryState.textContent = "Installed";
     dictionarySource.textContent = "Opening local copy";
   }
-  result.innerHTML = installed
-    ? ""
-    : `<p class="muted">Install the local dictionary once while online. After that, search can work from the local copy.</p>`;
-  loadButton.hidden = installed;
-  if (installed) setSearchLoading(true);
+  // Auto-install/load: open the local copy if present, or download it automatically when online.
+  // The manual button only appears as a fallback (offline on a device that never installed).
+  const canAutoLoad = installed || navigator.onLine;
+  result.innerHTML = canAutoLoad
+    ? `<p class="muted">${installed ? "Opening dictionary…" : "Installing dictionary (one-time download)…"}</p>`
+    : `<p class="muted">Connect to the internet once to install the dictionary. After that it works offline.</p>`;
+  loadButton.hidden = canAutoLoad;
+  if (canAutoLoad) setSearchLoading(true);
 
   if ("serviceWorker" in navigator) {
     try {
@@ -5415,8 +5418,9 @@ async function init() {
     void showLoginGateIfNeeded();
   }
   const smokeTerm = params.get("q");
-  if (installed && !smokeTerm) {
-    void ensureDictionaryLoaded().then(() => {
+  if (canAutoLoad && !smokeTerm) {
+    void ensureDictionaryLoaded().then((ok) => {
+      if (!ok) return;
       termInput.focus();
       if (termInput.value.trim()) void runLookup();
     });
@@ -5931,6 +5935,8 @@ runReviewAutomationButton.addEventListener("click", () => {
 window.addEventListener("online", () => {
   renderAppMenu();
   void runAutoSync("online");
+  // If the dictionary never installed (first run was offline), install it now that we're online.
+  if (!loaded) void ensureDictionaryLoaded();
 });
 window.addEventListener("offline", renderAppMenu);
 window.addEventListener("focus", () => {
