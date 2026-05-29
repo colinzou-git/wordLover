@@ -186,6 +186,20 @@ def main() -> int:
         if cjk != "学习abc":
             failures.append(f"input sanitizer stripped Chinese: got {cjk!r}, expected '学习abc'")
 
+        # Chinese -> English translation lookup returns English word matches (synonyms).
+        cn = page.evaluate(
+            """() => {
+                const d = window.WordLoverApp.lookupTerm('学习');
+                return { status: d.status, count: (d.matches || []).length,
+                         hasStudy: (d.matches || []).some(m => /stud|learn/.test(m.word)) };
+            }"""
+        )
+        print(f"chinese lookup: {cn}", flush=True)
+        if cn.get("status") != "chinese_results" or cn.get("count", 0) < 1:
+            failures.append(f"Chinese->English lookup broken: {cn}")
+        if not cn.get("hasStudy"):
+            failures.append("Chinese lookup for 学习 did not include a study/learn English match")
+
         # Double Return: 2nd Return on unchanged text clears the field.
         page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('vocabulary')")
         press_return(page, w_vocab)
