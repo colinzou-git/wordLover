@@ -171,6 +171,21 @@ def main() -> int:
         if cleaned != "abcd1- e'f":
             failures.append(f"input sanitizer wrong: got {cleaned!r}, expected \"abcd1- e'f\"")
 
+        # Chinese characters must be preserved (only stray symbols are dropped).
+        cjk = page.evaluate(
+            """() => {
+                const i = document.querySelector('#termInput');
+                i.value = '学习abc!@#';
+                i.dispatchEvent(new Event('input', { bubbles: true }));
+                const v = i.value;
+                i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));
+                return v;
+            }"""
+        )
+        print(f"sanitized CJK input: {cjk!r}", flush=True)
+        if cjk != "学习abc":
+            failures.append(f"input sanitizer stripped Chinese: got {cjk!r}, expected '学习abc'")
+
         # Double Return: 2nd Return on unchanged text clears the field.
         page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('vocabulary')")
         press_return(page, w_vocab)

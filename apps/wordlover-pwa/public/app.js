@@ -95,10 +95,11 @@ const DICTIONARY_CHUNK_SIZE = 4 * 1024 * 1024;
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
+const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v60";
+const APP_VERSION = "0.6.2-product.20260528-v61";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v60";
+const SHELL_CACHE_VERSION = "wordlover-shell-v61";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -5517,7 +5518,10 @@ async function init() {
     void ensureDictionaryLoaded().then((ok) => {
       if (!ok) return;
       termInput.focus();
+      // Clear the transient "Opening dictionary…" placeholder once it's ready;
+      // otherwise it lingers under the search box even though nothing is loading.
       if (termInput.value.trim()) void runLookup();
+      else result.innerHTML = `<p class="muted">${DEFAULT_RESULT_HINT}</p>`;
     });
   }
 
@@ -5532,8 +5536,9 @@ loadButton.addEventListener("click", async () => {
 
 // Only word-input characters are accepted; stray symbol presses (assumed
 // mistaken touches) are dropped. Space and apostrophe are kept so phrases
-// ("take off") and contractions ("o'clock") still work.
-const DISALLOWED_TERM_CHARS = /[^A-Za-z0-9 '\-]/g;
+// ("take off") and contractions ("o'clock") still work; CJK ideographs are
+// kept so Chinese terms can be typed too.
+const DISALLOWED_TERM_CHARS = /[^A-Za-z0-9 '\-㐀-䶿一-鿿]/g;
 function sanitizeTermInput() {
   const before = termInput.value;
   const cleaned = before.replace(DISALLOWED_TERM_CHARS, "");
@@ -5556,7 +5561,7 @@ function clearSearchField() {
   renderSuggestions([]);
   currentResult = null;
   scheduleAutosave(null);
-  result.innerHTML = `<p class="muted">Type a term to search.</p>`;
+  result.innerHTML = `<p class="muted">${DEFAULT_RESULT_HINT}</p>`;
   aiDetailPanel.hidden = true;
   aiDetailPanel.innerHTML = "";
   pendingAiDetail = null;
