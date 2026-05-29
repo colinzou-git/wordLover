@@ -110,6 +110,26 @@
   --warning-text: #6b4e00;
 }
 
+/* Deep blue: a dark navy theme with bright, playful accents for younger learners. */
+:root[data-theme="deepblue"] {
+  --bg: #0e1c3f;
+  --panel: #172c5b;
+  --panel-soft: #1f3870;
+  --text: #eef4ff;
+  --muted: #a6bce6;
+  --line: #2e4885;
+  --line-strong: #5070b6;
+  --primary: #4cc2ff;
+  --primary-soft: #16315f;
+  --accent: #ffd23f;
+  --accent-contrast: #16264d;
+  --secondary-bg: #14264f;
+  --shadow: rgb(0 0 0 / 0.3);
+  --warning-bg: #2d2a14;
+  --warning-line: #8f7d32;
+  --warning-text: #ffe9a8;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -118,6 +138,9 @@ body {
   margin: 0;
   min-width: 320px;
   background: var(--bg);
+  /* Respect the notch / rounded corners in landscape (viewport-fit=cover). */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 button,
@@ -164,9 +187,10 @@ button:disabled {
 }
 
 #app {
-  width: min(920px, calc(100% - 28px));
+  /* Edge-to-edge on phones (just a small inset); a wider, readable cap on tablets. */
+  width: min(1100px, 100%);
   margin: 0 auto;
-  padding: 10px 0 28px;
+  padding: max(10px, env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
 }
 
 .app-menu[hidden] {
@@ -607,12 +631,14 @@ body[data-ai-chat-open="true"] {
   background: #9a3e30;
 }
 
-:root[data-theme="ink"] .danger-button {
+:root[data-theme="ink"] .danger-button,
+:root[data-theme="deepblue"] .danger-button {
   background: #d96452;
   color: #1a1011;
 }
 
-:root[data-theme="ink"] .danger-button:hover {
+:root[data-theme="ink"] .danger-button:hover,
+:root[data-theme="deepblue"] .danger-button:hover {
   background: #c2543f;
 }
 
@@ -813,6 +839,22 @@ h1 {
 
 .search-row #appMenuButton {
   margin-left: 4ch;
+}
+
+/* Transient "Undo" affordance shown right after a word is saved. */
+.undo-button {
+  flex: 0 0 auto;
+  align-self: stretch;
+  background: var(--accent, var(--primary));
+  color: var(--accent-contrast, #fff);
+  border: 0;
+  padding: 0 14px;
+  font-weight: 700;
+  border-radius: 8px;
+}
+
+.undo-button[hidden] {
+  display: none;
 }
 
 .metrics {
@@ -1614,8 +1656,8 @@ li button {
 
 @media (max-width: 700px) {
   #app {
-    width: min(100% - 20px, 920px);
-    padding-top: 10px;
+    width: 100%;
+    padding: max(8px, env(safe-area-inset-top)) 12px calc(24px + env(safe-area-inset-bottom));
   }
 
   .hero,

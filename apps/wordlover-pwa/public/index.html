@@ -2,14 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#256d85" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260528-48" />
+    <link rel="stylesheet" href="/styles.css?v=20260528-49" />
     <title>WordFan</title>
   </head>
   <body>
@@ -52,6 +52,7 @@
               <option value="ink">Ink focus</option>
               <option value="sky">Bright blue</option>
               <option value="rose">Bright red</option>
+              <option value="deepblue">Deep blue (kids)</option>
             </select>
           </label>
           <label>
@@ -125,6 +126,7 @@
       <section class="search-surface">
         <div class="search-row">
           <input id="termInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="abandon, take off, in terms of" />
+          <button id="undoSave" class="undo-button" type="button" hidden aria-label="Undo last save">Undo</button>
           <button id="clearSearch" class="secondary-button" type="button" aria-label="Clear search">Clear</button>
           <button id="appMenuButton" class="icon-button secondary-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="appMenu">&#8942;</button>
         </div>
@@ -230,7 +232,7 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260528-48"></script>
-    <script type="module" src="/app.js?v=20260528-48"></script>
+    <script src="/wordlover-config.js?v=20260528-49"></script>
+    <script type="module" src="/app.js?v=20260528-49"></script>
   </body>
 </html>

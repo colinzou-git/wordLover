@@ -37,6 +37,7 @@ const aiChatTitle = document.querySelector("#aiChatTitle");
 const aiChatContent = document.querySelector("#aiChatContent");
 const termInput = document.querySelector("#termInput");
 const clearSearchButton = document.querySelector("#clearSearch");
+const undoSaveButton = document.querySelector("#undoSave");
 const result = document.querySelector("#result");
 const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
@@ -95,14 +96,14 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v59";
+const APP_VERSION = "0.6.2-product.20260528-v60";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v59";
+const SHELL_CACHE_VERSION = "wordlover-shell-v60";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
-const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose"];
+const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue"];
 const DEFAULT_THEME = "sunrise";
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
@@ -1736,6 +1737,27 @@ async function deleteSpellingRecord(item) {
   await deleteRecordValue(SPELLING_STORE, item.normalizedTerm);
 }
 
+// Hard-remove a word from a list (used by the "Undo" affordance right after a save).
+async function removeVocabularyItemHard(term) {
+  const item = getVocabularyItem(term);
+  if (!item) return;
+  vocabularyItems = vocabularyItems.filter((candidate) => candidate.normalizedTerm !== item.normalizedTerm);
+  await deleteVocabularyRecord(item);
+  renderVocabulary();
+  renderStudyStats();
+  renderHistoryChart();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function removeSpellingItemHard(term) {
+  const item = getSpellingItem(term);
+  if (!item) return;
+  spellingItems = spellingItems.filter((candidate) => candidate.normalizedTerm !== item.normalizedTerm);
+  await deleteSpellingRecord(item);
+  renderSpellingViews();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
 async function persistSpellingEvent(event) {
   await saveRecordValue(SPELLING_EVENT_STORE, event.id, event);
   renderSpellingViews();
@@ -2146,13 +2168,45 @@ function renderIpaWithSpeaker(term, phonetic) {
   return `${renderIpa(phonetic)}${renderSpeakerButton(term)}${renderAiChatButton(term)}`;
 }
 
+// Pick the most natural-sounding installed English voice. getVoices() is
+// populated asynchronously, so we refresh on the voiceschanged event too.
+let preferredVoice = null;
+function pickPreferredVoice() {
+  if (typeof window.speechSynthesis === "undefined") return null;
+  const voices = window.speechSynthesis.getVoices() ?? [];
+  if (!voices.length) return null;
+  const english = voices.filter((v) => /^en\b|^en[-_]/i.test(v.lang ?? ""));
+  const pool = english.length ? english : voices;
+  const score = (v) => {
+    const name = (v.name ?? "").toLowerCase();
+    let s = 0;
+    if (/enhanced|premium|natural|neural/.test(name)) s += 6; // iOS "Enhanced" / high-quality variants
+    if (/samantha|ava|allison|serena|nicky|aaron|karen|moira|tessa|google us english/.test(name)) s += 3;
+    if (v.localService) s += 1; // local = offline + lower latency (iPhone-first)
+    if (/^en[-_]us/i.test(v.lang ?? "")) s += 1;
+    return s;
+  };
+  return pool.slice().sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+function refreshPreferredVoice() {
+  preferredVoice = pickPreferredVoice();
+}
+if (typeof window.speechSynthesis !== "undefined") {
+  refreshPreferredVoice();
+  window.speechSynthesis.addEventListener?.("voiceschanged", refreshPreferredVoice);
+}
+
 function speakTerm(term) {
   if (!term || typeof window.speechSynthesis === "undefined") return;
   try {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(String(term));
     utterance.lang = "en-US";
-    utterance.rate = 0.9;
+    utterance.rate = 0.6; // ~1.5x slower than the previous 0.9 so each word is clearer
+    utterance.pitch = 1.15; // slightly brighter/friendlier tone (best the Web Speech API can do)
+    utterance.volume = 1;
+    if (!preferredVoice) refreshPreferredVoice();
+    if (preferredVoice) utterance.voice = preferredVoice;
     window.speechSynthesis.speak(utterance);
   } catch {
     /* speech synthesis not available */
@@ -3403,22 +3457,59 @@ async function handleReturnKey() {
   const data = await runLookup({ commit: true });
   if (speakOnReturn) speakTerm(data?.status === "found" ? data.term : value);
   if (onReturnAction === "vocabulary") {
-    if (data?.status === "found") await saveVocabularyItem(data, "return");
+    if (data?.status === "found") await saveWithUndo(data, ["vocabulary"], "return");
   } else if (onReturnAction === "spelling") {
     if (data?.status === "found") {
-      await saveSpellingItem(data, "return");
+      await saveWithUndo(data, ["spelling"], "return");
     } else {
       // Non-dictionary word can't go to the spelling list (dictionary words only): flag it red.
       flagSearchInputInvalid();
     }
   } else if (onReturnAction === "both") {
     if (data?.status === "found") {
-      await saveVocabularyItem(data, "return");
-      await saveSpellingItem(data, "return");
+      await saveWithUndo(data, ["vocabulary", "spelling"], "return");
     } else {
       // Spelling requires a dictionary word, so "both" can't fully apply: flag it red.
       flagSearchInputInvalid();
     }
+  }
+}
+
+// --- Undo-after-save -------------------------------------------------------
+// Remember only the records a save just *created* (not re-saves of words the
+// user already had) so a single Undo tap removes exactly the new ones.
+let pendingUndo = null; // { term, entries: [{ list: "vocabulary" | "spelling" }] }
+
+async function saveWithUndo(data, lists, reason) {
+  const created = [];
+  for (const list of lists) {
+    const existed = list === "spelling" ? Boolean(getSpellingItem(data.term)) : Boolean(getVocabularyItem(data.term));
+    if (list === "spelling") await saveSpellingItem(data, reason);
+    else await saveVocabularyItem(data, reason);
+    if (!existed) created.push({ list });
+  }
+  pendingUndo = created.length ? { term: data.term, entries: created } : null;
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  if (undoSaveButton) undoSaveButton.hidden = !pendingUndo;
+}
+
+function clearPendingUndo() {
+  if (!pendingUndo) return;
+  pendingUndo = null;
+  updateUndoButton();
+}
+
+async function performUndoSave() {
+  if (!pendingUndo) return;
+  const { term, entries } = pendingUndo;
+  pendingUndo = null;
+  updateUndoButton();
+  for (const entry of entries) {
+    if (entry.list === "spelling") await removeSpellingItemHard(term);
+    else await removeVocabularyItemHard(term);
   }
 }
 
@@ -5439,7 +5530,45 @@ loadButton.addEventListener("click", async () => {
   if (await ensureDictionaryLoaded()) await runLookup();
 });
 
+// Only word-input characters are accepted; stray symbol presses (assumed
+// mistaken touches) are dropped. Space and apostrophe are kept so phrases
+// ("take off") and contractions ("o'clock") still work.
+const DISALLOWED_TERM_CHARS = /[^A-Za-z0-9 '\-]/g;
+function sanitizeTermInput() {
+  const before = termInput.value;
+  const cleaned = before.replace(DISALLOWED_TERM_CHARS, "");
+  if (cleaned === before) return;
+  const caret = termInput.selectionStart ?? cleaned.length;
+  const keptBeforeCaret = before.slice(0, caret).replace(DISALLOWED_TERM_CHARS, "").length;
+  termInput.value = cleaned;
+  try {
+    termInput.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
+  } catch {
+    /* setSelectionRange not available in this state */
+  }
+}
+
+// A second Return on unchanged text clears the field (set in the keydown handler).
+let lastReturnValue = null;
+
+function clearSearchField() {
+  termInput.value = "";
+  renderSuggestions([]);
+  currentResult = null;
+  scheduleAutosave(null);
+  result.innerHTML = `<p class="muted">Type a term to search.</p>`;
+  aiDetailPanel.hidden = true;
+  aiDetailPanel.innerHTML = "";
+  pendingAiDetail = null;
+  lastReturnValue = null;
+  clearPendingUndo();
+  renderRecentSearchPopover();
+}
+
 termInput.addEventListener("input", () => {
+  sanitizeTermInput();
+  lastReturnValue = null; // any edit re-arms first-Return (save) behavior
+  clearPendingUndo(); // editing means we've moved on from the just-saved word
   hideRecentSearchPopover();
   window.clearTimeout(debounceHandle);
   window.clearTimeout(suggestionHandle);
@@ -5453,12 +5582,24 @@ termInput.addEventListener("keydown", (event) => {
     window.clearTimeout(debounceHandle);
     hideRecentSearchPopover();
     renderSuggestions([]);
+    const value = termInput.value;
+    if (lastReturnValue !== null && value === lastReturnValue && value.trim()) {
+      // Second consecutive Return on unchanged text: clear, ready for the next word.
+      clearSearchField();
+      return;
+    }
+    lastReturnValue = value;
     void handleReturnKey();
   }
 });
 
 termInput.addEventListener("input", () => {
   termInput.classList.remove("input-invalid");
+});
+
+undoSaveButton?.addEventListener("click", () => {
+  void performUndoSave();
+  termInput.focus();
 });
 
 termInput.addEventListener("focus", () => {
@@ -5487,12 +5628,12 @@ recentSearchPopover.addEventListener("click", (event) => {
 });
 
 result.addEventListener("click", (event) => {
-  if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm") {
-    void saveVocabularyItem(currentResult, "manual");
+  if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm" && currentResult) {
+    void saveWithUndo(currentResult, ["vocabulary"], "manual");
     return;
   }
   if (event.target instanceof HTMLButtonElement && event.target.id === "addToSpelling" && currentResult) {
-    void saveSpellingItem(currentResult, "manual");
+    void saveWithUndo(currentResult, ["spelling"], "manual");
     return;
   }
   if (event.target instanceof HTMLButtonElement && event.target.id === "addToDictionary") {
@@ -5587,16 +5728,8 @@ vocabularyList.addEventListener("input", (event) => {
 });
 
 clearSearchButton.addEventListener("click", () => {
-  termInput.value = "";
-  renderSuggestions([]);
-  currentResult = null;
-  scheduleAutosave(null);
-  result.innerHTML = `<p class="muted">Type a term to search.</p>`;
-  aiDetailPanel.hidden = true;
-  aiDetailPanel.innerHTML = "";
-  pendingAiDetail = null;
+  clearSearchField();
   termInput.focus();
-  renderRecentSearchPopover();
 });
 
 onReturnSelect?.addEventListener("change", async () => {

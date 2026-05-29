@@ -142,7 +142,8 @@ def main() -> int:
                 return data.status;
             }"""
         )
-        page.evaluate("() => { document.querySelector('#termInput').value = 'zxqwlmnvb'; document.querySelector('#termInput').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true})); }")
+        # Fire an input event first (like real typing) so the double-Return arm resets.
+        page.evaluate("() => { const i = document.querySelector('#termInput'); i.value = 'zxqwlmnvb'; i.dispatchEvent(new Event('input', {bubbles:true})); i.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true})); }")
         time.sleep(0.6)
         has_add = page.evaluate("() => Boolean(document.querySelector('#addToDictionary'))")
         print(f"not_found status={addbtn} addToDictionary button present={has_add}", flush=True)
@@ -154,6 +155,63 @@ def main() -> int:
         persisted = page.evaluate("() => document.querySelector('#speakOnReturnToggle')?.checked")
         if not persisted:
             failures.append("speak-on-return toggle not reflected after setSpeakOnReturn(true)")
+
+        # Input filter: stray symbol keys are dropped; letters/digits/space/hyphen/apostrophe kept.
+        cleaned = page.evaluate(
+            """() => {
+                const i = document.querySelector('#termInput');
+                i.value = "ab@c!d#1- e'f";
+                i.dispatchEvent(new Event('input', { bubbles: true }));
+                const v = i.value;
+                i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));
+                return v;
+            }"""
+        )
+        print(f"sanitized input: {cleaned!r}", flush=True)
+        if cleaned != "abcd1- e'f":
+            failures.append(f"input sanitizer wrong: got {cleaned!r}, expected \"abcd1- e'f\"")
+
+        # Double Return: 2nd Return on unchanged text clears the field.
+        page.evaluate("async () => await window.WordLoverApp.setOnReturnAction('vocabulary')")
+        press_return(page, w_vocab)
+        time.sleep(0.3)
+        val_after_first = page.evaluate("() => document.querySelector('#termInput').value")
+        press_return(page, w_vocab)
+        time.sleep(0.3)
+        val_after_second = page.evaluate("() => document.querySelector('#termInput').value")
+        print(f"double-return: after1={val_after_first!r} after2={val_after_second!r}", flush=True)
+        if not val_after_first:
+            failures.append("field cleared after the FIRST Return (should keep the word)")
+        if val_after_second != "":
+            failures.append(f"second Return did not clear the field (value={val_after_second!r})")
+
+        # Undo: saving a NEW word shows Undo; clicking it removes the word.
+        undo_word = page.evaluate(
+            """() => ['absent','accept','account','active','animal','answer'].find(w => {
+                try { return window.WordLoverApp.lookupTerm(w).status === 'found'
+                    && !window.WordLoverApp.getVocabulary().some(i => i.term === w); } catch { return false; }
+            }) ?? null"""
+        )
+        print(f"undo test word: {undo_word}", flush=True)
+        if not undo_word:
+            failures.append("could not find an unsaved dictionary word for the undo test")
+        else:
+            press_return(page, undo_word)
+            page.wait_for_function(
+                f"() => window.WordLoverApp.getVocabulary().some(i => i.term === {undo_word!r})", timeout=5000
+            )
+            undo_visible = page.evaluate("() => { const b = document.querySelector('#undoSave'); return b && !b.hidden; }")
+            if not undo_visible:
+                failures.append("Undo button did not appear after saving a new word")
+            page.evaluate("() => document.querySelector('#undoSave').click()")
+            time.sleep(0.5)
+            still_there = page.evaluate(f"() => window.WordLoverApp.getVocabulary().some(i => i.term === {undo_word!r})")
+            undo_hidden = page.evaluate("() => { const b = document.querySelector('#undoSave'); return !b || b.hidden; }")
+            print(f"after undo: stillSaved={still_there} undoHidden={undo_hidden}", flush=True)
+            if still_there:
+                failures.append("Undo did not remove the just-saved word")
+            if not undo_hidden:
+                failures.append("Undo button still visible after undoing")
 
         browser.close()
 
