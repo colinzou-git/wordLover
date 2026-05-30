@@ -1707,3 +1707,42 @@ li button {
     display: grid;
   }
 }
+
+/* Wide screens (iPad landscape, desktop): use the horizontal space as a
+   two-column dashboard instead of one tall scroll. The search surface (search
+   box + lookup result + AI detail) stays full width across the top; the Today,
+   Vocabulary, History, and diagnostics panels flow into two balanced columns. */
+@media (min-width: 980px) {
+  #app {
+    width: min(1200px, 100%);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: 20px 24px;
+  }
+
+  /* Full-bleed rows span both columns. */
+  #app > #pwaStatus,
+  #app > #appMenu,
+  #app > #aiChatPanel,
+  #app > #installBanner,
+  #app > .app-header,
+  #app > .search-surface {
+    grid-column: 1 / -1;
+  }
+
+  /* The full-screen overlays (menu, AI chat) read better centered than edge to
+     edge on a wide display. */
+  #app > #appMenu,
+  #app > #aiChatPanel {
+    padding-inline: max(clamp(16px, 4vw, 32px), calc((100% - 820px) / 2));
+  }
+}
+
+/* Large desktop: keep the reading column comfortable, not stretched. */
+@media (min-width: 1400px) {
+  #app {
+    width: min(1320px, 100%);
+    gap: 24px 28px;
+  }
+}

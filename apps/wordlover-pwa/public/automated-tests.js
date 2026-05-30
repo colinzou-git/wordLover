@@ -10,7 +10,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v62";
+const SHELL_CACHE_NAME = "wordlover-shell-v63";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 5;
 const APP_KV_STORE = "kv";
@@ -20,9 +20,9 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260528-51",
-  "/styles.css?v=20260528-51",
-  "/wordlover-config.js?v=20260528-51",
+  "/app.js?v=20260529-1",
+  "/styles.css?v=20260529-1",
+  "/wordlover-config.js?v=20260529-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -37,7 +37,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260528-51",
+  "/automated-tests.js?v=20260529-1",
 ];
 
 let lastResults = null;

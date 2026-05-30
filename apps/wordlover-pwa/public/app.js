@@ -97,9 +97,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260528-v62";
+const APP_VERSION = "0.6.2-product.20260529-v63";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v62";
+const SHELL_CACHE_VERSION = "wordlover-shell-v63";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -4458,6 +4458,10 @@ const AI_CHAT_CACHE_LIMIT = 200;
 // Insertion order doubles as LRU recency: read promotes, write appends, evict from the front.
 const aiChatCache = new Map();
 const aiChatPrefetchInFlight = new Set();
+// Saved/looked-up terms waiting for a prefetch slot. A FIFO queue (not a hard
+// drop) so a burst of saves all get warmed, just a couple at a time.
+const aiChatPrefetchQueue = [];
+const AI_CHAT_PREFETCH_CONCURRENCY = 2;
 let aiChatCachePersistHandle = 0;
 let aiChatState = { term: null, payload: null, tab: "explain", quizMode: "mcq", loading: false, error: null };
 
@@ -4529,19 +4533,33 @@ function prefetchAiChat(term) {
   if (!getGeminiApiKey()) return;
   if (!navigator.onLine) return;
   if (aiChatCache.has(key) || aiChatPrefetchInFlight.has(key)) return;
-  if (aiChatPrefetchInFlight.size >= 2) return;
-  aiChatPrefetchInFlight.add(key);
-  void requestAiChatPayload(clean)
-    .then((payload) => {
-      aiChatCacheSet(clean, payload);
-      if (!aiChatPanel.hidden && aiChatState.term && aiChatState.term.toLowerCase() === key && !aiChatState.payload) {
-        aiChatState.payload = payload;
-        aiChatState.loading = false;
-        renderAiChatPanel();
-      }
-    })
-    .catch(() => {})
-    .finally(() => aiChatPrefetchInFlight.delete(key));
+  if (aiChatPrefetchQueue.some((entry) => entry.key === key)) return;
+  aiChatPrefetchQueue.push({ key, term: clean });
+  drainAiChatPrefetchQueue();
+}
+
+// Run at most AI_CHAT_PREFETCH_CONCURRENCY requests at once; the rest wait in
+// aiChatPrefetchQueue and start as slots free up, so bursts of saves all warm.
+function drainAiChatPrefetchQueue() {
+  while (aiChatPrefetchInFlight.size < AI_CHAT_PREFETCH_CONCURRENCY && aiChatPrefetchQueue.length) {
+    const next = aiChatPrefetchQueue.shift();
+    if (!next || aiChatCache.has(next.key) || aiChatPrefetchInFlight.has(next.key)) continue;
+    aiChatPrefetchInFlight.add(next.key);
+    void requestAiChatPayload(next.term)
+      .then((payload) => {
+        aiChatCacheSet(next.term, payload);
+        if (!aiChatPanel.hidden && aiChatState.term && aiChatState.term.toLowerCase() === next.key && !aiChatState.payload) {
+          aiChatState.payload = payload;
+          aiChatState.loading = false;
+          renderAiChatPanel();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        aiChatPrefetchInFlight.delete(next.key);
+        drainAiChatPrefetchQueue();
+      });
+  }
 }
 
 function prettyGeminiModelLabel(id) {
