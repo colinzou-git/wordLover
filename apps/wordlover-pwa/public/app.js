@@ -97,9 +97,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260529-v63";
+const APP_VERSION = "0.6.2-product.20260530-v64";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v63";
+const SHELL_CACHE_VERSION = "wordlover-shell-v64";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -1678,6 +1678,7 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
     onReturnAction: newer.onReturnAction ?? localSnapshot.onReturnAction ?? (newer.autosaveEnabled === false ? "none" : "vocabulary"),
     speakOnReturn: newer.speakOnReturn ?? localSnapshot.speakOnReturn ?? false,
     theme: newer.theme ?? localSnapshot.theme,
+    studyGoals: newer.studyGoals ?? localSnapshot.studyGoals ?? null,
     lastMetrics: newer.lastMetrics ?? localSnapshot.lastMetrics,
   };
 }
@@ -2521,6 +2522,7 @@ function renderStudyStats() {
         ? "No words are due right now. You can still practice saved words."
         : "No saved words to review yet.";
   }
+  renderGoalsPanel();
 }
 
 function refreshReviewScheduleViews() {
@@ -3889,6 +3891,7 @@ function buildUserDataSnapshot() {
     onReturnAction,
     speakOnReturn,
     theme,
+    studyGoals,
     lastMetrics,
   };
 }
@@ -5423,6 +5426,7 @@ async function init() {
       if (Array.isArray(entry) && entry.length === 2 && entry[0]) aiChatCache.set(String(entry[0]), entry[1]);
     }
   }
+  studyGoals = normalizeStudyGoals(await loadValue("studyGoals", null));
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));
@@ -6146,6 +6150,256 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// --- Study goals & suggestions ------------------------------------------------
+// Quantified, user-set targets (vocabulary track) plus derived coaching tips.
+// Only the targets are persisted (key "studyGoals", carried in the sync
+// snapshot); all progress and suggestions are computed at render time from
+// vocabularyItems + studyEvents, so there is no extra state to keep consistent.
+const GOALS_PERIODS = ["day", "week", "month"];
+const STARTER_GOALS = { newPerDay: 5, reviewsPerDay: 15, masteredPerWeek: 5, masteredPerMonth: 20 };
+let studyGoals = null;
+let goalsPeriod = "day";
+
+const goalsPanel = document.querySelector("#goalsPanel");
+const goalsSummary = document.querySelector("#goalsSummary");
+const goalsPeriodTabsWrap = document.querySelector("#goalsPeriodTabs");
+const goalsPeriodTabs = document.querySelectorAll("[data-goals-period]");
+const goalsProgressEl = document.querySelector("#goalsProgress");
+const goalsSuggestionsEl = document.querySelector("#goalsSuggestions");
+const setGoalsButton = document.querySelector("#setGoalsButton");
+
+function clampInt(value, min, max, fallback) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeStudyGoals(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    version: 1,
+    track: "vocabulary",
+    newPerDay: clampInt(raw.newPerDay, 1, 100, STARTER_GOALS.newPerDay),
+    reviewsPerDay: clampInt(raw.reviewsPerDay, 1, 300, STARTER_GOALS.reviewsPerDay),
+    masteredPerWeek: clampInt(raw.masteredPerWeek, 1, 200, STARTER_GOALS.masteredPerWeek),
+    masteredPerMonth: clampInt(raw.masteredPerMonth, 1, 800, STARTER_GOALS.masteredPerMonth),
+    createdAt: raw.createdAt ?? nowIso(),
+    updatedAt: raw.updatedAt ?? nowIso(),
+    source: raw.source ?? "wizard",
+  };
+}
+
+// Median of the per-day counts over the last `days` calendar days that had any
+// activity, so the wizard's suggested defaults reflect the learner's own rhythm.
+function medianDailyCount(timestamps, days = 14) {
+  const now = appNowMs();
+  const buckets = new Map();
+  for (const ts of timestamps) {
+    const t = Date.parse(ts ?? "");
+    if (!Number.isFinite(t) || now - t > days * NORMAL_DAY_MS) continue;
+    const key = new Date(t).toISOString().slice(0, 10);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+  const counts = [...buckets.values()].sort((a, b) => a - b);
+  if (!counts.length) return 0;
+  const mid = Math.floor(counts.length / 2);
+  return counts.length % 2 ? counts[mid] : Math.round((counts[mid - 1] + counts[mid]) / 2);
+}
+
+function goalDefaults() {
+  const newPerDay = clampInt(medianDailyCount(vocabularyItems.map((i) => i.savedAt)), 3, 20, 0) || STARTER_GOALS.newPerDay;
+  const reviewsPerDay = clampInt(medianDailyCount(studyEvents.filter((e) => e.type === "review").map((e) => e.occurredAt)), 5, 40, 0) || STARTER_GOALS.reviewsPerDay;
+  const masteredPerWeek = Math.max(3, Math.round(newPerDay * 5 * 0.7));
+  return { newPerDay, reviewsPerDay, masteredPerWeek, masteredPerMonth: masteredPerWeek * 4 };
+}
+
+// [startMs, endMs) bounds for the active period, anchored to app (debug-aware) now.
+function periodRange(period) {
+  const now = new Date(appNowMs());
+  if (period === "week") {
+    const start = startOfWeekMonday(now);
+    return { startMs: start.getTime(), endMs: addDays(start, 7).getTime(), days: 7 };
+  }
+  if (period === "month") {
+    const start = startOfMonth(now);
+    const end = addMonths(start, 1);
+    return { startMs: start.getTime(), endMs: end.getTime(), days: Math.round((end.getTime() - start.getTime()) / NORMAL_DAY_MS) };
+  }
+  const start = startOfDay(now);
+  return { startMs: start.getTime(), endMs: addDays(start, 1).getTime(), days: 1 };
+}
+
+function inRange(value, startMs, endMs) {
+  const t = Date.parse(value ?? "");
+  return Number.isFinite(t) && t >= startMs && t < endMs;
+}
+
+function vocabStatsForRange(startMs, endMs) {
+  return {
+    newSaved: vocabularyItems.filter((i) => inRange(i.savedAt, startMs, endMs)).length,
+    reviewed: studyEvents.filter((e) => e.type === "review" && inRange(e.occurredAt, startMs, endMs)).length,
+    mastered: vocabularyItems.filter((i) => inRange(i.review?.masteredAt, startMs, endMs)).length,
+  };
+}
+
+function goalTargetsForPeriod(period) {
+  if (!studyGoals) return null;
+  if (period === "week") {
+    return { new: studyGoals.newPerDay * 7, reviews: studyGoals.reviewsPerDay * 7, mastered: studyGoals.masteredPerWeek };
+  }
+  if (period === "month") {
+    const days = periodRange("month").days;
+    return { new: studyGoals.newPerDay * days, reviews: studyGoals.reviewsPerDay * days, mastered: studyGoals.masteredPerMonth };
+  }
+  return { new: studyGoals.newPerDay, reviews: studyGoals.reviewsPerDay, mastered: Math.max(1, Math.round(studyGoals.masteredPerWeek / 7)) };
+}
+
+// Hour-of-day (0-23) with the most past reviews, or null if there isn't enough
+// data or no hour clearly stands out.
+function bestReviewHour(minSample = 20) {
+  const hours = new Array(24).fill(0);
+  let total = 0;
+  for (const e of studyEvents) {
+    if (e.type !== "review") continue;
+    const t = Date.parse(e.occurredAt ?? "");
+    if (!Number.isFinite(t)) continue;
+    hours[new Date(t).getHours()] += 1;
+    total += 1;
+  }
+  if (total < minSample) return null;
+  let best = 0;
+  for (let h = 1; h < 24; h += 1) if (hours[h] > hours[best]) best = h;
+  if (hours[best] < (total / 24) * 1.5) return null;
+  return best;
+}
+
+function formatHour(h) {
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}${h < 12 ? "am" : "pm"}`;
+}
+
+// One short, specific, numeric tip per applicable rule, ranked by impact.
+function computeGoalSuggestions() {
+  if (!studyGoals) return [];
+  const out = [];
+  const period = goalsPeriod;
+  const { startMs, days } = periodRange(period);
+  const range = periodRange(period);
+  const stats = vocabStatsForRange(range.startMs, range.endMs);
+  const targets = goalTargetsForPeriod(period);
+  const now = appNowMs();
+  const elapsedDays = Math.min(days, Math.max(1, Math.ceil((now - startMs) / NORMAL_DAY_MS)));
+  const remainingDays = Math.max(0, days - elapsedDays);
+  const label = period === "day" ? "today" : period === "week" ? "this week" : "this month";
+  const gap = (done, target) => Math.max(0, target - done);
+
+  const newGap = gap(stats.newSaved, targets.new);
+  if (newGap > 0) {
+    const perDay = remainingDays > 0 ? Math.ceil(newGap / remainingDays) : newGap;
+    out.push(period === "day"
+      ? `Add ${newGap} more new word${newGap === 1 ? "" : "s"} ${label} to hit your goal.`
+      : `Add ${newGap} more new words ${label} — about ${perDay}/day for the next ${remainingDays} day${remainingDays === 1 ? "" : "s"}.`);
+  }
+  const reviewGap = gap(stats.reviewed, targets.reviews);
+  if (reviewGap > 0) {
+    const perDay = remainingDays > 0 ? Math.ceil(reviewGap / remainingDays) : reviewGap;
+    out.push(period === "day"
+      ? `Do ${reviewGap} more review${reviewGap === 1 ? "" : "s"} ${label} to hit your goal.`
+      : `Do ${reviewGap} more reviews ${label} — about ${perDay}/day for the next ${remainingDays} day${remainingDays === 1 ? "" : "s"}.`);
+  }
+  if (targets.mastered > 0 && period !== "day") {
+    const expectedByNow = targets.mastered * (elapsedDays / days);
+    if (stats.mastered + 0.5 < expectedByNow) {
+      const behind = Math.ceil(expectedByNow - stats.mastered);
+      out.push(`You're ${behind} behind the mastery pace ${label}; extra reviews now will catch you up.`);
+    } else if (stats.mastered >= targets.mastered) {
+      out.push(`Mastery goal for ${label} reached — nice work.`);
+    }
+  }
+  const due = getDueVocabularyItems().length;
+  if (due > studyGoals.reviewsPerDay * 1.5) {
+    out.push(`${due} reviews are due. Clearing the backlog matters more than adding new words right now.`);
+  }
+  const hour = bestReviewHour();
+  if (hour !== null) {
+    out.push(`You review most around ${formatHour(hour)} — that's a good time to do reviews or add words.`);
+  }
+  if (!out.length) out.push(`You're on track for ${label}. Keep it up!`);
+  return out;
+}
+
+function renderGoalBar(label, done, target) {
+  const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
+  const met = target > 0 && done >= target;
+  return `
+    <div class="goal-metric${met ? " met" : ""}">
+      <div class="goal-metric-head"><span>${escapeHtml(label)}</span><strong>${done} / ${target}</strong></div>
+      <div class="goal-bar"><span style="width:${pct}%"></span></div>
+    </div>`;
+}
+
+function renderGoalsPanel() {
+  if (!goalsPanel) return;
+  for (const tab of goalsPeriodTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.goalsPeriod === goalsPeriod));
+  }
+  if (!studyGoals) {
+    if (goalsPeriodTabsWrap) goalsPeriodTabsWrap.hidden = true;
+    if (setGoalsButton) setGoalsButton.textContent = "Set goals";
+    goalsSummary.textContent = "Set a daily goal and get tips to reach it.";
+    goalsProgressEl.innerHTML = `<p class="muted goals-cta">No goals yet — tap “Set goals”. Takes about 20 seconds.</p>`;
+    goalsSuggestionsEl.innerHTML = "";
+    return;
+  }
+  if (goalsPeriodTabsWrap) goalsPeriodTabsWrap.hidden = false;
+  if (setGoalsButton) setGoalsButton.textContent = "Edit goals";
+  const { startMs, endMs } = periodRange(goalsPeriod);
+  const stats = vocabStatsForRange(startMs, endMs);
+  const targets = goalTargetsForPeriod(goalsPeriod);
+  goalsSummary.textContent = `Targets: ${studyGoals.newPerDay} new + ${studyGoals.reviewsPerDay} reviews/day, ${studyGoals.masteredPerWeek} mastered/week.`;
+  goalsProgressEl.innerHTML =
+    renderGoalBar("New words", stats.newSaved, targets.new) +
+    renderGoalBar("Reviews", stats.reviewed, targets.reviews) +
+    renderGoalBar("Mastered", stats.mastered, targets.mastered);
+  const suggestions = computeGoalSuggestions();
+  goalsSuggestionsEl.innerHTML = `<h3 class="goals-tips-title">Suggestions</h3><ul>${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`;
+}
+
+async function saveStudyGoals(next, source = "wizard") {
+  const now = nowIso();
+  const created = studyGoals?.createdAt ?? now;
+  studyGoals = normalizeStudyGoals({ ...next, createdAt: created, updatedAt: now, source });
+  await saveValue("studyGoals", studyGoals);
+  renderGoalsPanel();
+  return studyGoals;
+}
+
+async function openGoalsWizard() {
+  const base = studyGoals ?? goalDefaults();
+  const suggested = goalDefaults();
+  const values = await showModal({
+    title: studyGoals ? "Edit your goals" : "Set your study goals",
+    body: `Pick targets you can keep. Based on your recent activity we suggest about ${suggested.newPerDay} new words and ${suggested.reviewsPerDay} reviews per day.`,
+    submitText: "Save goals",
+    fields: [
+      { id: "newPerDay", label: "New words per day", type: "number", value: String(base.newPerDay), hint: `Suggested: ${suggested.newPerDay}` },
+      { id: "reviewsPerDay", label: "Reviews per day", type: "number", value: String(base.reviewsPerDay), hint: `Suggested: ${suggested.reviewsPerDay}` },
+      { id: "masteredPerWeek", label: "Words mastered per week", type: "number", value: String(base.masteredPerWeek), hint: `Suggested: ${suggested.masteredPerWeek}` },
+      { id: "masteredPerMonth", label: "Words mastered per month", type: "number", value: String(base.masteredPerMonth), hint: `Suggested: ${suggested.masteredPerMonth}` },
+    ],
+  });
+  if (!values) return null;
+  return saveStudyGoals(values, "wizard");
+}
+
+setGoalsButton?.addEventListener("click", () => { void openGoalsWizard(); });
+for (const tab of goalsPeriodTabs) {
+  tab.addEventListener("click", () => {
+    goalsPeriod = GOALS_PERIODS.includes(tab.dataset.goalsPeriod) ? tab.dataset.goalsPeriod : "day";
+    renderGoalsPanel();
+  });
+}
+
 window.WordLoverApp = {
   ensureDictionaryLoaded,
   lookupTerm,
@@ -6257,6 +6511,16 @@ window.WordLoverApp = {
     return theme;
   },
   getThemeIds: () => THEME_IDS.slice(),
+  getGoals: () => studyGoals,
+  setGoals: (goals) => saveStudyGoals(goals ?? {}, "test"),
+  goalDefaults,
+  goalSuggestions: () => computeGoalSuggestions(),
+  openGoalsWizard,
+  setGoalsPeriod: (period) => {
+    goalsPeriod = GOALS_PERIODS.includes(period) ? period : "day";
+    renderGoalsPanel();
+    return goalsPeriod;
+  },
   aiChat: {
     cacheGet: aiChatCacheGet,
     cacheSet: aiChatCacheSet,

@@ -1,7 +1,13 @@
 # Goals & Suggestions — design spec
 
-Status: **designed, implementation deferred** (see "Why deferred" at the end).
-Vocabulary (Memorize) track only for v1; data model leaves room for Spelling.
+Status: **implemented in v64** (Goals panel, wizard, suggestions, sync). This
+doc is the design of record; see the "Why deferred" note at the end for the
+history. Vocabulary (Memorize) track only for v1; data model leaves room for
+Spelling. Verified headless (Chromium): panel renders, `getGoals`/`setGoals`/
+`openGoalsWizard` work, wizard opens with 4 number fields, day/week/month
+targets recompute, suggestions are specific and numeric, and the panel sits in
+the right column at iPad-landscape width / full width on iPhone. Real-iPhone
+visual pass still pending.
 
 ## What the user asked for
 

@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260529-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260530-1" />
     <title>WordFan</title>
   </head>
   <body>
@@ -177,6 +177,25 @@
         <div id="spellingReviewPanel" class="quiz-panel spelling-review-panel" hidden></div>
       </section>
 
+      <section class="panel goals-panel" id="goalsPanel">
+        <div class="panel-head">
+          <div>
+            <h2>Goals</h2>
+            <p id="goalsSummary" class="muted">Set a daily goal and get tips to reach it.</p>
+          </div>
+          <div class="goals-actions">
+            <button id="setGoalsButton" type="button">Set goals</button>
+          </div>
+        </div>
+        <div class="track-tabs goals-period-tabs" id="goalsPeriodTabs" role="tablist" aria-label="Goal period" hidden>
+          <button type="button" data-goals-period="day" aria-selected="true">Day</button>
+          <button type="button" data-goals-period="week" aria-selected="false">Week</button>
+          <button type="button" data-goals-period="month" aria-selected="false">Month</button>
+        </div>
+        <div id="goalsProgress" class="goals-progress"></div>
+        <div id="goalsSuggestions" class="goals-suggestions" aria-live="polite"></div>
+      </section>
+
       <button id="loadDictionary" type="button" hidden>Install/load dictionary</button>
       <button id="exportState" type="button" hidden>Export state</button>
       <div id="metrics" hidden></div>
@@ -242,7 +261,7 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260529-1"></script>
-    <script type="module" src="/app.js?v=20260529-1"></script>
+    <script src="/wordlover-config.js?v=20260530-1"></script>
+    <script type="module" src="/app.js?v=20260530-1"></script>
   </body>
 </html>

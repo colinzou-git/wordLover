@@ -1708,6 +1708,83 @@ li button {
   }
 }
 
+/* --- Goals panel --- */
+.goals-actions {
+  display: flex;
+  align-items: center;
+}
+
+.goals-period-tabs[hidden] {
+  display: none;
+}
+
+.goals-progress {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.goal-metric {
+  display: grid;
+  gap: 6px;
+}
+
+.goal-metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.92rem;
+}
+
+.goal-metric-head strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.goal-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+.goal-metric.met .goal-bar > span {
+  background: #009e73;
+}
+
+.goals-cta {
+  margin: 8px 0 0;
+}
+
+.goals-suggestions {
+  margin-top: 14px;
+}
+
+.goals-tips-title {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.goals-suggestions ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.goals-suggestions li {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
 /* Wide screens (iPad landscape, desktop): use the horizontal space as a
    two-column dashboard instead of one tall scroll. The search surface (search
    box + lookup result + AI detail) stays full width across the top; the Today,
