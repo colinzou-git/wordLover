@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260530-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260531-1" />
     <title>WordFan</title>
   </head>
   <body>
@@ -55,6 +55,14 @@
               <option value="deepblue">Deep blue (kids)</option>
             </select>
           </label>
+          <div class="font-zoom-row">
+            <span>Font size</span>
+            <div class="font-zoom-controls" role="group" aria-label="Font size">
+              <button id="fontZoomOut" class="secondary-button" type="button" aria-label="Decrease font size">A-</button>
+              <strong id="fontZoomValue" aria-live="polite">100%</strong>
+              <button id="fontZoomIn" class="secondary-button" type="button" aria-label="Increase font size">A+</button>
+            </div>
+          </div>
           <label>
             <span>Save on Return</span>
             <select id="onReturnSelect">
@@ -261,7 +269,7 @@
       </details>
     </main>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260530-1"></script>
-    <script type="module" src="/app.js?v=20260530-1"></script>
+    <script src="/wordlover-config.js?v=20260531-1"></script>
+    <script type="module" src="/app.js?v=20260531-1"></script>
   </body>
 </html>

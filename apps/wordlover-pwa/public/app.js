@@ -22,6 +22,9 @@ const authDiagnosticsToggleButton = document.querySelector("#authDiagnosticsTogg
 const authDiagnosticsSendButton = document.querySelector("#authDiagnosticsSend");
 const authDiagnosticsPre = document.querySelector("#authDiagnostics");
 const themeSelect = document.querySelector("#themeSelect");
+const fontZoomOutButton = document.querySelector("#fontZoomOut");
+const fontZoomInButton = document.querySelector("#fontZoomIn");
+const fontZoomValue = document.querySelector("#fontZoomValue");
 const checkForUpdateButton = document.querySelector("#checkForUpdate");
 const applyUpdateButton = document.querySelector("#applyUpdate");
 const exportStateMenuButton = document.querySelector("#exportStateMenu");
@@ -97,15 +100,19 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260530-v64";
+const APP_VERSION = "0.6.2-product.20260531-v65";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v64";
+const SHELL_CACHE_VERSION = "wordlover-shell-v65";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue"];
 const DEFAULT_THEME = "sunrise";
+const DEFAULT_FONT_SCALE = 1;
+const FONT_SCALE_MIN = 0.9;
+const FONT_SCALE_MAX = 1.4;
+const FONT_SCALE_STEP = 0.1;
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
@@ -180,6 +187,7 @@ let deviceId = null;
 let activeQuiz = null;
 let activeSpellingSession = null;
 let theme = DEFAULT_THEME;
+let fontScale = DEFAULT_FONT_SCALE;
 let vocabularyView = {
   filter: "summary",
   page: 0,
@@ -749,6 +757,7 @@ function renderAppMenu() {
   googleRestoreButton.disabled = !canSync;
   googleSignOutButton.disabled = !(googleAuth.accessToken || hasGoogleGrant());
   themeSelect.value = theme;
+  renderFontZoomControls();
   void listCheckpoints().then(([latest]) => {
     rollbackCheckpointButton.disabled = !latest;
     if (latest && !checkpointStatus.textContent) {
@@ -760,6 +769,26 @@ function renderAppMenu() {
 function applyTheme(nextTheme) {
   theme = THEME_IDS.includes(nextTheme) ? nextTheme : DEFAULT_THEME;
   document.documentElement.dataset.theme = theme;
+}
+
+function normalizeFontScale(nextScale) {
+  const numeric = Number(nextScale);
+  if (!Number.isFinite(numeric)) return DEFAULT_FONT_SCALE;
+  return Math.round(clamp(numeric, FONT_SCALE_MIN, FONT_SCALE_MAX) * 10) / 10;
+}
+
+function renderFontZoomControls() {
+  if (!fontZoomValue) return;
+  const percent = Math.round(fontScale * 100);
+  fontZoomValue.textContent = `${percent}%`;
+  fontZoomOutButton.disabled = fontScale <= FONT_SCALE_MIN;
+  fontZoomInButton.disabled = fontScale >= FONT_SCALE_MAX;
+}
+
+function applyFontScale(nextScale) {
+  fontScale = normalizeFontScale(nextScale);
+  document.documentElement.style.setProperty("--app-font-size", `${Math.round(fontScale * 100)}%`);
+  renderFontZoomControls();
 }
 
 function getGoogleClientId() {
@@ -5414,6 +5443,8 @@ async function init() {
   await saveValue("lastOpenedAt", nowIso());
   theme = await loadValue("theme", DEFAULT_THEME);
   applyTheme(theme);
+  fontScale = normalizeFontScale(await loadValue("fontScale", DEFAULT_FONT_SCALE));
+  applyFontScale(fontScale);
   debugMode = await loadValue("debugMode", debugMode);
   googleClientIdOverride = String(await loadValue("googleClientIdOverride", "") ?? "").trim();
   geminiApiKeyOverride = String(await loadValue("geminiApiKeyOverride", "") ?? "").trim();
@@ -5934,6 +5965,16 @@ aiDetailPanel.addEventListener("click", (event) => {
 themeSelect.addEventListener("change", async () => {
   applyTheme(themeSelect.value);
   await saveValue("theme", theme);
+});
+
+fontZoomOutButton.addEventListener("click", async () => {
+  applyFontScale(fontScale - FONT_SCALE_STEP);
+  await saveValue("fontScale", fontScale);
+});
+
+fontZoomInButton.addEventListener("click", async () => {
+  applyFontScale(fontScale + FONT_SCALE_STEP);
+  await saveValue("fontScale", fontScale);
 });
 
 googleSignInButton.addEventListener("click", async () => {
