@@ -37,6 +37,7 @@ const aiChatTitle = document.querySelector("#aiChatTitle");
 const aiChatContent = document.querySelector("#aiChatContent");
 const termInput = document.querySelector("#termInput");
 const clearSearchButton = document.querySelector("#clearSearch");
+const undoSaveButton = document.querySelector("#undoSave");
 const result = document.querySelector("#result");
 const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
@@ -48,6 +49,8 @@ const dictionarySource = document.querySelector("#dictionarySource");
 const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
 const autosaveToggle = document.querySelector("#autosaveToggle");
+const onReturnSelect = document.querySelector("#onReturnSelect");
+const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
@@ -56,7 +59,12 @@ const statReviewed = document.querySelector("#statReviewed");
 const statMastered = document.querySelector("#statMastered");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
+const startSpellingReviewButton = document.querySelector("#startSpellingReview");
+const startSpellingPracticeMoreButton = document.querySelector("#startSpellingPracticeMore");
 const quizPanel = document.querySelector("#quizPanel");
+const spellingReviewPanel = document.querySelector("#spellingReviewPanel");
+const todayTrackTabs = document.querySelectorAll("[data-today-track]");
+const vocabularyTrackTabs = document.querySelectorAll("[data-vocab-track]");
 const historyChart = document.querySelector("#historyChart");
 const historyChartSummary = document.querySelector("#historyChartSummary");
 const historyRangeLabel = document.querySelector("#historyRangeLabel");
@@ -65,6 +73,7 @@ const historyNextButton = document.querySelector("#historyNext");
 const historyTodayButton = document.querySelector("#historyToday");
 const historyAnchorInput = document.querySelector("#historyAnchorInput");
 const historyGranularityButtons = Array.from(document.querySelectorAll("[data-history-granularity]"));
+const historyTrackTabs = document.querySelectorAll("[data-history-track]");
 const debugModeToggle = document.querySelector("#debugModeToggle");
 const runReviewAutomationButton = document.querySelector("#runReviewAutomation");
 const debugStatus = document.querySelector("#debugStatus");
@@ -75,6 +84,9 @@ const FILE_STORE = "files";
 const KEY_STORE = "keys";
 const VOCABULARY_STORE = "vocabularyRecords";
 const STUDY_EVENT_STORE = "studyEventRecords";
+const SPELLING_STORE = "spellingRecords";
+const SPELLING_EVENT_STORE = "spellingEventRecords";
+const USER_DICTIONARY_STORE = "userDictionary";
 const CHECKPOINT_STORE = "checkpoints";
 const DICTIONARY_KEY = "dictionary.sqlite";
 const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
@@ -83,15 +95,16 @@ const DICTIONARY_CHUNK_SIZE = 4 * 1024 * 1024;
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
+const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260527-v51";
+const APP_VERSION = "0.6.2-product.20260530-v64";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v51";
+const SHELL_CACHE_VERSION = "wordlover-shell-v64";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
-const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose"];
+const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue"];
 const DEFAULT_THEME = "sunrise";
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
@@ -156,19 +169,29 @@ let ftsSearchAvailable = null;
 let currentResult = null;
 let vocabularyItems = [];
 let studyEvents = [];
+let spellingItems = [];
+let spellingEvents = [];
+let userDictionaryEntries = [];
 let autosaveEnabled = true;
+// "vocabulary" | "spelling" | "none" — what pressing Return saves (replaces the autosave toggle).
+let onReturnAction = "vocabulary";
+let speakOnReturn = false;
 let deviceId = null;
 let activeQuiz = null;
+let activeSpellingSession = null;
 let theme = DEFAULT_THEME;
 let vocabularyView = {
   filter: "summary",
   page: 0,
   selectedTerm: null,
   query: "",
+  track: "vocabulary",
 };
+let todayTrack = "vocabulary";
 let historyView = {
   granularity: "days",
   anchorMs: null,
+  track: "vocabulary",
 };
 let debugMode = {
   enabled: false,
@@ -351,7 +374,7 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 5);
+    const request = indexedDB.open(DB_NAME, 6);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
@@ -359,6 +382,9 @@ function openUserDb() {
       if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE);
       if (!db.objectStoreNames.contains(VOCABULARY_STORE)) db.createObjectStore(VOCABULARY_STORE);
       if (!db.objectStoreNames.contains(STUDY_EVENT_STORE)) db.createObjectStore(STUDY_EVENT_STORE);
+      if (!db.objectStoreNames.contains(SPELLING_STORE)) db.createObjectStore(SPELLING_STORE);
+      if (!db.objectStoreNames.contains(SPELLING_EVENT_STORE)) db.createObjectStore(SPELLING_EVENT_STORE);
+      if (!db.objectStoreNames.contains(USER_DICTIONARY_STORE)) db.createObjectStore(USER_DICTIONARY_STORE);
       if (!db.objectStoreNames.contains(CHECKPOINT_STORE)) db.createObjectStore(CHECKPOINT_STORE);
     };
     request.onsuccess = () => resolve(request.result);
@@ -455,7 +481,7 @@ function snapshotIntegrity(snapshot) {
 }
 
 function validateUserDataSnapshot(snapshot) {
-  if (snapshot?.app !== "wordlover") throw new Error("This is not a WordLover user-data snapshot.");
+  if (snapshot?.app !== "wordlover") throw new Error("This is not a WordFan user-data snapshot.");
   if (snapshot.userDataFormatVersion && snapshot.userDataFormatVersion !== USER_DATA_FORMAT_VERSION) {
     throw new Error(`User-data format ${snapshot.userDataFormatVersion} is not supported by this app format ${USER_DATA_FORMAT_VERSION}.`);
   }
@@ -672,7 +698,8 @@ function renderAppMenu() {
   appVersion.textContent = APP_VERSION;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
   dictionaryEngine.textContent = DICTIONARY_ENGINE;
-  syncStatus.textContent = !googleAuth.accessToken
+  const signedInOrGranted = Boolean(googleAuth.accessToken) || hasGoogleGrant();
+  syncStatus.textContent = !signedInOrGranted
     ? "Local only"
     : !navigator.onLine
       ? "Offline"
@@ -683,13 +710,20 @@ function renderAppMenu() {
           : "Pending sync";
   if (syncDetails) {
     if (lastSyncSummary?.at) {
-      syncDetails.textContent =
-        `Last sync ${formatSyncTime(lastSyncSummary.at)} · ${lastSyncSummary.words} word(s) · ${formatBytes(lastSyncSummary.sizeBytes)} on Drive` +
-        (driveSyncState === "error" && lastSyncInfo?.error ? ` · last attempt failed: ${lastSyncInfo.error}` : "");
-    } else if (googleAuth.accessToken) {
+      const s = lastSyncSummary;
+      const when = formatSyncTime(s.at);
+      const lines = [
+        `Last sync: ${when}`,
+        `Vocabulary: ${s.vocabWords ?? s.words ?? 0} word(s) · ${formatBytes(s.vocabBytes)}`,
+        `Spelling: ${s.spellingWords ?? 0} word(s) · ${formatBytes(s.spellingBytes)}`,
+        `Drive backup: ${formatBytes(s.driveBytes ?? s.sizeBytes)} total`,
+      ];
+      if (driveSyncState === "error" && lastSyncInfo?.error) lines.push(`Last attempt failed: ${lastSyncInfo.error}`);
+      syncDetails.innerHTML = lines.map((line) => escapeHtml(line)).join("<br>");
+    } else if (signedInOrGranted) {
       syncDetails.textContent = driveSyncState === "error" && lastSyncInfo?.error
         ? `Not synced yet · last attempt failed: ${lastSyncInfo.error}`
-        : "Not synced yet on this device.";
+        : "Not synced yet on this device. Tap Sync now.";
     } else {
       syncDetails.textContent = "";
     }
@@ -707,9 +741,13 @@ function renderAppMenu() {
         ? "Ready to connect Google."
         : "Tap Sign in with Google to add your OAuth client ID.";
   googleSignInButton.disabled = Boolean(googleAuth.accessToken);
-  googleSyncNowButton.disabled = !googleAuth.accessToken;
-  googleRestoreButton.disabled = !googleAuth.accessToken;
-  googleSignOutButton.disabled = !googleAuth.accessToken;
+  // Sync/Restore stay available whenever an OAuth client is configured: clicking them will
+  // silently refresh (or prompt) the Google session as needed, so the user never has to manually
+  // re-sign-in first.
+  const canSync = Boolean(getGoogleClientId());
+  googleSyncNowButton.disabled = !canSync;
+  googleRestoreButton.disabled = !canSync;
+  googleSignOutButton.disabled = !(googleAuth.accessToken || hasGoogleGrant());
   themeSelect.value = theme;
   void listCheckpoints().then(([latest]) => {
     rollbackCheckpointButton.disabled = !latest;
@@ -784,13 +822,21 @@ async function purgeDebugData() {
   const sessionId = debugMode.sessionId;
   const removedVocabulary = vocabularyItems.filter((item) => item.debugSessionId === sessionId);
   const removedEvents = studyEvents.filter((event) => event.debugSessionId === sessionId);
+  const removedSpelling = spellingItems.filter((item) => item.debugSessionId === sessionId);
+  const removedSpellingEvents = spellingEvents.filter((event) => event.debugSessionId === sessionId);
   vocabularyItems = vocabularyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
   studyEvents = studyEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
+  spellingItems = spellingItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
+  spellingEvents = spellingEvents.filter((event) => !event.debugSessionId || event.debugSessionId !== sessionId);
   historyItems = historyItems.filter((item) => !item.debugSessionId || item.debugSessionId !== sessionId);
   await Promise.all(removedVocabulary.map((item) => deleteVocabularyRecord(item)));
   await Promise.all(removedEvents.map((event) => deleteRecordValue(STUDY_EVENT_STORE, event.id)));
+  await Promise.all(removedSpelling.map((item) => deleteSpellingRecord(item)));
+  await Promise.all(removedSpellingEvents.map((event) => deleteRecordValue(SPELLING_EVENT_STORE, event.id)));
   await persistVocabulary();
   await persistStudyEvents();
+  await persistSpelling();
+  await persistSpellingEvents();
   await saveValue("history", historyItems);
   renderVocabulary();
   renderHistory();
@@ -855,8 +901,8 @@ function renderInstallContext() {
   }
   installBanner.hidden = false;
   installBanner.textContent = isSafari
-    ? "For long-term offline use on iPhone, add WordLover to the Home Screen from Safari after the dictionary is installed."
-    : "For iPhone offline install, open this address in Safari, then add WordLover to the Home Screen.";
+    ? "For long-term offline use on iPhone, add WordFan to the Home Screen from Safari after the dictionary is installed."
+    : "For iPhone offline install, open this address in Safari, then add WordFan to the Home Screen.";
 }
 
 function renderHistory() {
@@ -903,6 +949,7 @@ function renderResult(data) {
       ${canSaveAnyway ? `
         <div class="result-actions">
           <button id="saveUnknownTerm" type="button" data-typed-term="${escapeHtml(typed)}">Save anyway with my own meaning</button>
+          <button id="addToDictionary" class="secondary-button" type="button" data-typed-term="${escapeHtml(typed)}">Add to dictionary</button>
         </div>
       ` : ""}
     `;
@@ -920,6 +967,8 @@ function renderResult(data) {
   currentResult = data;
   const vocabularyItem = getVocabularyItem(data.term);
   const isActiveSaved = Boolean(vocabularyItem && !vocabularyItem.archivedAt);
+  const spellingItem = getSpellingItem(data.term);
+  const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
   result.innerHTML = `
     <div class="result-head">
       <div class="result-title-row">
@@ -943,6 +992,7 @@ function renderResult(data) {
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button" ${isActiveSaved ? "disabled" : ""}>${isActiveSaved ? "Saved" : "Save to vocabulary"}</button>
+      <button id="addToSpelling" class="secondary-button" type="button" ${isInSpelling ? "disabled" : ""}>${isInSpelling ? "In spelling list" : "Add to spelling list"}</button>
       <button id="showAiDetails" class="secondary-button" type="button">Gemini details</button>
       ${vocabularyItem ? `<button id="editCurrentTerm" class="secondary-button" type="button">Edit saved meaning</button>` : ""}
     </div>
@@ -982,18 +1032,6 @@ async function cleanupDictionaryChunks(chunkCount) {
   );
 }
 
-async function assembleDictionaryChunks(totalBytes, chunkCount) {
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (let index = 0; index < chunkCount; index += 1) {
-    const chunk = await loadFile(`${DICTIONARY_CHUNK_PREFIX}${index}`);
-    if (!chunk) throw new Error(`Dictionary chunk ${index + 1} is missing; retry while online.`);
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
 // Wrap fetch with an abort timeout so an offline iOS request that never settles
 // cannot hang the dictionary load (the request rejects and we fall back to the local copy).
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -1006,63 +1044,46 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
-async function fetchDictionaryWithResume(url) {
-  let totalBytes = 0;
-  try {
-    const head = await fetchWithTimeout(url, { method: "HEAD", cache: "no-store" }, 8000);
-    totalBytes = Number(head.headers.get("content-length") ?? 0);
-  } catch {
-    totalBytes = 0;
-  }
-
-  const storageCheck = await checkStorageBeforeInstall(totalBytes || DICTIONARY_ESTIMATED_BYTES);
+// Download the dictionary in a single request and verify its integrity BEFORE it is stored.
+// (A previous chunked Range download corrupted the file on CDNs that honor 206 responses, e.g.
+// GitHub Pages — the local test server only returns 200, so it went unnoticed. Single GET +
+// checksum is simple and robust.)
+async function downloadDictionaryFile(url, expected) {
+  const storageCheck = await checkStorageBeforeInstall(Number(expected?.bytes) || DICTIONARY_ESTIMATED_BYTES);
   if (!storageCheck.ok) throw new Error(storageCheck.message);
   if (storageCheck.warning) result.innerHTML = `<p class="muted">${escapeHtml(storageCheck.warning)}</p>`;
-
-  if (!totalBytes) {
-    const response = await fetchWithTimeout(url, { cache: "no-store" }, 120000);
-    if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    await saveFile(DICTIONARY_KEY, bytes);
-    return bytes;
-  }
-
-  const expectedChunkCount = Math.ceil(totalBytes / DICTIONARY_CHUNK_SIZE);
-  let progress = await loadRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, null);
-  if (!progress || progress.totalBytes !== totalBytes || progress.chunkSize !== DICTIONARY_CHUNK_SIZE) {
-    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: 0 };
-    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
-  }
-
-  for (let index = progress.completedChunks; index < expectedChunkCount; index += 1) {
-    const start = index * DICTIONARY_CHUNK_SIZE;
-    const end = Math.min(start + DICTIONARY_CHUNK_SIZE - 1, totalBytes - 1);
-    const response = await fetchWithTimeout(url, {
-      cache: "no-store",
-      headers: { Range: `bytes=${start}-${end}` },
-    }, 60000);
-    if (response.status === 200 && index === 0) {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      await saveFile(DICTIONARY_KEY, bytes);
-      await cleanupDictionaryChunks(expectedChunkCount);
-      return bytes;
-    }
-    if (response.status !== 206) {
-      throw new Error(`Dictionary range fetch failed: ${response.status}`);
-    }
-    const chunk = new Uint8Array(await response.arrayBuffer());
-    await saveFile(`${DICTIONARY_CHUNK_PREFIX}${index}`, chunk);
-    progress = { totalBytes, chunkSize: DICTIONARY_CHUNK_SIZE, completedChunks: index + 1 };
-    await saveRawValue(FILE_STORE, DICTIONARY_PROGRESS_KEY, progress);
-    const percent = Math.round((progress.completedChunks / expectedChunkCount) * 100);
-    loadButton.textContent = `Downloading ${percent}%`;
-    result.innerHTML = `<p class="muted">Downloading dictionary ${percent}%.</p>`;
-  }
-
-  const bytes = await assembleDictionaryChunks(totalBytes, expectedChunkCount);
-  await saveFile(DICTIONARY_KEY, bytes);
-  await cleanupDictionaryChunks(expectedChunkCount);
+  result.innerHTML = `<p class="muted">Downloading dictionary (one-time)…</p>`;
+  const response = await fetchWithTimeout(url, { cache: "no-store" }, 120000);
+  if (!response.ok) throw new Error(`Dictionary fetch failed: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await verifyDictionaryBytes(bytes, expected);
   return bytes;
+}
+
+// Validate downloaded bytes against the manifest (length + SHA-256) so a truncated/corrupted
+// transfer is rejected instead of being saved and later failing to open ("malformed").
+async function verifyDictionaryBytes(bytes, expected) {
+  if (!expected) return;
+  if (expected.bytes && bytes.byteLength !== Number(expected.bytes)) {
+    throw new Error(`Dictionary download size mismatch (got ${bytes.byteLength}, expected ${expected.bytes}).`);
+  }
+  if (expected.sha256 && crypto?.subtle?.digest) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (hex !== String(expected.sha256).toLowerCase()) {
+      throw new Error("Dictionary download checksum mismatch (corrupt transfer).");
+    }
+  }
+}
+
+// Open + sanity-check a SQLite buffer. A corrupt buffer throws here ("database disk image is
+// malformed"), which the caller uses to discard the bad copy and re-download.
+async function openDictionaryFromBytes(bytes) {
+  SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
+  dictionaryDb?.close();
+  dictionaryDb = new SQL.Database(bytes);
+  ftsSearchAvailable = null;
+  return dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
 }
 
 async function fetchRemoteDictionaryManifest() {
@@ -1103,9 +1124,6 @@ async function loadLocalDictionaryBytes() {
 
 async function loadDictionary() {
   const start = performance.now();
-  let source = "offline copy";
-  let bytes = null;
-
   const hasLocalCopy = await hasInstalledDictionary();
   // Best-effort, time-boxed update check. Skipped entirely when offline so a never-settling
   // request can't block loading the installed copy (the iOS offline-hang bug).
@@ -1114,46 +1132,74 @@ async function loadDictionary() {
   const remoteVersion = remoteManifest?.dictionaryDataVersion ?? null;
   const versionChanged = Boolean(remoteVersion && localVersion && remoteVersion !== localVersion);
 
-  // Local-first: if an installed copy exists and there is no confirmed update, use it with
-  // no network body fetch at all. This makes offline launches load instantly and reliably.
+  let bytes = null;
+  let count = null;
+  let source = "offline copy";
+  let fetchedMs = null;
+
+  // 1) Local-first: open the installed copy directly (instant + offline-safe) unless a new
+  // version is available. If it is corrupt, discard it and fall through to a fresh download.
   if (hasLocalCopy && !versionChanged) {
-    bytes = await loadLocalDictionaryBytes();
+    const local = await loadLocalDictionaryBytes();
+    if (local) {
+      try {
+        fetchedMs = performance.now();
+        count = await openDictionaryFromBytes(local);
+        bytes = local;
+      } catch (error) {
+        console.warn("Local dictionary is unreadable; re-downloading.", error);
+        await invalidateLocalDictionaryCopy();
+        await saveValue("dictionaryInstalled", false);
+      }
+    }
   }
 
+  // 2) Download a fresh, verified copy (first install / version change / corrupt local copy).
   if (!bytes) {
     if (versionChanged) {
       result.innerHTML = `<p class="muted">Dictionary update detected (${escapeHtml(localVersion)} -> ${escapeHtml(remoteVersion)}). Replacing local copy.</p>`;
       await invalidateLocalDictionaryCopy();
       await saveValue("dictionaryInstalled", false);
     }
+    let downloaded = null;
     try {
-      bytes = await fetchDictionaryWithResume("/dictionary.sqlite");
+      downloaded = await downloadDictionaryFile("/dictionary.sqlite", remoteManifest?.sqlite ?? null);
+    } catch (error) {
+      // Network/integrity failure → fall back to any already-installed local copy.
+      const local = await loadLocalDictionaryBytes();
+      if (!local) {
+        throw new Error(`Dictionary is unavailable online and no offline copy is installed yet. Connect to the internet to install it. ${error instanceof Error ? error.message : String(error)}`);
+      }
+      fetchedMs = performance.now();
+      count = await openDictionaryFromBytes(local);
+      bytes = local;
+      source = "offline copy after failed download";
+    }
+    if (downloaded) {
+      fetchedMs = performance.now();
+      try {
+        count = await openDictionaryFromBytes(downloaded);
+      } catch (error) {
+        // Downloaded bytes are unreadable — do not keep a bad copy.
+        await invalidateLocalDictionaryCopy();
+        await saveValue("dictionaryInstalled", false);
+        throw new Error(`The dictionary could not be opened after download (it may be corrupt). Reload to retry. ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Persist only AFTER it opened cleanly.
+      bytes = downloaded;
       source = "network";
-      await saveOpfsFile(DICTIONARY_KEY, bytes);
+      await saveFile(DICTIONARY_KEY, downloaded);
+      await saveOpfsFile(DICTIONARY_KEY, downloaded);
       await saveValue("dictionaryInstalled", true);
       if (remoteVersion) await saveValue(DICTIONARY_VERSION_KEY, remoteVersion);
-    } catch (error) {
-      bytes = await loadLocalDictionaryBytes();
-      source = "offline copy after failed download";
-      if (!bytes) {
-        throw new Error(
-          `Dictionary is unavailable online and no offline copy is installed yet. Load it once while online first. ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
     }
   }
-  const fetched = performance.now();
-  SQL ??= await initSqlJs({ locateFile: (file) => `/vendor/${file}` });
-  const initialized = performance.now();
-  dictionaryDb?.close();
-  dictionaryDb = new SQL.Database(bytes);
-  ftsSearchAvailable = null;
-  const opened = performance.now();
-  const count = dictionaryDb.exec("SELECT count(*) AS count FROM dictionary_entries")[0].values[0][0];
+
+  const now = performance.now();
   lastMetrics = {
-    fetchMs: fetched - start,
-    initMs: initialized - fetched,
-    openMs: opened - initialized,
+    fetchMs: (fetchedMs ?? now) - start,
+    initMs: 0,
+    openMs: now - (fetchedMs ?? now),
     bytes: bytes.byteLength,
     entries: count,
     source,
@@ -1213,6 +1259,9 @@ function lookupTerm(input) {
   const normalized = normalizeTerm(input);
   if (isChineseInput(input)) return lookupChineseTerm(input);
   if (!TERM_RE.test(normalized)) return { status: "invalid_input", term: input };
+  // User dictionary overlay: words the user added themselves resolve without the sql.js DB.
+  const userEntry = getUserDictionaryEntry(input);
+  if (userEntry) return userDictionaryToResult(userEntry);
   if (!dictionaryDb) throw new Error("Dictionary is not loaded yet.");
 
   const start = performance.now();
@@ -1613,10 +1662,43 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
       localSnapshot.studyEvents ?? [],
       remoteSnapshot?.studyEvents ?? [],
     ),
+    spellingItems: mergeVocabularySources(
+      localSnapshot.spellingItems ?? [],
+      remoteSnapshot?.spellingItems ?? [],
+    ),
+    spellingEvents: mergeStudyEventSources(
+      localSnapshot.spellingEvents ?? [],
+      remoteSnapshot?.spellingEvents ?? [],
+    ),
+    userDictionary: mergeUserDictionarySources(
+      localSnapshot.userDictionary ?? [],
+      remoteSnapshot?.userDictionary ?? [],
+    ),
     autosaveEnabled: newer.autosaveEnabled ?? localSnapshot.autosaveEnabled ?? true,
+    onReturnAction: newer.onReturnAction ?? localSnapshot.onReturnAction ?? (newer.autosaveEnabled === false ? "none" : "vocabulary"),
+    speakOnReturn: newer.speakOnReturn ?? localSnapshot.speakOnReturn ?? false,
     theme: newer.theme ?? localSnapshot.theme,
+    studyGoals: newer.studyGoals ?? localSnapshot.studyGoals ?? null,
     lastMetrics: newer.lastMetrics ?? localSnapshot.lastMetrics,
   };
+}
+
+function mergeUserDictionarySources(localEntries, remoteEntries) {
+  const byTerm = new Map();
+  for (const entry of [...(remoteEntries ?? []), ...(localEntries ?? [])]) {
+    if (!entry?.normalizedTerm && !entry?.word) continue;
+    const normalizedTerm = entry.normalizedTerm ?? normalizeTerm(entry.word);
+    const incoming = { ...entry, normalizedTerm };
+    const existing = byTerm.get(normalizedTerm);
+    if (!existing) {
+      byTerm.set(normalizedTerm, incoming);
+      continue;
+    }
+    const existingUpdated = Date.parse(existing.updatedAt ?? existing.createdAt ?? 0) || 0;
+    const incomingUpdated = Date.parse(incoming.updatedAt ?? incoming.createdAt ?? 0) || 0;
+    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? incoming : existing);
+  }
+  return [...byTerm.values()];
 }
 
 async function persistVocabulary() {
@@ -1640,6 +1722,94 @@ async function deleteVocabularyRecord(item) {
 async function persistStudyEvent(event) {
   await saveRecordValue(STUDY_EVENT_STORE, event.id, event);
   renderStudyStats();
+}
+
+// --- Spelling track persistence (mirrors the vocabulary track) ---
+async function persistSpelling() {
+  await Promise.all(spellingItems.map((item) => saveRecordValue(SPELLING_STORE, item.normalizedTerm, item)));
+  renderSpellingViews();
+}
+
+async function persistSpellingItem(item) {
+  await saveRecordValue(SPELLING_STORE, item.normalizedTerm, item);
+  renderSpellingViews();
+}
+
+async function deleteSpellingRecord(item) {
+  await deleteRecordValue(SPELLING_STORE, item.normalizedTerm);
+}
+
+// Hard-remove a word from a list (used by the "Undo" affordance right after a save).
+async function removeVocabularyItemHard(term) {
+  const item = getVocabularyItem(term);
+  if (!item) return;
+  vocabularyItems = vocabularyItems.filter((candidate) => candidate.normalizedTerm !== item.normalizedTerm);
+  await deleteVocabularyRecord(item);
+  renderVocabulary();
+  renderStudyStats();
+  renderHistoryChart();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function removeSpellingItemHard(term) {
+  const item = getSpellingItem(term);
+  if (!item) return;
+  spellingItems = spellingItems.filter((candidate) => candidate.normalizedTerm !== item.normalizedTerm);
+  await deleteSpellingRecord(item);
+  renderSpellingViews();
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function persistSpellingEvent(event) {
+  await saveRecordValue(SPELLING_EVENT_STORE, event.id, event);
+  renderSpellingViews();
+}
+
+async function persistSpellingEvents() {
+  await Promise.all(spellingEvents.map((event) => saveRecordValue(SPELLING_EVENT_STORE, event.id, event)));
+  renderSpellingViews();
+}
+
+// Re-render every spelling-aware surface after spelling data changes.
+function renderSpellingViews() {
+  renderStudyStats();
+  renderVocabulary();
+  renderHistoryChart();
+}
+
+function getSpellingItem(term) {
+  const normalizedTerm = normalizeTerm(term);
+  return spellingItems.find((item) => item.normalizedTerm === normalizedTerm) ?? null;
+}
+
+// --- User dictionary (additive overlay on the read-only sql.js dictionary) ---
+async function persistUserDictionaryEntry(entry) {
+  await saveRecordValue(USER_DICTIONARY_STORE, entry.normalizedTerm, entry);
+}
+
+function getUserDictionaryEntry(term) {
+  const normalizedTerm = normalizeTerm(term);
+  return userDictionaryEntries.find((entry) => entry.normalizedTerm === normalizedTerm) ?? null;
+}
+
+function userDictionaryToResult(entry, queryMs = 0) {
+  return {
+    status: "found",
+    term: entry.word,
+    entryType: entry.word.includes(" ") ? "phrase" : "word",
+    phonetic: entry.phonetic ?? "",
+    englishMeanings: entry.englishMeanings ?? [],
+    englishMeaningSource: "user dictionary",
+    chineseMeanings: entry.chineseMeanings ?? [],
+    tags: ["user"],
+    queryMs,
+    source: "user-dictionary",
+  };
+}
+
+function resultToTrackItem(data) {
+  // Spelling items share the vocabulary item shape so all FSRS/stat helpers work unchanged.
+  return resultToVocabularyItem(data);
 }
 
 function resultToVocabularyItem(data) {
@@ -1708,11 +1878,38 @@ async function saveVocabularyItem(data, reason = "manual") {
   return getVocabularyItem(data.term);
 }
 
+// Add a dictionary (or user-dictionary) word to the separate spelling list.
+async function saveSpellingItem(data, reason = "manual") {
+  if (!data || data.status !== "found") return null;
+  await getDeviceId();
+  const normalizedTerm = normalizeTerm(data.term);
+  const existing = getSpellingItem(data.term);
+  const now = nowIso();
+  if (existing) {
+    existing.archivedAt = null;
+    existing.updatedAt = now;
+    existing.syncVersion = (existing.syncVersion ?? 0) + 1;
+    existing.isSynced = false;
+    existing.lastSaveReason = reason;
+    existing.review = normalizeReviewState(existing.review ?? { dueAt: now });
+  } else {
+    const item = resultToTrackItem(data);
+    item.lastSaveReason = reason;
+    spellingItems = [item, ...spellingItems];
+  }
+  spellingItems = spellingItems
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
+    .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
+  await persistSpelling();
+  if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
+  return getSpellingItem(data.term);
+}
+
 async function showUnknownTermDialog(typedTerm) {
   const initial = (typedTerm ?? "").trim();
   const values = await showModal({
     title: "Save term without dictionary match?",
-    body: "WordLover did not find an exact match. You can save anyway, edit the term, or cancel. Provide at least one meaning before saving.",
+    body: "WordFan did not find an exact match. You can save anyway, edit the term, or cancel. Provide at least one meaning before saving.",
     fields: [
       { id: "term", label: "Term", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
       { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
@@ -1762,6 +1959,58 @@ async function showUnknownTermDialog(typedTerm) {
     chinese,
     phonetic: values.phonetic.trim(),
   });
+}
+
+// Add a brand-new word to the additive user dictionary (must not already exist in the dictionary).
+async function showAddToDictionaryDialog(typedTerm) {
+  const initial = (typedTerm ?? "").trim();
+  const values = await showModal({
+    title: "Add a word to the dictionary",
+    body: "Add a new word so it becomes searchable and eligible for the spelling list. The word must not already exist in the dictionary.",
+    fields: [
+      { id: "term", label: "Word", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
+      { id: "phonetic", label: "Pronunciation / IPA (optional)", value: "" },
+      { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "", required: true },
+      { id: "chinese", label: "Chinese meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
+    ],
+    submitText: "Add to dictionary",
+    cancelText: "Cancel",
+  });
+  if (!values) return null;
+  const term = values.term.trim();
+  const normalizedTerm = normalizeTerm(term);
+  if (!normalizedTerm || !TERM_RE.test(normalizedTerm)) {
+    await showModal({ title: "Word cannot be added", body: "Use English letters, spaces, hyphens, or apostrophes, up to 6 words.", submitText: "OK", allowCancel: false });
+    return null;
+  }
+  // Reject words that already exist (shipped dictionary or user dictionary).
+  if (getUserDictionaryEntry(term) || (loaded && lookupTerm(term)?.status === "found")) {
+    await showModal({ title: "Word already exists", body: `"${term}" is already in the dictionary. Search it directly.`, submitText: "OK", allowCancel: false });
+    return null;
+  }
+  const english = values.english.split(";").map((line) => line.trim()).filter(Boolean);
+  const chinese = values.chinese.split(";").map((line) => line.trim()).filter(Boolean);
+  if (!english.length) {
+    await showModal({ title: "English meaning required", body: "Add at least one English meaning.", submitText: "OK", allowCancel: false });
+    return null;
+  }
+  const now = nowIso();
+  const entry = {
+    normalizedTerm,
+    word: term,
+    phonetic: values.phonetic.trim(),
+    englishMeanings: english,
+    chineseMeanings: chinese,
+    createdAt: now,
+    updatedAt: now,
+    syncVersion: 1,
+  };
+  userDictionaryEntries = [entry, ...userDictionaryEntries.filter((e) => e.normalizedTerm !== normalizedTerm)];
+  await persistUserDictionaryEntry(entry);
+  // Show the freshly added word as a normal result.
+  termInput.value = term;
+  renderResult(userDictionaryToResult(entry));
+  return entry;
 }
 
 async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese, phonetic }) {
@@ -1825,18 +2074,17 @@ async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese
   return getVocabularyItem(term);
 }
 
-function scheduleAutosave(data) {
+// Dwell-based autosave was replaced by the explicit "On Return" setting (see handleReturnKey).
+// Kept as a no-op so existing call sites stay simple.
+function scheduleAutosave() {
   window.clearTimeout(autosaveHandle);
-  if (!autosaveEnabled || !data || data.status !== "found" || getVocabularyItem(data.term)) return;
-  autosaveHandle = window.setTimeout(() => {
-    if (currentResult && normalizeTerm(currentResult.term) === normalizeTerm(data.term)) {
-      void saveVocabularyItem(data, "autosave");
-    }
-  }, AUTOSAVE_DWELL_MS);
 }
 
 async function editVocabularyItem(term) {
-  const item = getVocabularyItem(term);
+  return editVocabularyItemGeneric(getVocabularyItem(term), persistVocabularyItem);
+}
+
+async function editVocabularyItemGeneric(item, persistFn) {
   if (!item) return;
   const values = await showModal({
     title: `Edit ${item.term}`,
@@ -1855,7 +2103,7 @@ async function editVocabularyItem(term) {
   item.updatedAt = nowIso();
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  await persistVocabularyItem(item);
+  await persistFn(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
 }
 
@@ -1868,6 +2116,28 @@ async function setVocabularyArchived(term, archived) {
   item.isSynced = false;
   await persistVocabularyItem(item);
   if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+async function setSpellingArchived(term, archived) {
+  const item = getSpellingItem(term);
+  if (!item) return;
+  item.archivedAt = archived ? nowIso() : null;
+  item.updatedAt = nowIso();
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  await persistSpellingItem(item);
+  if (currentResult && normalizeTerm(currentResult.term) === item.normalizedTerm) renderResult(currentResult);
+}
+
+// Browser action wrappers route to the track currently shown in the vocabulary panel.
+function archiveBrowserItem(term, archived) {
+  return vocabularyView.track === "spelling" ? setSpellingArchived(term, archived) : setVocabularyArchived(term, archived);
+}
+
+async function editBrowserItem(term) {
+  if (vocabularyView.track !== "spelling") return editVocabularyItem(term);
+  // Spelling items inherit the dictionary meaning; offer a light edit of the user meaning hint.
+  return editVocabularyItemGeneric(getSpellingItem(term), persistSpellingItem);
 }
 
 function getVocabularyRating(item) {
@@ -1900,22 +2170,63 @@ function renderIpaWithSpeaker(term, phonetic) {
   return `${renderIpa(phonetic)}${renderSpeakerButton(term)}${renderAiChatButton(term)}`;
 }
 
+// Pick the most natural-sounding installed English voice. getVoices() is
+// populated asynchronously, so we refresh on the voiceschanged event too.
+let preferredVoice = null;
+function pickPreferredVoice() {
+  if (typeof window.speechSynthesis === "undefined") return null;
+  const voices = window.speechSynthesis.getVoices() ?? [];
+  if (!voices.length) return null;
+  const english = voices.filter((v) => /^en\b|^en[-_]/i.test(v.lang ?? ""));
+  const pool = english.length ? english : voices;
+  const score = (v) => {
+    const name = (v.name ?? "").toLowerCase();
+    let s = 0;
+    if (/enhanced|premium|natural|neural/.test(name)) s += 6; // iOS "Enhanced" / high-quality variants
+    if (/samantha|ava|allison|serena|nicky|aaron|karen|moira|tessa|google us english/.test(name)) s += 3;
+    if (v.localService) s += 1; // local = offline + lower latency (iPhone-first)
+    if (/^en[-_]us/i.test(v.lang ?? "")) s += 1;
+    return s;
+  };
+  return pool.slice().sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+function refreshPreferredVoice() {
+  preferredVoice = pickPreferredVoice();
+}
+if (typeof window.speechSynthesis !== "undefined") {
+  refreshPreferredVoice();
+  window.speechSynthesis.addEventListener?.("voiceschanged", refreshPreferredVoice);
+}
+
 function speakTerm(term) {
   if (!term || typeof window.speechSynthesis === "undefined") return;
   try {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(String(term));
     utterance.lang = "en-US";
-    utterance.rate = 0.9;
+    utterance.rate = 0.6; // ~1.5x slower than the previous 0.9 so each word is clearer
+    utterance.pitch = 1.15; // slightly brighter/friendlier tone (best the Web Speech API can do)
+    utterance.volume = 1;
+    if (!preferredVoice) refreshPreferredVoice();
+    if (preferredVoice) utterance.voice = preferredVoice;
     window.speechSynthesis.speak(utterance);
   } catch {
     /* speech synthesis not available */
   }
 }
 
-function getVocabularyStats() {
-  const active = vocabularyItems.filter((item) => !item.archivedAt);
-  const archived = vocabularyItems.filter((item) => item.archivedAt);
+// The vocabulary browser is shared by the vocabulary and spelling tracks.
+function activeBrowserItems() {
+  return vocabularyView.track === "spelling" ? spellingItems : vocabularyItems;
+}
+
+function getBrowserItem(term) {
+  return vocabularyView.track === "spelling" ? getSpellingItem(term) : getVocabularyItem(term);
+}
+
+function getVocabularyStats(items = activeBrowserItems()) {
+  const active = items.filter((item) => !item.archivedAt);
+  const archived = items.filter((item) => item.archivedAt);
   const counts = Object.fromEntries(FSRS_RATINGS.map((rating) => [rating, 0]));
   active.forEach((item) => {
     counts[getVocabularyRating(item)] += 1;
@@ -2021,7 +2332,7 @@ function renderVocabularyBrowser(stats) {
   if (vocabularyView.page < 0) vocabularyView.page = 0;
   const start = vocabularyView.page * VOCABULARY_PAGE_SIZE;
   const pageItems = items.slice(start, start + VOCABULARY_PAGE_SIZE);
-  const selectedItem = vocabularyView.selectedTerm ? getVocabularyItem(vocabularyView.selectedTerm) : null;
+  const selectedItem = vocabularyView.selectedTerm ? getBrowserItem(vocabularyView.selectedTerm) : null;
   const rangeStart = items.length ? start + 1 : 0;
   const rangeEnd = Math.min(start + VOCABULARY_PAGE_SIZE, items.length);
   const emptyMessage = query
@@ -2086,14 +2397,20 @@ function preserveVocabSearchFocus() {
 }
 
 function renderVocabulary() {
+  for (const tab of vocabularyTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.vocabTrack === vocabularyView.track));
+  }
+  const isSpelling = vocabularyView.track === "spelling";
   const stats = getVocabularyStats();
   if (!stats.active.length && !stats.archived.length) {
-    vocabularySummary.textContent = "No saved terms yet.";
-    vocabularyList.innerHTML = `<p class="muted">Search a word and save it here. Autosave can add valid searches after a short pause.</p>`;
+    vocabularySummary.textContent = isSpelling ? "No spelling words yet." : "No saved terms yet.";
+    vocabularyList.innerHTML = isSpelling
+      ? `<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
+      : `<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
     return;
   }
   if (vocabularyView.filter !== "summary" && vocabularyView.selectedTerm) {
-    const selected = getVocabularyItem(vocabularyView.selectedTerm);
+    const selected = getBrowserItem(vocabularyView.selectedTerm);
     if (!selected || selected.archivedAt) vocabularyView.selectedTerm = null;
   }
   const statsHtml = renderVocabularyStats(stats);
@@ -2143,6 +2460,17 @@ function ensureVocabularyReviewStates() {
   }));
 }
 
+function getDueSpellingItems() {
+  const now = appNowMs();
+  const cutoff = now + REVIEW_GRACE_WINDOW_MS;
+  return spellingItems
+    .filter((item) => {
+      if (item.archivedAt || item.review?.masteredAt) return false;
+      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= cutoff;
+    })
+    .sort((left, right) => (Date.parse(left.review?.dueAt ?? "0") || 0) - (Date.parse(right.review?.dueAt ?? "0") || 0));
+}
+
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
@@ -2150,18 +2478,51 @@ function getTodayStats() {
   return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
+function getSpellingTodayStats() {
+  const newSaved = spellingItems.filter((item) => isToday(item.savedAt)).length;
+  const reviewed = spellingEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
+  const mastered = spellingItems.filter((item) => isToday(item.review?.masteredAt)).length;
+  return { newSaved, reviewed, mastered, dueCount: getDueSpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
+}
+
 function renderStudyStats() {
-  const stats = getTodayStats();
+  for (const tab of todayTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.todayTrack === todayTrack));
+  }
+  const isSpelling = todayTrack === "spelling";
+  const stats = isSpelling ? getSpellingTodayStats() : getTodayStats();
   statNewSaved.textContent = String(stats.newSaved);
   statReviewed.textContent = String(stats.reviewed);
   statMastered.textContent = String(stats.mastered);
-  startReviewButton.disabled = stats.activeCount === 0;
-  startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
-  studySummary.textContent = stats.dueCount
-    ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
-    : stats.activeCount
-      ? "No words are due right now. You can still practice saved words."
-      : "No saved words to review yet.";
+
+  startReviewButton.hidden = isSpelling;
+  studyNewWordButton.hidden = isSpelling;
+  if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
+  if (startSpellingPracticeMoreButton) {
+    startSpellingPracticeMoreButton.hidden = !isSpelling;
+    startSpellingPracticeMoreButton.disabled = !isSpelling || stats.activeCount === 0;
+  }
+
+  if (isSpelling) {
+    if (startSpellingReviewButton) {
+      startSpellingReviewButton.disabled = stats.dueCount === 0;
+      startSpellingReviewButton.textContent = stats.dueCount ? `Spelling Review (${stats.dueCount})` : "No spelling due";
+    }
+    studySummary.textContent = stats.dueCount
+      ? `${stats.dueCount} spelling word${stats.dueCount === 1 ? " is" : "s are"} due today.`
+      : stats.activeCount
+        ? "No spelling words are due right now."
+        : "Add words to the spelling list to start.";
+  } else {
+    startReviewButton.disabled = stats.activeCount === 0;
+    startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
+    studySummary.textContent = stats.dueCount
+      ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
+      : stats.activeCount
+        ? "No words are due right now. You can still practice saved words."
+        : "No saved words to review yet.";
+  }
+  renderGoalsPanel();
 }
 
 function refreshReviewScheduleViews() {
@@ -2248,12 +2609,15 @@ function computeHistoryBuckets(granularity, anchorDate) {
 }
 
 function summarizeHistoryBuckets(buckets) {
+  const isSpelling = historyView.track === "spelling";
+  const events = isSpelling ? spellingEvents : studyEvents;
+  const items = isSpelling ? spellingItems : vocabularyItems;
   const previousRatingByTerm = new Map();
-  const sortedReviews = studyEvents
+  const sortedReviews = events
     .filter((event) => event?.type === "review" && event.normalizedTerm && event.rating)
     .slice()
     .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
-  const newWordSavedAt = vocabularyItems.map((item) => Date.parse(item.savedAt)).filter(Number.isFinite);
+  const newWordSavedAt = items.map((item) => Date.parse(item.savedAt)).filter(Number.isFinite);
   return buckets.map((bucket) => {
     const startMs = bucket.start.getTime();
     const endMs = bucket.end.getTime();
@@ -2329,7 +2693,7 @@ function renderHistoryChartSvg(rows) {
     })
     .join("");
   return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="WordLover history chart" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="WordFan history chart" preserveAspectRatio="xMidYMid meet">
       <defs>
         <pattern id="h-hatch-down" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
           <rect width="6" height="6" fill="#d55e00"></rect>
@@ -2394,6 +2758,9 @@ function renderHistoryChart() {
   for (const button of historyGranularityButtons) {
     const selected = button.dataset.historyGranularity === historyView.granularity;
     button.setAttribute("aria-selected", String(selected));
+  }
+  for (const tab of historyTrackTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.historyTrack === historyView.track));
   }
 }
 
@@ -2525,6 +2892,225 @@ function hideQuiz() {
   quizPanel.innerHTML = "";
 }
 
+// --- Spelling review engine ---
+// A clean first-try spelling completes the word immediately (rating: easy). Once the user has
+// missed it at least once, they must spell it correctly 3 times in a row to complete it. The
+// session rating is derived from how many wrong attempts (retries) it took. Strict check:
+// exact, case-sensitive, no trimming.
+const SPELLING_FEEDBACK_PAUSE_MS = 1000;
+
+function spellingThreshold() {
+  return (activeSpellingSession?.retries ?? 0) === 0 ? 1 : 3;
+}
+
+function ratingFromRetries(retries) {
+  if (retries <= 0) return "easy";
+  if (retries === 1) return "good";
+  if (retries === 2) return "hard";
+  return "again";
+}
+
+function spellingMeaningHint(item) {
+  return {
+    en: summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings),
+    zh: summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings),
+  };
+}
+
+function currentSpellingItem() {
+  return activeSpellingSession?.queue[activeSpellingSession.index] ?? null;
+}
+
+function getPracticeSpellingItems() {
+  return spellingItems
+    .filter((item) => !item.archivedAt)
+    .sort((left, right) => {
+      const leftReviewed = left.review?.lastReviewedAt ?? "";
+      const rightReviewed = right.review?.lastReviewedAt ?? "";
+      if (leftReviewed !== rightReviewed) return leftReviewed.localeCompare(rightReviewed);
+      return (left.savedAt ?? "").localeCompare(right.savedAt ?? "");
+    });
+}
+
+function startSpellingSessionWith(queue, emptyMessage) {
+  spellingReviewPanel.hidden = false;
+  if (!queue.length) {
+    activeSpellingSession = null;
+    spellingReviewPanel.innerHTML = `<p class="muted">${escapeHtml(emptyMessage)}</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+    return;
+  }
+  activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false };
+  quizPanel.hidden = true;
+  renderSpellingPrompt();
+}
+
+function startSpellingReview() {
+  startSpellingSessionWith(getDueSpellingItems(), "No spelling words are due today.");
+}
+
+// Practice mode: drill every active spelling word (least-recently-practiced first),
+// regardless of whether it is due.
+function startSpellingPractice() {
+  startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.");
+}
+
+function renderSpellingPrompt() {
+  const item = currentSpellingItem();
+  if (!item) {
+    finishSpellingSession();
+    return;
+  }
+  activeSpellingSession.awaitingRetry = false;
+  const hint = spellingMeaningHint(item);
+  spellingReviewPanel.hidden = false;
+  spellingReviewPanel.innerHTML = `
+    <div class="spelling-review">
+      <p class="spelling-progress">${escapeHtml(spellingProgressText())}</p>
+      <p class="spelling-hint-zh">${escapeHtml(hint.zh)}</p>
+      <p class="spelling-hint-en">${escapeHtml(hint.en)}</p>
+      <div class="spelling-controls">
+        ${renderSpeakerButton(item.term)}
+        <input type="text" id="spellingInput" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="type what you hear" />
+      </div>
+      <p class="spelling-feedback" id="spellingFeedback" aria-live="polite"></p>
+      <div class="quiz-actions">
+        <button class="secondary-button" type="button" data-spelling-close="1">End session</button>
+      </div>
+    </div>
+  `;
+  const input = spellingReviewPanel.querySelector("#spellingInput");
+  input?.focus();
+  speakTerm(item.term);
+}
+
+function spellingProgressText() {
+  const s = activeSpellingSession;
+  const base = `Word ${s.index + 1} of ${s.queue.length}`;
+  return s.retries === 0
+    ? `${base} · spell the word you hear`
+    : `${base} · ${s.consecutive}/3 correct in a row (after a miss)`;
+}
+
+function updateSpellingProgress() {
+  const progress = spellingReviewPanel.querySelector(".spelling-progress");
+  if (progress && activeSpellingSession) progress.textContent = spellingProgressText();
+}
+
+function checkSpelling() {
+  const item = currentSpellingItem();
+  if (!item || !activeSpellingSession || activeSpellingSession.awaitingRetry || activeSpellingSession.pausing) return;
+  const input = spellingReviewPanel.querySelector("#spellingInput");
+  const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
+  if (!input || !feedback) return;
+  const value = input.value; // strict: no trim, case-sensitive
+  if (value === item.term) {
+    activeSpellingSession.consecutive += 1;
+    // Show the result (with the correct word) and keep the typed text on screen for a beat so the
+    // user can see what they entered before it clears / advances.
+    feedback.innerHTML = `<span class="spelling-correct-label">Correct!</span><span class="spelling-answer-correct">${escapeHtml(item.term)}</span>`;
+    feedback.className = "spelling-feedback correct";
+    input.classList.add("spelling-correct-flash");
+    const reachedThreshold = activeSpellingSession.consecutive >= spellingThreshold();
+    activeSpellingSession.pausing = true;
+    window.setTimeout(() => {
+      input.classList.remove("spelling-correct-flash");
+      if (!activeSpellingSession) return;
+      activeSpellingSession.pausing = false;
+      // First-try correct completes immediately; after a miss, require 3 in a row.
+      if (reachedThreshold) {
+        void completeCurrentSpellingWord();
+      } else {
+        input.value = "";
+        feedback.textContent = "";
+        feedback.className = "spelling-feedback";
+        updateSpellingProgress();
+        input.focus();
+        speakTerm(item.term);
+      }
+    }, SPELLING_FEEDBACK_PAUSE_MS);
+  } else {
+    activeSpellingSession.retries += 1;
+    activeSpellingSession.consecutive = 0;
+    activeSpellingSession.awaitingRetry = true;
+    feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span><span class="spelling-retry-hint">Press Return again (or Retry) to try once more.</span>`;
+    feedback.className = "spelling-feedback wrong";
+    // Keep the input enabled + focused so pressing Return again acts like Retry.
+    input.focus();
+    updateSpellingProgress();
+    const actions = spellingReviewPanel.querySelector(".quiz-actions");
+    if (actions && !actions.querySelector("[data-spelling-retry]")) {
+      actions.insertAdjacentHTML("afterbegin", `<button type="button" data-spelling-retry="1">Retry</button>`);
+    }
+  }
+}
+
+function retrySpelling() {
+  if (!currentSpellingItem()) return;
+  renderSpellingPrompt();
+}
+
+async function completeCurrentSpellingWord() {
+  const item = currentSpellingItem();
+  if (!item) return;
+  const rating = ratingFromRetries(activeSpellingSession.retries);
+  await recordSpellingReview(item, rating, activeSpellingSession.retries);
+  activeSpellingSession.completed += 1;
+  activeSpellingSession.index += 1;
+  activeSpellingSession.retries = 0;
+  activeSpellingSession.consecutive = 0;
+  if (activeSpellingSession.index >= activeSpellingSession.queue.length) {
+    finishSpellingSession();
+  } else {
+    // The 1s feedback pause already elapsed in checkSpelling; advance to the next word now.
+    renderSpellingPrompt();
+  }
+}
+
+async function recordSpellingReview(item, rating, retries) {
+  const schedule = scheduleFromFsrsRating(item.review ?? {}, rating);
+  const reviewedAt = nowIso();
+  item.review = {
+    ...(item.review ?? {}),
+    lastRating: rating,
+    intervalDays: schedule.intervalDays,
+    dueAt: schedule.dueAt,
+    masteredAt: schedule.masteredAt,
+    lastReviewedAt: reviewedAt,
+    reviewCount: (item.review?.reviewCount ?? 0) + 1,
+    fsrsCard: schedule.fsrsCard,
+  };
+  item.updatedAt = reviewedAt;
+  item.syncVersion = (item.syncVersion ?? 0) + 1;
+  item.isSynced = false;
+  const event = markDebugRecord({
+    id: crypto.randomUUID ? crypto.randomUUID() : `spelling-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type: "review",
+    term: item.term,
+    normalizedTerm: item.normalizedTerm,
+    rating,
+    retries,
+    mastered: Boolean(schedule.masteredAt),
+    occurredAt: reviewedAt,
+    deviceId,
+  });
+  spellingEvents.push(event);
+  await saveRecordValue(SPELLING_STORE, item.normalizedTerm, item);
+  await persistSpellingEvent(event);
+}
+
+function finishSpellingSession() {
+  const completed = activeSpellingSession?.completed ?? 0;
+  activeSpellingSession = null;
+  spellingReviewPanel.hidden = false;
+  spellingReviewPanel.innerHTML = `<p class="muted">Spelling session done. ${completed} word${completed === 1 ? "" : "s"} reviewed.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+  renderStudyStats();
+}
+
+function hideSpellingReview() {
+  activeSpellingSession = null;
+  spellingReviewPanel.hidden = true;
+  spellingReviewPanel.innerHTML = "";
+}
 
 function meaningPreviewFromEntry(entry) {
   return topLines(entry.translation, 1)[0] ?? topLines(entry.definition, 1)[0] ?? "No meaning available";
@@ -2853,8 +3439,80 @@ async function runLookup({ commit = false } = {}) {
     if (commit && data.status === "found") {
       await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
     }
+    return data;
   } catch (error) {
     result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+    return null;
+  }
+}
+
+let invalidFlagHandle = 0;
+function flagSearchInputInvalid() {
+  termInput.classList.add("input-invalid");
+  window.clearTimeout(invalidFlagHandle);
+  invalidFlagHandle = window.setTimeout(() => termInput.classList.remove("input-invalid"), 1500);
+}
+
+// Return key: always search; then apply the configured "On Return" save action + optional speak.
+async function handleReturnKey() {
+  const value = termInput.value;
+  if (!value.trim()) return;
+  const data = await runLookup({ commit: true });
+  if (speakOnReturn) speakTerm(data?.status === "found" ? data.term : value);
+  if (onReturnAction === "vocabulary") {
+    if (data?.status === "found") await saveWithUndo(data, ["vocabulary"], "return");
+  } else if (onReturnAction === "spelling") {
+    if (data?.status === "found") {
+      await saveWithUndo(data, ["spelling"], "return");
+    } else {
+      // Non-dictionary word can't go to the spelling list (dictionary words only): flag it red.
+      flagSearchInputInvalid();
+    }
+  } else if (onReturnAction === "both") {
+    if (data?.status === "found") {
+      await saveWithUndo(data, ["vocabulary", "spelling"], "return");
+    } else {
+      // Spelling requires a dictionary word, so "both" can't fully apply: flag it red.
+      flagSearchInputInvalid();
+    }
+  }
+}
+
+// --- Undo-after-save -------------------------------------------------------
+// Remember only the records a save just *created* (not re-saves of words the
+// user already had) so a single Undo tap removes exactly the new ones.
+let pendingUndo = null; // { term, entries: [{ list: "vocabulary" | "spelling" }] }
+
+async function saveWithUndo(data, lists, reason) {
+  const created = [];
+  for (const list of lists) {
+    const existed = list === "spelling" ? Boolean(getSpellingItem(data.term)) : Boolean(getVocabularyItem(data.term));
+    if (list === "spelling") await saveSpellingItem(data, reason);
+    else await saveVocabularyItem(data, reason);
+    if (!existed) created.push({ list });
+  }
+  pendingUndo = created.length ? { term: data.term, entries: created } : null;
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  if (undoSaveButton) undoSaveButton.hidden = !pendingUndo;
+}
+
+function clearPendingUndo() {
+  if (!pendingUndo) return;
+  pendingUndo = null;
+  updateUndoButton();
+}
+
+async function performUndoSave() {
+  if (!pendingUndo) return;
+  const { term, entries } = pendingUndo;
+  pendingUndo = null;
+  updateUndoButton();
+  for (const entry of entries) {
+    if (entry.list === "spelling") await removeSpellingItemHard(term);
+    else await removeVocabularyItemHard(term);
   }
 }
 
@@ -3226,8 +3884,14 @@ function buildUserDataSnapshot() {
     historyItems,
     vocabularyItems,
     studyEvents,
-    autosaveEnabled,
+    spellingItems,
+    spellingEvents,
+    userDictionary: userDictionaryEntries,
+    autosaveEnabled: onReturnAction === "vocabulary" || onReturnAction === "both",
+    onReturnAction,
+    speakOnReturn,
     theme,
+    studyGoals,
     lastMetrics,
   };
 }
@@ -3328,7 +3992,7 @@ async function rollbackLatestCheckpoint() {
 
 async function deleteAllLocalUserData() {
   const confirmation = await showModal({
-    title: "Delete all local WordLover data?",
+    title: "Delete all local WordFan data?",
     body: "This removes your vocabulary, study progress, history, checkpoints, encrypted keys, and the installed dictionary from this device. Cloud backups are not touched. Type DELETE to confirm.",
     fields: [{ id: "confirm", label: "Type DELETE to confirm", value: "", required: true }],
     submitText: "Delete everything",
@@ -3337,7 +4001,7 @@ async function deleteAllLocalUserData() {
   });
   if (!confirmation || confirmation.confirm.trim().toUpperCase() !== "DELETE") return false;
 
-  checkpointStatus.textContent = "Deleting local WordLover data...";
+  checkpointStatus.textContent = "Deleting local WordFan data...";
   dictionaryDb?.close();
   dictionaryDb = null;
   loaded = false;
@@ -3398,19 +4062,20 @@ async function deleteAllLocalUserData() {
   return true;
 }
 
-async function replaceUserDataAtomically({ nextVocabularyItems, nextStudyEvents, kvValues }) {
-  const encryptedVocabulary = await Promise.all(
-    nextVocabularyItems.map(async (item) => ({
-      key: item.normalizedTerm,
-      value: await encryptValue(item),
-    })),
-  );
-  const encryptedEvents = await Promise.all(
-    nextStudyEvents.map(async (event) => ({
-      key: event.id,
-      value: await encryptValue(event),
-    })),
-  );
+async function replaceUserDataAtomically({
+  nextVocabularyItems,
+  nextStudyEvents,
+  nextSpellingItems = [],
+  nextSpellingEvents = [],
+  nextUserDictionary = [],
+  kvValues,
+}) {
+  const encrypt = (records, keyOf) => Promise.all(records.map(async (record) => ({ key: keyOf(record), value: await encryptValue(record) })));
+  const encryptedVocabulary = await encrypt(nextVocabularyItems, (item) => item.normalizedTerm);
+  const encryptedEvents = await encrypt(nextStudyEvents, (event) => event.id);
+  const encryptedSpelling = await encrypt(nextSpellingItems, (item) => item.normalizedTerm);
+  const encryptedSpellingEvents = await encrypt(nextSpellingEvents, (event) => event.id);
+  const encryptedUserDictionary = await encrypt(nextUserDictionary, (entry) => entry.normalizedTerm);
   const encryptedKv = await Promise.all(
     Object.entries(kvValues).map(async ([key, value]) => ({
       key,
@@ -3419,14 +4084,26 @@ async function replaceUserDataAtomically({ nextVocabularyItems, nextStudyEvents,
   );
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction([VOCABULARY_STORE, STUDY_EVENT_STORE, STORE], "readwrite");
+    const tx = db.transaction(
+      [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, STORE],
+      "readwrite",
+    );
     const vocabularyStore = tx.objectStore(VOCABULARY_STORE);
     const eventStore = tx.objectStore(STUDY_EVENT_STORE);
+    const spellingStore = tx.objectStore(SPELLING_STORE);
+    const spellingEventStore = tx.objectStore(SPELLING_EVENT_STORE);
+    const userDictStore = tx.objectStore(USER_DICTIONARY_STORE);
     const kvStore = tx.objectStore(STORE);
     vocabularyStore.clear();
     eventStore.clear();
+    spellingStore.clear();
+    spellingEventStore.clear();
+    userDictStore.clear();
     encryptedVocabulary.forEach((record) => vocabularyStore.put(record.value, record.key));
     encryptedEvents.forEach((record) => eventStore.put(record.value, record.key));
+    encryptedSpelling.forEach((record) => spellingStore.put(record.value, record.key));
+    encryptedSpellingEvents.forEach((record) => spellingEventStore.put(record.value, record.key));
+    encryptedUserDictionary.forEach((record) => userDictStore.put(record.value, record.key));
     encryptedKv.forEach((record) => kvStore.put(record.value, record.key));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -3438,12 +4115,27 @@ function driveNameQuery(fileName) {
   return encodeURIComponent(`name = '${String(fileName).replace(/'/g, "\\'")}' and trashed = false`);
 }
 
+function jsonByteLength(value) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value ?? [])).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function recordSyncSummary(driveResult) {
+  const driveBytes = Number(driveResult?.size ?? 0) || 0;
   lastSyncSummary = {
     at: nowIso(),
-    words: vocabularyItems.length,
-    sizeBytes: Number(driveResult?.size ?? 0) || 0,
+    vocabWords: vocabularyItems.length,
+    spellingWords: spellingItems.length,
+    vocabBytes: jsonByteLength(vocabularyItems),
+    spellingBytes: jsonByteLength(spellingItems),
+    driveBytes,
     driveModifiedTime: driveResult?.modifiedTime ?? null,
+    // Legacy fields kept for back-compat with older readers.
+    words: vocabularyItems.length,
+    sizeBytes: driveBytes,
   };
   await saveValue("lastSyncSummary", lastSyncSummary).catch(() => {});
 }
@@ -3609,16 +4301,24 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   const nextHistoryItems = Array.isArray(snapshot.historyItems) ? snapshot.historyItems : [];
   const nextVocabularyItems = mergeVocabularySources(Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [], []);
   const nextStudyEvents = mergeStudyEventSources(Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents : [], []);
-  const nextAutosaveEnabled = Boolean(snapshot.autosaveEnabled ?? true);
+  const nextSpellingItems = mergeVocabularySources(Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems : [], []);
+  const nextSpellingEvents = mergeStudyEventSources(Array.isArray(snapshot.spellingEvents) ? snapshot.spellingEvents : [], []);
+  const nextUserDictionary = mergeUserDictionarySources(Array.isArray(snapshot.userDictionary) ? snapshot.userDictionary : [], []);
+  const nextOnReturnAction = normalizeOnReturnAction(snapshot.onReturnAction ?? (snapshot.autosaveEnabled === false ? "none" : "vocabulary"));
+  const nextSpeakOnReturn = Boolean(snapshot.speakOnReturn ?? false);
   const nextTheme = THEME_IDS.includes(snapshot.theme) ? snapshot.theme : DEFAULT_THEME;
   const nextLastMetrics = snapshot.lastMetrics ?? lastMetrics;
 
   await replaceUserDataAtomically({
     nextVocabularyItems,
     nextStudyEvents,
+    nextSpellingItems,
+    nextSpellingEvents,
+    nextUserDictionary,
     kvValues: {
       history: nextHistoryItems,
-      autosaveEnabled: nextAutosaveEnabled,
+      onReturnAction: nextOnReturnAction,
+      speakOnReturn: nextSpeakOnReturn,
       theme: nextTheme,
       lastMetrics: nextLastMetrics,
     },
@@ -3627,11 +4327,15 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   historyItems = nextHistoryItems;
   vocabularyItems = nextVocabularyItems;
   studyEvents = nextStudyEvents;
-  autosaveEnabled = nextAutosaveEnabled;
+  spellingItems = nextSpellingItems;
+  spellingEvents = nextSpellingEvents;
+  userDictionaryEntries = nextUserDictionary;
+  onReturnAction = nextOnReturnAction;
+  speakOnReturn = nextSpeakOnReturn;
   theme = nextTheme;
   lastMetrics = nextLastMetrics;
 
-  autosaveToggle.checked = autosaveEnabled;
+  syncSettingsControls();
   applyTheme(theme);
   renderHistory();
   renderVocabulary();
@@ -3639,6 +4343,16 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   renderHistoryChart();
   renderMetrics();
   renderAppMenu();
+}
+
+function normalizeOnReturnAction(value) {
+  return ["vocabulary", "spelling", "both", "none"].includes(value) ? value : "vocabulary";
+}
+
+// Reflect current settings state into the menu controls (guarded — controls may not exist yet).
+function syncSettingsControls() {
+  if (onReturnSelect) onReturnSelect.value = onReturnAction;
+  if (speakOnReturnToggle) speakOnReturnToggle.checked = speakOnReturn;
 }
 
 async function restoreFromGoogleDrive() {
@@ -3747,6 +4461,10 @@ const AI_CHAT_CACHE_LIMIT = 200;
 // Insertion order doubles as LRU recency: read promotes, write appends, evict from the front.
 const aiChatCache = new Map();
 const aiChatPrefetchInFlight = new Set();
+// Saved/looked-up terms waiting for a prefetch slot. A FIFO queue (not a hard
+// drop) so a burst of saves all get warmed, just a couple at a time.
+const aiChatPrefetchQueue = [];
+const AI_CHAT_PREFETCH_CONCURRENCY = 2;
 let aiChatCachePersistHandle = 0;
 let aiChatState = { term: null, payload: null, tab: "explain", quizMode: "mcq", loading: false, error: null };
 
@@ -3818,19 +4536,33 @@ function prefetchAiChat(term) {
   if (!getGeminiApiKey()) return;
   if (!navigator.onLine) return;
   if (aiChatCache.has(key) || aiChatPrefetchInFlight.has(key)) return;
-  if (aiChatPrefetchInFlight.size >= 2) return;
-  aiChatPrefetchInFlight.add(key);
-  void requestAiChatPayload(clean)
-    .then((payload) => {
-      aiChatCacheSet(clean, payload);
-      if (!aiChatPanel.hidden && aiChatState.term && aiChatState.term.toLowerCase() === key && !aiChatState.payload) {
-        aiChatState.payload = payload;
-        aiChatState.loading = false;
-        renderAiChatPanel();
-      }
-    })
-    .catch(() => {})
-    .finally(() => aiChatPrefetchInFlight.delete(key));
+  if (aiChatPrefetchQueue.some((entry) => entry.key === key)) return;
+  aiChatPrefetchQueue.push({ key, term: clean });
+  drainAiChatPrefetchQueue();
+}
+
+// Run at most AI_CHAT_PREFETCH_CONCURRENCY requests at once; the rest wait in
+// aiChatPrefetchQueue and start as slots free up, so bursts of saves all warm.
+function drainAiChatPrefetchQueue() {
+  while (aiChatPrefetchInFlight.size < AI_CHAT_PREFETCH_CONCURRENCY && aiChatPrefetchQueue.length) {
+    const next = aiChatPrefetchQueue.shift();
+    if (!next || aiChatCache.has(next.key) || aiChatPrefetchInFlight.has(next.key)) continue;
+    aiChatPrefetchInFlight.add(next.key);
+    void requestAiChatPayload(next.term)
+      .then((payload) => {
+        aiChatCacheSet(next.term, payload);
+        if (!aiChatPanel.hidden && aiChatState.term && aiChatState.term.toLowerCase() === next.key && !aiChatState.payload) {
+          aiChatState.payload = payload;
+          aiChatState.loading = false;
+          renderAiChatPanel();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        aiChatPrefetchInFlight.delete(next.key);
+        drainAiChatPrefetchQueue();
+      });
+  }
 }
 
 function prettyGeminiModelLabel(id) {
@@ -4476,6 +5208,11 @@ function exportState() {
     historyItems,
     vocabularyItems,
     studyEvents,
+    spellingItems,
+    spellingEvents,
+    userDictionary: userDictionaryEntries,
+    onReturnAction,
+    speakOnReturn,
     autosaveEnabled,
     lastMetrics,
   };
@@ -4642,9 +5379,9 @@ async function showLoginGateIfNeeded() {
     await saveValue("loginGateAcknowledged", true);
     return;
   }
-  const body = "Sign in with your Google account so WordLover can sync your vocabulary to Drive and unlock Gemini AI example sentences. You can skip and use the app locally only.";
+  const body = "Sign in with your Google account so WordFan can sync your vocabulary to Drive and unlock Gemini AI example sentences. You can skip and use the app locally only.";
   const choice = await showModal({
-    title: "Welcome to WordLover",
+    title: "Welcome to WordFan",
     body,
     submitText: "Sign in with Google",
     cancelText: "Skip sign-in for now",
@@ -4689,6 +5426,7 @@ async function init() {
       if (Array.isArray(entry) && entry.length === 2 && entry[0]) aiChatCache.set(String(entry[0]), entry[1]);
     }
   }
+  studyGoals = normalizeStudyGoals(await loadValue("studyGoals", null));
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));
@@ -4731,8 +5469,21 @@ async function init() {
   const legacyStudyEvents = await loadValue("studyEvents", []);
   studyEvents = mergeStudyEventSources(studyEventRecords, legacyStudyEvents);
   if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await persistStudyEvents();
-  autosaveEnabled = await loadValue("autosaveEnabled", true);
-  autosaveToggle.checked = autosaveEnabled;
+  spellingItems = mergeVocabularySources(await loadAllRecordValues(SPELLING_STORE), []);
+  spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
+  userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
+  // Migrate the old autosave toggle into the new On Return action.
+  const storedOnReturn = await loadValue("onReturnAction", null);
+  if (storedOnReturn) {
+    onReturnAction = normalizeOnReturnAction(storedOnReturn);
+  } else {
+    const legacyAutosave = await loadValue("autosaveEnabled", true);
+    onReturnAction = legacyAutosave ? "vocabulary" : "none";
+    await saveValue("onReturnAction", onReturnAction);
+  }
+  speakOnReturn = Boolean(await loadValue("speakOnReturn", false));
+  autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
+  syncSettingsControls();
   lastMetrics = await loadValue("lastMetrics", null);
   await ensureDailyCheckpoint();
   renderHistory();
@@ -4750,11 +5501,14 @@ async function init() {
     dictionaryState.textContent = "Installed";
     dictionarySource.textContent = "Opening local copy";
   }
-  result.innerHTML = installed
-    ? ""
-    : `<p class="muted">Install the local dictionary once while online. After that, search can work from the local copy.</p>`;
-  loadButton.hidden = installed;
-  if (installed) setSearchLoading(true);
+  // Auto-install/load: open the local copy if present, or download it automatically when online.
+  // The manual button only appears as a fallback (offline on a device that never installed).
+  const canAutoLoad = installed || navigator.onLine;
+  result.innerHTML = canAutoLoad
+    ? `<p class="muted">${installed ? "Opening dictionary…" : "Installing dictionary (one-time download)…"}</p>`
+    : `<p class="muted">Connect to the internet once to install the dictionary. After that it works offline.</p>`;
+  loadButton.hidden = canAutoLoad;
+  if (canAutoLoad) setSearchLoading(true);
 
   if ("serviceWorker" in navigator) {
     try {
@@ -4782,10 +5536,14 @@ async function init() {
     void showLoginGateIfNeeded();
   }
   const smokeTerm = params.get("q");
-  if (installed && !smokeTerm) {
-    void ensureDictionaryLoaded().then(() => {
+  if (canAutoLoad && !smokeTerm) {
+    void ensureDictionaryLoaded().then((ok) => {
+      if (!ok) return;
       termInput.focus();
+      // Clear the transient "Opening dictionary…" placeholder once it's ready;
+      // otherwise it lingers under the search box even though nothing is loading.
       if (termInput.value.trim()) void runLookup();
+      else result.innerHTML = `<p class="muted">${DEFAULT_RESULT_HINT}</p>`;
     });
   }
 
@@ -4798,7 +5556,47 @@ loadButton.addEventListener("click", async () => {
   if (await ensureDictionaryLoaded()) await runLookup();
 });
 
+// Only word-input characters are accepted; stray symbol presses (assumed
+// mistaken touches) are dropped. Space and apostrophe are kept so phrases
+// ("take off") and contractions ("o'clock") still work. The CJK range mirrors
+// HAN_RE exactly so any character that routes to the Chinese→English lookup is
+// also accepted here (Chinese terms can be typed and translated).
+const DISALLOWED_TERM_CHARS = /[^A-Za-z0-9 '\-㐀-鿿]/g;
+function sanitizeTermInput() {
+  const before = termInput.value;
+  const cleaned = before.replace(DISALLOWED_TERM_CHARS, "");
+  if (cleaned === before) return;
+  const caret = termInput.selectionStart ?? cleaned.length;
+  const keptBeforeCaret = before.slice(0, caret).replace(DISALLOWED_TERM_CHARS, "").length;
+  termInput.value = cleaned;
+  try {
+    termInput.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
+  } catch {
+    /* setSelectionRange not available in this state */
+  }
+}
+
+// A second Return on unchanged text clears the field (set in the keydown handler).
+let lastReturnValue = null;
+
+function clearSearchField() {
+  termInput.value = "";
+  renderSuggestions([]);
+  currentResult = null;
+  scheduleAutosave(null);
+  result.innerHTML = `<p class="muted">${DEFAULT_RESULT_HINT}</p>`;
+  aiDetailPanel.hidden = true;
+  aiDetailPanel.innerHTML = "";
+  pendingAiDetail = null;
+  lastReturnValue = null;
+  clearPendingUndo();
+  renderRecentSearchPopover();
+}
+
 termInput.addEventListener("input", () => {
+  sanitizeTermInput();
+  lastReturnValue = null; // any edit re-arms first-Return (save) behavior
+  clearPendingUndo(); // editing means we've moved on from the just-saved word
   hideRecentSearchPopover();
   window.clearTimeout(debounceHandle);
   window.clearTimeout(suggestionHandle);
@@ -4812,8 +5610,24 @@ termInput.addEventListener("keydown", (event) => {
     window.clearTimeout(debounceHandle);
     hideRecentSearchPopover();
     renderSuggestions([]);
-    void runLookup({ commit: true });
+    const value = termInput.value;
+    if (lastReturnValue !== null && value === lastReturnValue && value.trim()) {
+      // Second consecutive Return on unchanged text: clear, ready for the next word.
+      clearSearchField();
+      return;
+    }
+    lastReturnValue = value;
+    void handleReturnKey();
   }
+});
+
+termInput.addEventListener("input", () => {
+  termInput.classList.remove("input-invalid");
+});
+
+undoSaveButton?.addEventListener("click", () => {
+  void performUndoSave();
+  termInput.focus();
 });
 
 termInput.addEventListener("focus", () => {
@@ -4842,8 +5656,17 @@ recentSearchPopover.addEventListener("click", (event) => {
 });
 
 result.addEventListener("click", (event) => {
-  if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm") {
-    void saveVocabularyItem(currentResult, "manual");
+  if (event.target instanceof HTMLButtonElement && event.target.id === "saveCurrentTerm" && currentResult) {
+    void saveWithUndo(currentResult, ["vocabulary"], "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "addToSpelling" && currentResult) {
+    void saveWithUndo(currentResult, ["spelling"], "manual");
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement && event.target.id === "addToDictionary") {
+    const typed = event.target.dataset.typedTerm ?? termInput.value;
+    void showAddToDictionaryDialog(typed);
     return;
   }
   if (event.target instanceof HTMLButtonElement && event.target.id === "showAiDetails" && currentResult) {
@@ -4878,6 +5701,7 @@ vocabularyList.addEventListener("click", (event) => {
   const action = button.dataset.action;
   if (action === "vocab-filter") {
     vocabularyView = {
+      ...vocabularyView,
       filter: button.dataset.filter ?? "all",
       page: 0,
       selectedTerm: null,
@@ -4887,7 +5711,7 @@ vocabularyList.addEventListener("click", (event) => {
     return;
   }
   if (action === "vocab-summary") {
-    vocabularyView = { filter: "summary", page: 0, selectedTerm: null, query: "" };
+    vocabularyView = { ...vocabularyView, filter: "summary", page: 0, selectedTerm: null, query: "" };
     renderVocabulary();
     return;
   }
@@ -4914,12 +5738,12 @@ vocabularyList.addEventListener("click", (event) => {
     renderSuggestions([]);
     void runLookup({ commit: true });
   }
-  if (action === "edit") void editVocabularyItem(term);
+  if (action === "edit") void editBrowserItem(term);
   if (action === "archive") {
     vocabularyView.selectedTerm = null;
-    void setVocabularyArchived(term, true);
+    void archiveBrowserItem(term, true);
   }
-  if (action === "restore") void setVocabularyArchived(term, false);
+  if (action === "restore") void archiveBrowserItem(term, false);
 });
 
 vocabularyList.addEventListener("input", (event) => {
@@ -4932,23 +5756,19 @@ vocabularyList.addEventListener("input", (event) => {
 });
 
 clearSearchButton.addEventListener("click", () => {
-  termInput.value = "";
-  renderSuggestions([]);
-  currentResult = null;
-  scheduleAutosave(null);
-  result.innerHTML = `<p class="muted">Type a term to search.</p>`;
-  aiDetailPanel.hidden = true;
-  aiDetailPanel.innerHTML = "";
-  pendingAiDetail = null;
+  clearSearchField();
   termInput.focus();
-  renderRecentSearchPopover();
 });
 
-autosaveToggle.addEventListener("change", async () => {
-  autosaveEnabled = autosaveToggle.checked;
-  await saveValue("autosaveEnabled", autosaveEnabled);
-  if (!autosaveEnabled) scheduleAutosave(null);
-  if (currentResult) renderResult(currentResult);
+onReturnSelect?.addEventListener("change", async () => {
+  onReturnAction = normalizeOnReturnAction(onReturnSelect.value);
+  autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
+  await saveValue("onReturnAction", onReturnAction);
+});
+
+speakOnReturnToggle?.addEventListener("change", async () => {
+  speakOnReturn = speakOnReturnToggle.checked;
+  await saveValue("speakOnReturn", speakOnReturn);
 });
 
 startReviewButton.addEventListener("click", () => {
@@ -4957,6 +5777,55 @@ startReviewButton.addEventListener("click", () => {
 
 studyNewWordButton.addEventListener("click", () => {
   void startNewWordStudy();
+});
+
+startSpellingReviewButton?.addEventListener("click", () => {
+  startSpellingReview();
+});
+
+startSpellingPracticeMoreButton?.addEventListener("click", () => {
+  startSpellingPractice();
+});
+
+for (const tab of todayTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.todayTrack;
+    if (!next || next === todayTrack) return;
+    todayTrack = next;
+    hideQuiz();
+    hideSpellingReview();
+    renderStudyStats();
+  });
+}
+
+for (const tab of vocabularyTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.vocabTrack;
+    if (!next || next === vocabularyView.track) return;
+    vocabularyView = { ...vocabularyView, track: next, filter: "summary", page: 0, selectedTerm: null };
+    renderVocabulary();
+  });
+}
+
+spellingReviewPanel.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.id === "spellingInput") {
+    event.preventDefault();
+    // After a wrong answer, a second Return acts like the Retry button.
+    if (activeSpellingSession?.awaitingRetry) retrySpelling();
+    else checkSpelling();
+  }
+});
+
+spellingReviewPanel.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  if (target.closest("[data-spelling-retry]")) {
+    retrySpelling();
+    return;
+  }
+  if (target.closest("[data-spelling-close]")) {
+    hideSpellingReview();
+  }
 });
 
 quizPanel.addEventListener("click", (event) => {
@@ -5182,6 +6051,15 @@ for (const button of historyGranularityButtons) {
   });
 }
 
+for (const tab of historyTrackTabs) {
+  tab.addEventListener("click", () => {
+    const next = tab.dataset.historyTrack;
+    if (!next || next === historyView.track) return;
+    historyView = { ...historyView, track: next };
+    renderHistoryChart();
+  });
+}
+
 historyPrevButton.addEventListener("click", () => {
   shiftHistoryAnchor(-1);
 });
@@ -5222,6 +6100,8 @@ runReviewAutomationButton.addEventListener("click", () => {
 window.addEventListener("online", () => {
   renderAppMenu();
   void runAutoSync("online");
+  // If the dictionary never installed (first run was offline), install it now that we're online.
+  if (!loaded) void ensureDictionaryLoaded();
 });
 window.addEventListener("offline", renderAppMenu);
 window.addEventListener("focus", () => {
@@ -5270,6 +6150,256 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// --- Study goals & suggestions ------------------------------------------------
+// Quantified, user-set targets (vocabulary track) plus derived coaching tips.
+// Only the targets are persisted (key "studyGoals", carried in the sync
+// snapshot); all progress and suggestions are computed at render time from
+// vocabularyItems + studyEvents, so there is no extra state to keep consistent.
+const GOALS_PERIODS = ["day", "week", "month"];
+const STARTER_GOALS = { newPerDay: 5, reviewsPerDay: 15, masteredPerWeek: 5, masteredPerMonth: 20 };
+let studyGoals = null;
+let goalsPeriod = "day";
+
+const goalsPanel = document.querySelector("#goalsPanel");
+const goalsSummary = document.querySelector("#goalsSummary");
+const goalsPeriodTabsWrap = document.querySelector("#goalsPeriodTabs");
+const goalsPeriodTabs = document.querySelectorAll("[data-goals-period]");
+const goalsProgressEl = document.querySelector("#goalsProgress");
+const goalsSuggestionsEl = document.querySelector("#goalsSuggestions");
+const setGoalsButton = document.querySelector("#setGoalsButton");
+
+function clampInt(value, min, max, fallback) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeStudyGoals(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    version: 1,
+    track: "vocabulary",
+    newPerDay: clampInt(raw.newPerDay, 1, 100, STARTER_GOALS.newPerDay),
+    reviewsPerDay: clampInt(raw.reviewsPerDay, 1, 300, STARTER_GOALS.reviewsPerDay),
+    masteredPerWeek: clampInt(raw.masteredPerWeek, 1, 200, STARTER_GOALS.masteredPerWeek),
+    masteredPerMonth: clampInt(raw.masteredPerMonth, 1, 800, STARTER_GOALS.masteredPerMonth),
+    createdAt: raw.createdAt ?? nowIso(),
+    updatedAt: raw.updatedAt ?? nowIso(),
+    source: raw.source ?? "wizard",
+  };
+}
+
+// Median of the per-day counts over the last `days` calendar days that had any
+// activity, so the wizard's suggested defaults reflect the learner's own rhythm.
+function medianDailyCount(timestamps, days = 14) {
+  const now = appNowMs();
+  const buckets = new Map();
+  for (const ts of timestamps) {
+    const t = Date.parse(ts ?? "");
+    if (!Number.isFinite(t) || now - t > days * NORMAL_DAY_MS) continue;
+    const key = new Date(t).toISOString().slice(0, 10);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+  const counts = [...buckets.values()].sort((a, b) => a - b);
+  if (!counts.length) return 0;
+  const mid = Math.floor(counts.length / 2);
+  return counts.length % 2 ? counts[mid] : Math.round((counts[mid - 1] + counts[mid]) / 2);
+}
+
+function goalDefaults() {
+  const newPerDay = clampInt(medianDailyCount(vocabularyItems.map((i) => i.savedAt)), 3, 20, 0) || STARTER_GOALS.newPerDay;
+  const reviewsPerDay = clampInt(medianDailyCount(studyEvents.filter((e) => e.type === "review").map((e) => e.occurredAt)), 5, 40, 0) || STARTER_GOALS.reviewsPerDay;
+  const masteredPerWeek = Math.max(3, Math.round(newPerDay * 5 * 0.7));
+  return { newPerDay, reviewsPerDay, masteredPerWeek, masteredPerMonth: masteredPerWeek * 4 };
+}
+
+// [startMs, endMs) bounds for the active period, anchored to app (debug-aware) now.
+function periodRange(period) {
+  const now = new Date(appNowMs());
+  if (period === "week") {
+    const start = startOfWeekMonday(now);
+    return { startMs: start.getTime(), endMs: addDays(start, 7).getTime(), days: 7 };
+  }
+  if (period === "month") {
+    const start = startOfMonth(now);
+    const end = addMonths(start, 1);
+    return { startMs: start.getTime(), endMs: end.getTime(), days: Math.round((end.getTime() - start.getTime()) / NORMAL_DAY_MS) };
+  }
+  const start = startOfDay(now);
+  return { startMs: start.getTime(), endMs: addDays(start, 1).getTime(), days: 1 };
+}
+
+function inRange(value, startMs, endMs) {
+  const t = Date.parse(value ?? "");
+  return Number.isFinite(t) && t >= startMs && t < endMs;
+}
+
+function vocabStatsForRange(startMs, endMs) {
+  return {
+    newSaved: vocabularyItems.filter((i) => inRange(i.savedAt, startMs, endMs)).length,
+    reviewed: studyEvents.filter((e) => e.type === "review" && inRange(e.occurredAt, startMs, endMs)).length,
+    mastered: vocabularyItems.filter((i) => inRange(i.review?.masteredAt, startMs, endMs)).length,
+  };
+}
+
+function goalTargetsForPeriod(period) {
+  if (!studyGoals) return null;
+  if (period === "week") {
+    return { new: studyGoals.newPerDay * 7, reviews: studyGoals.reviewsPerDay * 7, mastered: studyGoals.masteredPerWeek };
+  }
+  if (period === "month") {
+    const days = periodRange("month").days;
+    return { new: studyGoals.newPerDay * days, reviews: studyGoals.reviewsPerDay * days, mastered: studyGoals.masteredPerMonth };
+  }
+  return { new: studyGoals.newPerDay, reviews: studyGoals.reviewsPerDay, mastered: Math.max(1, Math.round(studyGoals.masteredPerWeek / 7)) };
+}
+
+// Hour-of-day (0-23) with the most past reviews, or null if there isn't enough
+// data or no hour clearly stands out.
+function bestReviewHour(minSample = 20) {
+  const hours = new Array(24).fill(0);
+  let total = 0;
+  for (const e of studyEvents) {
+    if (e.type !== "review") continue;
+    const t = Date.parse(e.occurredAt ?? "");
+    if (!Number.isFinite(t)) continue;
+    hours[new Date(t).getHours()] += 1;
+    total += 1;
+  }
+  if (total < minSample) return null;
+  let best = 0;
+  for (let h = 1; h < 24; h += 1) if (hours[h] > hours[best]) best = h;
+  if (hours[best] < (total / 24) * 1.5) return null;
+  return best;
+}
+
+function formatHour(h) {
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}${h < 12 ? "am" : "pm"}`;
+}
+
+// One short, specific, numeric tip per applicable rule, ranked by impact.
+function computeGoalSuggestions() {
+  if (!studyGoals) return [];
+  const out = [];
+  const period = goalsPeriod;
+  const { startMs, days } = periodRange(period);
+  const range = periodRange(period);
+  const stats = vocabStatsForRange(range.startMs, range.endMs);
+  const targets = goalTargetsForPeriod(period);
+  const now = appNowMs();
+  const elapsedDays = Math.min(days, Math.max(1, Math.ceil((now - startMs) / NORMAL_DAY_MS)));
+  const remainingDays = Math.max(0, days - elapsedDays);
+  const label = period === "day" ? "today" : period === "week" ? "this week" : "this month";
+  const gap = (done, target) => Math.max(0, target - done);
+
+  const newGap = gap(stats.newSaved, targets.new);
+  if (newGap > 0) {
+    const perDay = remainingDays > 0 ? Math.ceil(newGap / remainingDays) : newGap;
+    out.push(period === "day"
+      ? `Add ${newGap} more new word${newGap === 1 ? "" : "s"} ${label} to hit your goal.`
+      : `Add ${newGap} more new words ${label} — about ${perDay}/day for the next ${remainingDays} day${remainingDays === 1 ? "" : "s"}.`);
+  }
+  const reviewGap = gap(stats.reviewed, targets.reviews);
+  if (reviewGap > 0) {
+    const perDay = remainingDays > 0 ? Math.ceil(reviewGap / remainingDays) : reviewGap;
+    out.push(period === "day"
+      ? `Do ${reviewGap} more review${reviewGap === 1 ? "" : "s"} ${label} to hit your goal.`
+      : `Do ${reviewGap} more reviews ${label} — about ${perDay}/day for the next ${remainingDays} day${remainingDays === 1 ? "" : "s"}.`);
+  }
+  if (targets.mastered > 0 && period !== "day") {
+    const expectedByNow = targets.mastered * (elapsedDays / days);
+    if (stats.mastered + 0.5 < expectedByNow) {
+      const behind = Math.ceil(expectedByNow - stats.mastered);
+      out.push(`You're ${behind} behind the mastery pace ${label}; extra reviews now will catch you up.`);
+    } else if (stats.mastered >= targets.mastered) {
+      out.push(`Mastery goal for ${label} reached — nice work.`);
+    }
+  }
+  const due = getDueVocabularyItems().length;
+  if (due > studyGoals.reviewsPerDay * 1.5) {
+    out.push(`${due} reviews are due. Clearing the backlog matters more than adding new words right now.`);
+  }
+  const hour = bestReviewHour();
+  if (hour !== null) {
+    out.push(`You review most around ${formatHour(hour)} — that's a good time to do reviews or add words.`);
+  }
+  if (!out.length) out.push(`You're on track for ${label}. Keep it up!`);
+  return out;
+}
+
+function renderGoalBar(label, done, target) {
+  const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
+  const met = target > 0 && done >= target;
+  return `
+    <div class="goal-metric${met ? " met" : ""}">
+      <div class="goal-metric-head"><span>${escapeHtml(label)}</span><strong>${done} / ${target}</strong></div>
+      <div class="goal-bar"><span style="width:${pct}%"></span></div>
+    </div>`;
+}
+
+function renderGoalsPanel() {
+  if (!goalsPanel) return;
+  for (const tab of goalsPeriodTabs) {
+    tab.setAttribute("aria-selected", String(tab.dataset.goalsPeriod === goalsPeriod));
+  }
+  if (!studyGoals) {
+    if (goalsPeriodTabsWrap) goalsPeriodTabsWrap.hidden = true;
+    if (setGoalsButton) setGoalsButton.textContent = "Set goals";
+    goalsSummary.textContent = "Set a daily goal and get tips to reach it.";
+    goalsProgressEl.innerHTML = `<p class="muted goals-cta">No goals yet — tap “Set goals”. Takes about 20 seconds.</p>`;
+    goalsSuggestionsEl.innerHTML = "";
+    return;
+  }
+  if (goalsPeriodTabsWrap) goalsPeriodTabsWrap.hidden = false;
+  if (setGoalsButton) setGoalsButton.textContent = "Edit goals";
+  const { startMs, endMs } = periodRange(goalsPeriod);
+  const stats = vocabStatsForRange(startMs, endMs);
+  const targets = goalTargetsForPeriod(goalsPeriod);
+  goalsSummary.textContent = `Targets: ${studyGoals.newPerDay} new + ${studyGoals.reviewsPerDay} reviews/day, ${studyGoals.masteredPerWeek} mastered/week.`;
+  goalsProgressEl.innerHTML =
+    renderGoalBar("New words", stats.newSaved, targets.new) +
+    renderGoalBar("Reviews", stats.reviewed, targets.reviews) +
+    renderGoalBar("Mastered", stats.mastered, targets.mastered);
+  const suggestions = computeGoalSuggestions();
+  goalsSuggestionsEl.innerHTML = `<h3 class="goals-tips-title">Suggestions</h3><ul>${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`;
+}
+
+async function saveStudyGoals(next, source = "wizard") {
+  const now = nowIso();
+  const created = studyGoals?.createdAt ?? now;
+  studyGoals = normalizeStudyGoals({ ...next, createdAt: created, updatedAt: now, source });
+  await saveValue("studyGoals", studyGoals);
+  renderGoalsPanel();
+  return studyGoals;
+}
+
+async function openGoalsWizard() {
+  const base = studyGoals ?? goalDefaults();
+  const suggested = goalDefaults();
+  const values = await showModal({
+    title: studyGoals ? "Edit your goals" : "Set your study goals",
+    body: `Pick targets you can keep. Based on your recent activity we suggest about ${suggested.newPerDay} new words and ${suggested.reviewsPerDay} reviews per day.`,
+    submitText: "Save goals",
+    fields: [
+      { id: "newPerDay", label: "New words per day", type: "number", value: String(base.newPerDay), hint: `Suggested: ${suggested.newPerDay}` },
+      { id: "reviewsPerDay", label: "Reviews per day", type: "number", value: String(base.reviewsPerDay), hint: `Suggested: ${suggested.reviewsPerDay}` },
+      { id: "masteredPerWeek", label: "Words mastered per week", type: "number", value: String(base.masteredPerWeek), hint: `Suggested: ${suggested.masteredPerWeek}` },
+      { id: "masteredPerMonth", label: "Words mastered per month", type: "number", value: String(base.masteredPerMonth), hint: `Suggested: ${suggested.masteredPerMonth}` },
+    ],
+  });
+  if (!values) return null;
+  return saveStudyGoals(values, "wizard");
+}
+
+setGoalsButton?.addEventListener("click", () => { void openGoalsWizard(); });
+for (const tab of goalsPeriodTabs) {
+  tab.addEventListener("click", () => {
+    goalsPeriod = GOALS_PERIODS.includes(tab.dataset.goalsPeriod) ? tab.dataset.goalsPeriod : "day";
+    renderGoalsPanel();
+  });
+}
+
 window.WordLoverApp = {
   ensureDictionaryLoaded,
   lookupTerm,
@@ -5293,9 +6423,85 @@ window.WordLoverApp = {
   setDebugMode,
   getDueVocabularyItems,
   setAutosaveEnabled: async (enabled) => {
+    onReturnAction = enabled ? "vocabulary" : "none";
     autosaveEnabled = Boolean(enabled);
-    autosaveToggle.checked = autosaveEnabled;
-    await saveValue("autosaveEnabled", autosaveEnabled);
+    syncSettingsControls();
+    await saveValue("onReturnAction", onReturnAction);
+  },
+  setOnReturnAction: async (action) => {
+    onReturnAction = normalizeOnReturnAction(action);
+    autosaveEnabled = onReturnAction === "vocabulary" || onReturnAction === "both";
+    syncSettingsControls();
+    await saveValue("onReturnAction", onReturnAction);
+  },
+  setSpeakOnReturn: async (enabled) => {
+    speakOnReturn = Boolean(enabled);
+    syncSettingsControls();
+    await saveValue("speakOnReturn", speakOnReturn);
+  },
+  saveSpellingItem,
+  getSpelling: () => spellingItems,
+  getSpellingEvents: () => spellingEvents,
+  getUserDictionary: () => userDictionaryEntries,
+  addUserDictionaryEntry: showAddToDictionaryDialog,
+  addUserDictionaryEntryForTest: async (word, english, chinese) => {
+    const now = nowIso();
+    const entry = {
+      normalizedTerm: normalizeTerm(word),
+      word,
+      phonetic: "",
+      englishMeanings: [english ?? ("meaning of " + word)],
+      chineseMeanings: [chinese ?? ("中文" + word)],
+      createdAt: now,
+      updatedAt: now,
+      syncVersion: 1,
+    };
+    userDictionaryEntries = [entry, ...userDictionaryEntries.filter((e) => e.normalizedTerm !== entry.normalizedTerm)];
+    await persistUserDictionaryEntry(entry);
+    return entry;
+  },
+  getDueSpellingItems,
+  spelling: {
+    ratingFromRetries,
+    getDue: getDueSpellingItems,
+    getPractice: getPracticeSpellingItems,
+    start: startSpellingReview,
+    startPractice: startSpellingPractice,
+    retry: retrySpelling,
+    close: hideSpellingReview,
+    // Test/programmatic answer: types into the field and submits a strict check.
+    answer: (text) => {
+      const input = spellingReviewPanel.querySelector("#spellingInput");
+      if (!input || input.disabled) return false;
+      input.value = String(text);
+      checkSpelling();
+      return true;
+    },
+    state: () => activeSpellingSession ? {
+      index: activeSpellingSession.index,
+      retries: activeSpellingSession.retries,
+      consecutive: activeSpellingSession.consecutive,
+      completed: activeSpellingSession.completed,
+      queueLength: activeSpellingSession.queue.length,
+      currentTerm: currentSpellingItem()?.term ?? null,
+      awaitingRetry: activeSpellingSession.awaitingRetry,
+      pausing: Boolean(activeSpellingSession.pausing),
+    } : null,
+    // Directly seed a spelling item for tests (bypasses dictionary lookup).
+    addItemForTest: async (term, english, chinese) => {
+      await saveSpellingItem({
+        status: "found",
+        term,
+        entryType: term.includes(" ") ? "phrase" : "word",
+        phonetic: "",
+        englishMeanings: [english ?? ("meaning of " + term)],
+        englishMeaningSource: "test",
+        chineseMeanings: [chinese ?? ("中文" + term)],
+        tags: [],
+      }, "test");
+      return getSpellingItem(term);
+    },
+    setTodayTrack: (track) => { todayTrack = track === "spelling" ? "spelling" : "vocabulary"; renderStudyStats(); },
   },
   runAutomatedSearchSmoke,
   applyTheme: (next) => {
@@ -5305,6 +6511,16 @@ window.WordLoverApp = {
     return theme;
   },
   getThemeIds: () => THEME_IDS.slice(),
+  getGoals: () => studyGoals,
+  setGoals: (goals) => saveStudyGoals(goals ?? {}, "test"),
+  goalDefaults,
+  goalSuggestions: () => computeGoalSuggestions(),
+  openGoalsWizard,
+  setGoalsPeriod: (period) => {
+    goalsPeriod = GOALS_PERIODS.includes(period) ? period : "day";
+    renderGoalsPanel();
+    return goalsPeriod;
+  },
   aiChat: {
     cacheGet: aiChatCacheGet,
     cacheSet: aiChatCacheSet,

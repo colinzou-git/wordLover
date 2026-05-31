@@ -175,12 +175,24 @@ def main() -> int:
                         term: w, normalizedTerm: w, english: ['meaning of ' + w], chinese: ['中文' + w], phonetic: ''
                     });
                 }
-                return window.WordLoverApp.getVocabulary().length;
+                // Also seed the spelling track + user dictionary to verify they sync too (SP-9).
+                await window.WordLoverApp.spelling.addItemForTest('justice', 'fairness', '公正');
+                await window.WordLoverApp.spelling.addItemForTest('kindle', 'to light', '点燃');
+                await window.WordLoverApp.addUserDictionaryEntryForTest('zorptastic', 'made-up word', '生造词');
+                return {
+                    vocab: window.WordLoverApp.getVocabulary().length,
+                    spelling: window.WordLoverApp.getSpelling().length,
+                    userDict: window.WordLoverApp.getUserDictionary().length,
+                };
             }"""
         )
-        print(f"device A local words: {added}", flush=True)
-        if added != 9:
-            failures.append(f"device A should have 9 words, has {added}")
+        print(f"device A local: {added}", flush=True)
+        if added.get("vocab") != 9:
+            failures.append(f"device A should have 9 vocab words, has {added.get('vocab')}")
+        if added.get("spelling") != 2:
+            failures.append(f"device A should have 2 spelling words, has {added.get('spelling')}")
+        if added.get("userDict") != 1:
+            failures.append(f"device A should have 1 user-dictionary entry, has {added.get('userDict')}")
 
         a_sync = page_a.evaluate(
             """async () => {
@@ -229,6 +241,22 @@ def main() -> int:
             if b_sync.get("count") != 9:
                 failures.append(f"device B should have 9 words after sync, has {b_sync.get('count')}")
 
+        # Device B must also receive the spelling list and the user dictionary (SP-9 sync).
+        b_tracks = page_b.evaluate(
+            """() => ({
+                spelling: window.WordLoverApp.getSpelling().length,
+                userDict: window.WordLoverApp.getUserDictionary().length,
+                hasJustice: window.WordLoverApp.getSpelling().some(i => i.term === 'justice'),
+            })"""
+        )
+        print(f"device B tracks: {b_tracks}", flush=True)
+        if b_tracks.get("spelling") != 2:
+            failures.append(f"device B should receive 2 spelling words, got {b_tracks.get('spelling')}")
+        if b_tracks.get("userDict") != 1:
+            failures.append(f"device B should receive 1 user-dictionary entry, got {b_tracks.get('userDict')}")
+        if not b_tracks.get("hasJustice"):
+            failures.append("device B spelling list missing the synced word 'justice'")
+
         # Regression: the Sync-now BUTTON result must survive renderAppMenu() (not be overwritten).
         btn = page_b.evaluate(
             """async () => {
@@ -255,14 +283,18 @@ def main() -> int:
         )
         print(f"device B sync report: {report}", flush=True)
         summary = report.get("summary") or {}
-        if summary.get("words") != 9:
-            failures.append(f"sync summary words should be 9, got {summary.get('words')}")
-        if not summary.get("sizeBytes"):
-            failures.append(f"sync summary should record Drive size, got {summary.get('sizeBytes')}")
+        if summary.get("vocabWords") != 9:
+            failures.append(f"sync summary vocabWords should be 9, got {summary.get('vocabWords')}")
+        if summary.get("spellingWords") != 2:
+            failures.append(f"sync summary spellingWords should be 2, got {summary.get('spellingWords')}")
+        if not summary.get("vocabBytes") or not summary.get("spellingBytes"):
+            failures.append(f"sync summary should record per-list sizes, got vocab={summary.get('vocabBytes')} spelling={summary.get('spellingBytes')}")
+        if not summary.get("driveBytes"):
+            failures.append(f"sync summary should record Drive size, got {summary.get('driveBytes')}")
         if not summary.get("at"):
             failures.append("sync summary should record a timestamp")
         details = report.get("details") or ""
-        for token in ("Last sync", "9 word", "on Drive"):
+        for token in ("Last sync", "Vocabulary: 9 word", "Spelling: 2 word", "Drive backup"):
             if token not in details:
                 failures.append(f"sync details missing '{token}': {details!r}")
         ctx_b.close()
