@@ -100,14 +100,14 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260531-v65";
+const APP_VERSION = "0.6.2-product.20260601-v74";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v65";
+const SHELL_CACHE_VERSION = "wordlover-shell-v74";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
-const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue"];
+const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
 const DEFAULT_THEME = "sunrise";
 const DEFAULT_FONT_SCALE = 1;
 const FONT_SCALE_MIN = 0.9;
@@ -973,7 +973,7 @@ function renderResult(data) {
     const normalizedTyped = typed ? normalizeTerm(typed) : "";
     const canSaveAnyway = Boolean(normalizedTyped) && TERM_RE.test(normalizedTyped);
     result.innerHTML = `
-      <p class="muted">No exact dictionary match found.</p>
+      <p class="muted">This word does not match any dictionary words.</p>
       ${data.alternatives?.length ? renderResultList(data.alternatives, "Closest matches") : ""}
       ${canSaveAnyway ? `
         <div class="result-actions">
@@ -1964,7 +1964,7 @@ async function showUnknownTermDialog(typedTerm) {
   if (existing && !existing.archivedAt) {
     await showModal({
       title: "Already saved",
-      body: `"${term}" is already in your vocabulary list. Edit it from the Vocabulary panel instead.`,
+      body: `"${term}" is already in your vocabulary list. Edit it from the Word Lists panel instead.`,
       submitText: "OK",
       allowCancel: false,
     });
@@ -2264,9 +2264,10 @@ function getVocabularyStats(items = activeBrowserItems()) {
 }
 
 function getVocabularyViewTitle(filter) {
-  if (filter === "all") return "All vocabulary";
+  const label = vocabularyView.track === "spelling" ? "spelling words" : "memorize words";
+  if (filter === "all") return `All ${label}`;
   if (FSRS_RATING_LABELS[filter]) return `${FSRS_RATING_LABELS[filter]} words`;
-  return "Vocabulary";
+  return vocabularyView.track === "spelling" ? "Spelling words" : "Memorize words";
 }
 
 function vocabularyItemMatchesQuery(item, query) {
@@ -2303,7 +2304,7 @@ function renderVocabularyStats(stats) {
   const archivedText = stats.archived.length ? `, ${stats.archived.length} archived` : "";
   vocabularySummary.textContent = `${total} saved${archivedText}`;
   return `
-    <div class="vocab-stats" aria-label="Vocabulary status counts">
+    <div class="vocab-stats" aria-label="Memorize status counts">
       <button class="vocab-stat total" type="button" data-action="vocab-filter" data-filter="all">
         <span>Total</span>
         <strong>${total}</strong>
@@ -2315,6 +2316,26 @@ function renderVocabularyStats(stats) {
         </button>
       `).join("")}
     </div>
+  `;
+}
+
+function renderVocabularyFilter(query, mode = "summary") {
+  return `
+    <label class="vocab-filter-field">
+      <span>Filter</span>
+      <div class="vocab-search-row">
+        <input
+          id="vocabSearchInput"
+          type="search"
+          autocomplete="off"
+          placeholder="Search by word, meaning, or pronunciation"
+          value="${escapeHtml(query)}"
+          aria-label="Filter saved words"
+          data-vocab-filter-mode="${escapeHtml(mode)}"
+        />
+        ${query ? `<button class="secondary-button" type="button" data-action="vocab-clear-query">Clear</button>` : ""}
+      </div>
+    </label>
   `;
 }
 
@@ -2375,19 +2396,9 @@ function renderVocabularyBrowser(stats) {
           <strong>${escapeHtml(getVocabularyViewTitle(filter))}</strong>
           <p class="muted">${rangeStart}-${rangeEnd} of ${items.length}${query ? ` matching "${escapeHtml(query)}"` : ""}</p>
         </div>
-        <button class="secondary-button" type="button" data-action="vocab-summary">Stats</button>
+        <button class="secondary-button" type="button" data-action="vocab-summary">Back</button>
       </div>
-      <div class="vocab-search-row">
-        <input
-          id="vocabSearchInput"
-          type="search"
-          autocomplete="off"
-          placeholder="Filter by term, meaning, or pronunciation"
-          value="${escapeHtml(query)}"
-          aria-label="Filter saved vocabulary"
-        />
-        ${query ? `<button class="secondary-button" type="button" data-action="vocab-clear-query">Clear</button>` : ""}
-      </div>
+      ${renderVocabularyFilter(query, "list")}
       ${pageItems.length ? `
         <ol class="vocab-word-list" start="${start + 1}">
           ${pageItems.map((item) => {
@@ -2431,11 +2442,12 @@ function renderVocabulary() {
   }
   const isSpelling = vocabularyView.track === "spelling";
   const stats = getVocabularyStats();
+  const query = vocabularyView.query ?? "";
   if (!stats.active.length && !stats.archived.length) {
     vocabularySummary.textContent = isSpelling ? "No spelling words yet." : "No saved terms yet.";
     vocabularyList.innerHTML = isSpelling
-      ? `<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
-      : `<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
+      ? `${renderVocabularyFilter(query)}<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
+      : `${renderVocabularyFilter(query)}<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
     return;
   }
   if (vocabularyView.filter !== "summary" && vocabularyView.selectedTerm) {
@@ -2444,8 +2456,8 @@ function renderVocabulary() {
   }
   const statsHtml = renderVocabularyStats(stats);
   vocabularyList.innerHTML = vocabularyView.filter === "summary"
-    ? statsHtml
-    : `${statsHtml}${renderVocabularyBrowser(stats)}`;
+    ? `${renderVocabularyFilter(query)}${statsHtml}`
+    : renderVocabularyBrowser(stats);
 }
 
 function getDueVocabularyItems() {
@@ -3031,7 +3043,9 @@ function checkSpelling() {
   const input = spellingReviewPanel.querySelector("#spellingInput");
   const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
   if (!input || !feedback) return;
-  const value = input.value; // strict: no trim, case-sensitive
+  const value = input.value.trim(); // Ignore accidental edge spaces; spelling remains case-sensitive.
+  if (!value) return;
+  if (value !== input.value) input.value = value;
   if (value === item.term) {
     activeSpellingSession.consecutive += 1;
     // Show the result (with the correct word) and keep the typed text on screen for a beat so the
@@ -3487,7 +3501,7 @@ async function handleReturnKey() {
   const value = termInput.value;
   if (!value.trim()) return;
   const data = await runLookup({ commit: true });
-  if (speakOnReturn) speakTerm(data?.status === "found" ? data.term : value);
+  if (speakOnReturn && data?.status === "found") speakTerm(data.term);
   if (onReturnAction === "vocabulary") {
     if (data?.status === "found") await saveWithUndo(data, ["vocabulary"], "return");
   } else if (onReturnAction === "spelling") {
@@ -5607,6 +5621,21 @@ function sanitizeTermInput() {
   }
 }
 
+const DISALLOWED_SPELLING_CHARS = /[^A-Za-z0-9-]/g;
+function sanitizeSpellingInput(input) {
+  const before = input.value;
+  const cleaned = before.replace(DISALLOWED_SPELLING_CHARS, "");
+  if (cleaned === before) return;
+  const caret = input.selectionStart ?? cleaned.length;
+  const keptBeforeCaret = before.slice(0, caret).replace(DISALLOWED_SPELLING_CHARS, "").length;
+  input.value = cleaned;
+  try {
+    input.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
+  } catch {
+    /* setSelectionRange not available in this state */
+  }
+}
+
 // A second Return on unchanged text clears the field (set in the keydown handler).
 let lastReturnValue = null;
 
@@ -5713,7 +5742,7 @@ result.addEventListener("click", (event) => {
     void (async () => {
       const saved = await showUnknownTermDialog(typed);
       if (saved) {
-        result.innerHTML = `<p class="muted">Saved <strong>${escapeHtml(saved.term)}</strong> with your meaning. Open it from the Vocabulary panel to review or edit.</p>`;
+        result.innerHTML = `<p class="muted">Saved <strong>${escapeHtml(saved.term)}</strong> with your meaning. Open it from the Word Lists panel to review or edit.</p>`;
       }
     })();
     return;
@@ -5782,6 +5811,7 @@ vocabularyList.addEventListener("input", (event) => {
   vocabularyView.query = event.target.value;
   vocabularyView.page = 0;
   vocabularyView.selectedTerm = null;
+  if (vocabularyView.filter === "summary" && vocabularyView.query.trim()) vocabularyView.filter = "all";
   renderVocabulary();
   preserveVocabSearchFocus();
 });
@@ -5844,6 +5874,12 @@ spellingReviewPanel.addEventListener("keydown", (event) => {
     // After a wrong answer, a second Return acts like the Retry button.
     if (activeSpellingSession?.awaitingRetry) retrySpelling();
     else checkSpelling();
+  }
+});
+
+spellingReviewPanel.addEventListener("input", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.id === "spellingInput") {
+    sanitizeSpellingInput(event.target);
   }
 });
 

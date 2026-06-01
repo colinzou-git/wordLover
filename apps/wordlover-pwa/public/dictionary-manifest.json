@@ -1,18 +1,18 @@
 {
   "app": "wordlover",
-  "dictionaryDataVersion": "2026.05.26.slim",
+  "dictionaryDataVersion": "2026.06.01.slim",
   "variant": "slim",
-  "generatedAt": "2026-05-27T00:42:03Z",
+  "generatedAt": "2026-06-01T15:56:12Z",
   "rowCount": 100000,
   "sqlite": {
     "path": "dictionary.sqlite",
-    "bytes": 33366016,
-    "sha256": "04c121fc13f172b9bead19020e6143eccbd6be33db242ce2edc34e19e1a171ac"
+    "bytes": 32239616,
+    "sha256": "6a3566037b9a05d3738c366cfb535bbacc99aae937873b1977ba568c403c6f7b"
   },
   "zstd": {
     "path": "dictionary.sqlite.zst",
-    "bytes": 15224940,
-    "sha256": "4754b03eddb2d62aec7676fb03a1dc9af6cdfb96ef7b360f8b478d04c7b1215d",
+    "bytes": 14770323,
+    "sha256": "a184a5397835d578e8c96c4fc1366401dfcdc011b5739a6501018e8ede95cff8",
     "level": 3
   },
   "sources": [
