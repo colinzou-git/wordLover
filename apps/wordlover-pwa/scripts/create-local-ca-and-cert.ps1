@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$certDir = Join-Path $PSScriptRoot "certs"
+$certDir = Join-Path (Split-Path -Parent $PSScriptRoot) "certs"
 New-Item -ItemType Directory -Force $certDir | Out-Null
 
 function Write-PemFile {
