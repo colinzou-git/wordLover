@@ -1143,7 +1143,7 @@ h1 {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 16px;
 }
@@ -2079,6 +2079,10 @@ li button {
   fill: #56b4e9;
 }
 
+.history-chart .h-bar-known {
+  fill: #8b5cf6;
+}
+
 .history-chart .h-bar-up {
   fill: #009e73;
 }
@@ -2118,6 +2122,10 @@ li button {
 
 .history-legend i.dot-reviewed {
   background: #56b4e9;
+}
+
+.history-legend i.dot-known {
+  background: #8b5cf6;
 }
 
 .history-legend i.dot-up {

@@ -66,6 +66,7 @@ const studySummary = document.querySelector("#studySummary");
 const statNewSaved = document.querySelector("#statNewSaved");
 const statReviewed = document.querySelector("#statReviewed");
 const statMastered = document.querySelector("#statMastered");
+const statKnown = document.querySelector("#statKnown");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
 const studyOneMoreLevelSelect = document.querySelector("#studyOneMoreLevel");
@@ -98,6 +99,7 @@ const STUDY_EVENT_STORE = "studyEventRecords";
 const SPELLING_STORE = "spellingRecords";
 const SPELLING_EVENT_STORE = "spellingEventRecords";
 const USER_DICTIONARY_STORE = "userDictionary";
+const KNOWN_STORE = "knownRecords";
 const CHECKPOINT_STORE = "checkpoints";
 const DICTIONARY_KEY = "dictionary.sqlite";
 const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
@@ -108,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v85";
+const APP_VERSION = "0.6.2-product.20260602-v86";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v85";
+const SHELL_CACHE_VERSION = "wordlover-shell-v86";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -200,6 +202,7 @@ let studyEvents = [];
 let spellingItems = [];
 let spellingEvents = [];
 let userDictionaryEntries = [];
+let knownWords = [];
 let autosaveEnabled = true;
 // "vocabulary" | "spelling" | "none" — what pressing Return saves (replaces the autosave toggle).
 let onReturnAction = "vocabulary";
@@ -413,7 +416,7 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 6);
+    const request = indexedDB.open(DB_NAME, 7);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
@@ -424,6 +427,7 @@ function openUserDb() {
       if (!db.objectStoreNames.contains(SPELLING_STORE)) db.createObjectStore(SPELLING_STORE);
       if (!db.objectStoreNames.contains(SPELLING_EVENT_STORE)) db.createObjectStore(SPELLING_EVENT_STORE);
       if (!db.objectStoreNames.contains(USER_DICTIONARY_STORE)) db.createObjectStore(USER_DICTIONARY_STORE);
+      if (!db.objectStoreNames.contains(KNOWN_STORE)) db.createObjectStore(KNOWN_STORE);
       if (!db.objectStoreNames.contains(CHECKPOINT_STORE)) db.createObjectStore(CHECKPOINT_STORE);
     };
     request.onsuccess = () => resolve(request.result);
@@ -507,6 +511,7 @@ function snapshotIntegrity(snapshot) {
   const vocabularyCount = Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems.length : 0;
   const studyEventCount = Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents.length : 0;
   const historyCount = Array.isArray(snapshot.historyItems) ? snapshot.historyItems.length : 0;
+  const knownCount = Array.isArray(snapshot.knownWords) ? snapshot.knownWords.length : 0;
   const normalizedTerms = (snapshot.vocabularyItems ?? [])
     .map((item) => item?.normalizedTerm ?? normalizeTerm(item?.term ?? ""))
     .filter(Boolean)
@@ -515,7 +520,8 @@ function snapshotIntegrity(snapshot) {
     vocabularyCount,
     studyEventCount,
     historyCount,
-    checksum: checksumText(JSON.stringify({ normalizedTerms, studyEventCount, historyCount })),
+    knownCount,
+    checksum: checksumText(JSON.stringify({ normalizedTerms, studyEventCount, historyCount, knownCount })),
   };
 }
 
@@ -823,6 +829,7 @@ function renderAppMenu() {
         `Last sync: ${when}`,
         `Vocabulary: ${s.vocabWords ?? s.words ?? 0} word(s) · ${formatBytes(s.vocabBytes)}`,
         `Spelling: ${s.spellingWords ?? 0} word(s) · ${formatBytes(s.spellingBytes)}`,
+        `Known: ${s.knownWords ?? 0} word(s) · ${formatBytes(s.knownBytes)}`,
         `Drive backup: ${formatBytes(s.driveBytes ?? s.sizeBytes)} total`,
       ];
       if (driveSyncState === "error" && lastSyncInfo?.error) lines.push(`Last attempt failed: ${lastSyncInfo.error}`);
@@ -1776,10 +1783,58 @@ function mergeHistoryItems(localItems, remoteItems) {
     .slice(0, 10);
 }
 
+function mergeKnownSources(localKnown, remoteKnown, activeTerms = new Set()) {
+  const byTerm = new Map();
+  for (const record of [...(remoteKnown ?? []), ...(localKnown ?? [])]) {
+    if (!record?.term && !record?.normalizedTerm) continue;
+    const normalizedTerm = record.normalizedTerm ?? normalizeTerm(record.term);
+    if (!normalizedTerm || activeTerms.has(normalizedTerm)) continue;
+    const knownAt = record.knownAt ?? record.updatedAt ?? nowIso();
+    const incoming = {
+      ...record,
+      term: record.term ?? normalizedTerm,
+      normalizedTerm,
+      knownAt,
+      updatedAt: record.updatedAt ?? knownAt,
+      source: record.source ?? "study-one-more",
+    };
+    const existing = byTerm.get(normalizedTerm);
+    if (!existing) {
+      byTerm.set(normalizedTerm, incoming);
+      continue;
+    }
+    const existingUpdated = Date.parse(existing.updatedAt ?? existing.knownAt ?? 0) || 0;
+    const incomingUpdated = Date.parse(incoming.updatedAt ?? incoming.knownAt ?? 0) || 0;
+    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? { ...existing, ...incoming } : { ...incoming, ...existing });
+  }
+  return [...byTerm.values()].sort((left, right) => (right.knownAt ?? "").localeCompare(left.knownAt ?? ""));
+}
+
+function activeStudyTermsFromItems(vocabulary = [], spelling = []) {
+  const terms = new Set();
+  for (const item of [...(vocabulary ?? []), ...(spelling ?? [])]) {
+    if (item?.normalizedTerm && !item.archivedAt) terms.add(item.normalizedTerm);
+  }
+  return terms;
+}
+
 function mergeSnapshots(localSnapshot, remoteSnapshot) {
   const localUpdated = Date.parse(localSnapshot?.exportedAt ?? 0) || 0;
   const remoteUpdated = Date.parse(remoteSnapshot?.exportedAt ?? 0) || 0;
   const newer = remoteUpdated > localUpdated ? remoteSnapshot : localSnapshot;
+  const mergedVocabularyItems = mergeVocabularySources(
+    localSnapshot.vocabularyItems ?? [],
+    remoteSnapshot?.vocabularyItems ?? [],
+  );
+  const mergedSpellingItems = mergeVocabularySources(
+    localSnapshot.spellingItems ?? [],
+    remoteSnapshot?.spellingItems ?? [],
+  );
+  const mergedKnownWords = mergeKnownSources(
+    localSnapshot.knownWords ?? [],
+    remoteSnapshot?.knownWords ?? [],
+    activeStudyTermsFromItems(mergedVocabularyItems, mergedSpellingItems),
+  );
   return {
     app: "wordlover",
     appVersion: localSnapshot.appVersion,
@@ -1787,18 +1842,12 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
     exportedAt: nowIso(),
     profile: localSnapshot.profile ?? remoteSnapshot?.profile ?? null,
     historyItems: mergeHistoryItems(localSnapshot.historyItems, remoteSnapshot?.historyItems),
-    vocabularyItems: mergeVocabularySources(
-      localSnapshot.vocabularyItems ?? [],
-      remoteSnapshot?.vocabularyItems ?? [],
-    ),
+    vocabularyItems: mergedVocabularyItems,
     studyEvents: mergeStudyEventSources(
       localSnapshot.studyEvents ?? [],
       remoteSnapshot?.studyEvents ?? [],
     ),
-    spellingItems: mergeVocabularySources(
-      localSnapshot.spellingItems ?? [],
-      remoteSnapshot?.spellingItems ?? [],
-    ),
+    spellingItems: mergedSpellingItems,
     spellingEvents: mergeStudyEventSources(
       localSnapshot.spellingEvents ?? [],
       remoteSnapshot?.spellingEvents ?? [],
@@ -1807,6 +1856,7 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
       localSnapshot.userDictionary ?? [],
       remoteSnapshot?.userDictionary ?? [],
     ),
+    knownWords: mergedKnownWords,
     autosaveEnabled: newer.autosaveEnabled ?? localSnapshot.autosaveEnabled ?? true,
     onReturnAction: newer.onReturnAction ?? localSnapshot.onReturnAction ?? (newer.autosaveEnabled === false ? "none" : "vocabulary"),
     speakOnReturn: newer.speakOnReturn ?? localSnapshot.speakOnReturn ?? false,
@@ -1920,6 +1970,23 @@ async function persistUserDictionaryEntry(entry) {
   await saveRecordValue(USER_DICTIONARY_STORE, entry.normalizedTerm, entry);
 }
 
+async function persistKnownWord(record) {
+  await saveRecordValue(KNOWN_STORE, record.normalizedTerm, record);
+  renderStudyStats();
+  renderHistoryChart();
+}
+
+async function deleteKnownWord(normalizedTerm) {
+  if (!normalizedTerm) return;
+  const before = knownWords.length;
+  knownWords = knownWords.filter((record) => record.normalizedTerm !== normalizedTerm);
+  if (knownWords.length !== before) {
+    await deleteRecordValue(KNOWN_STORE, normalizedTerm);
+    renderStudyStats();
+    renderHistoryChart();
+  }
+}
+
 function getUserDictionaryEntry(term) {
   const normalizedTerm = normalizeTerm(term);
   return userDictionaryEntries.find((entry) => entry.normalizedTerm === normalizedTerm) ?? null;
@@ -1987,6 +2054,7 @@ async function saveVocabularyItem(data, reason = "manual") {
   if (!data || data.status !== "found") return null;
   await getDeviceId();
   const normalizedTerm = normalizeTerm(data.term);
+  await deleteKnownWord(normalizedTerm);
   const existing = getVocabularyItem(data.term);
   const now = nowIso();
   if (existing) {
@@ -2016,6 +2084,7 @@ async function saveSpellingItem(data, reason = "manual") {
   if (!data || data.status !== "found") return null;
   await getDeviceId();
   const normalizedTerm = normalizeTerm(data.term);
+  await deleteKnownWord(normalizedTerm);
   const existing = getSpellingItem(data.term);
   const now = nowIso();
   if (existing) {
@@ -2729,14 +2798,15 @@ function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
   const mastered = vocabularyItems.filter((item) => isToday(item.review?.masteredAt)).length;
-  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, dueTodayCount: getDueTodayVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
+  const known = knownWords.filter((record) => isToday(record.knownAt)).length;
+  return { newSaved, reviewed, mastered, known, dueCount: getDueVocabularyItems().length, dueTodayCount: getDueTodayVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
 function getSpellingTodayStats() {
   const newSaved = spellingItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = spellingEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
   const mastered = spellingItems.filter((item) => isToday(item.review?.masteredAt)).length;
-  return { newSaved, reviewed, mastered, dueCount: getDueSpellingItems().length, dueTodayCount: getDueTodaySpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
+  return { newSaved, reviewed, mastered, known: 0, dueCount: getDueSpellingItems().length, dueTodayCount: getDueTodaySpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
 }
 
 function renderStudyStats() {
@@ -2748,6 +2818,7 @@ function renderStudyStats() {
   statNewSaved.textContent = String(stats.newSaved);
   statReviewed.textContent = String(stats.reviewed);
   statMastered.textContent = String(stats.mastered);
+  if (statKnown) statKnown.textContent = String(stats.known);
 
   startReviewButton.hidden = isSpelling;
   studyNewWordButton.hidden = isSpelling;
@@ -2868,6 +2939,7 @@ function summarizeHistoryBuckets(buckets) {
   const isSpelling = historyView.track === "spelling";
   const events = isSpelling ? spellingEvents : studyEvents;
   const items = isSpelling ? spellingItems : vocabularyItems;
+  const knownAt = isSpelling ? [] : knownWords.map((record) => Date.parse(record.knownAt)).filter(Number.isFinite);
   const previousRatingByTerm = new Map();
   const sortedReviews = events
     .filter((event) => event?.type === "review" && event.normalizedTerm && event.rating)
@@ -2896,7 +2968,8 @@ function summarizeHistoryBuckets(buckets) {
       previousRatingByTerm.set(event.normalizedTerm, event.rating);
     }
     const newWords = newWordSavedAt.filter((ms) => ms >= startMs && ms < endMs).length;
-    return { ...bucket, newWords, reviewed, leveledUp, leveledDown };
+    const known = knownAt.filter((ms) => ms >= startMs && ms < endMs).length;
+    return { ...bucket, newWords, reviewed, known, leveledUp, leveledDown };
   });
 }
 
@@ -2904,6 +2977,7 @@ function renderHistoryChartSvg(rows) {
   const series = [
     { key: "newWords", cls: "h-bar-new" },
     { key: "reviewed", cls: "h-bar-reviewed" },
+    { key: "known", cls: "h-bar-known" },
     { key: "leveledUp", cls: "h-bar-up" },
     { key: "leveledDown", cls: "h-bar-down" },
   ];
@@ -2986,7 +3060,7 @@ function renderHistoryChart() {
   const anchorDate = getHistoryAnchorDate();
   const buckets = computeHistoryBuckets(historyView.granularity, anchorDate);
   const rows = summarizeHistoryBuckets(buckets);
-  const totalActivity = rows.reduce((acc, row) => acc + row.newWords + row.reviewed, 0);
+  const totalActivity = rows.reduce((acc, row) => acc + row.newWords + row.reviewed + row.known, 0);
   if (totalActivity === 0) {
     historyChart.innerHTML = `<p class="h-empty muted">No activity in this period yet.</p>`;
   } else {
@@ -3005,12 +3079,13 @@ function renderHistoryChart() {
     (acc, row) => ({
       newWords: acc.newWords + row.newWords,
       reviewed: acc.reviewed + row.reviewed,
+      known: acc.known + row.known,
       leveledUp: acc.leveledUp + row.leveledUp,
       leveledDown: acc.leveledDown + row.leveledDown,
     }),
-    { newWords: 0, reviewed: 0, leveledUp: 0, leveledDown: 0 },
+    { newWords: 0, reviewed: 0, known: 0, leveledUp: 0, leveledDown: 0 },
   );
-  historyChartSummary.textContent = `${totals.newWords} new, ${totals.reviewed} reviewed, ${totals.leveledUp} level-up, ${totals.leveledDown} level-down.`;
+  historyChartSummary.textContent = `${totals.newWords} new, ${totals.reviewed} reviewed, ${totals.known} known, ${totals.leveledUp} level-up, ${totals.leveledDown} level-down.`;
   for (const button of historyGranularityButtons) {
     const selected = button.dataset.historyGranularity === historyView.granularity;
     button.setAttribute("aria-selected", String(selected));
@@ -3433,6 +3508,7 @@ function buildStudyOneMoreExclusionSets({
   vocabulary = vocabularyItems,
   spelling = spellingItems,
   events = studyEvents,
+  known = knownWords,
 } = {}) {
   const memorizeTerms = new Set();
   const spellingTerms = new Set();
@@ -3456,7 +3532,13 @@ function buildStudyOneMoreExclusionSets({
     if (event.type === "new-word-first-pass") firstTryPassed.add(event.normalizedTerm);
     if (introducedByStudyOneMore(event) && isToday(event.occurredAt)) introducedToday.add(event.normalizedTerm);
   }
-  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, archivedIgnoredOrMastered };
+  const knownTerms = new Set(
+    (known ?? [])
+      .map((record) => record?.normalizedTerm)
+      .filter(Boolean)
+      .filter((term) => !memorizeTerms.has(term) && !spellingTerms.has(term)),
+  );
+  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, knownTerms, archivedIgnoredOrMastered };
 }
 
 function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyOneMoreExclusionSets()) {
@@ -3475,6 +3557,7 @@ function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyO
     .filter((row) => candidateMatchesStudyOneMoreLevel(row, normalizedLevel))
     .filter((row) => !exclusions.memorizeTerms?.has(row.normalizedTerm))
     .filter((row) => !exclusions.spellingTerms?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.knownTerms?.has(row.normalizedTerm))
     .filter((row) => !exclusions.introducedToday?.has(row.normalizedTerm))
     .filter((row) => !exclusions.firstTryPassed?.has(row.normalizedTerm))
     .filter((row) => !exclusions.archivedIgnoredOrMastered?.has(row.normalizedTerm))
@@ -3524,14 +3607,19 @@ function renderStudyOneMoreMeaning(entry) {
 }
 
 function renderStudyOneMoreActions(passed) {
+  const message = passed
+    ? "Correct. Marked as Known, so WordFan will not suggest it again."
+    : "Not quite. You can add it for review or skip it for today.";
   return `
     <div class="study-one-more-result">
-      <p class="muted">${passed ? "Correct. You knew this one." : "Not quite. You can add it for review or skip it for today."}</p>
+      <p class="muted">${escapeHtml(message)}</p>
       <div class="quiz-actions">
         <button class="secondary-button" type="button" data-study-one-more-show="1">Show</button>
         <button type="button" data-study-one-more-add="memorize">Add to Memorize</button>
         <button class="secondary-button" type="button" data-study-one-more-add="spelling">Add to Spelling</button>
-        <button class="secondary-button" type="button" data-study-one-more-skip="1">Skip</button>
+        ${passed
+          ? `<button type="button" data-study-next="1">Study another</button><button class="secondary-button" type="button" data-quiz-close="1">Close</button>`
+          : `<button class="secondary-button" type="button" data-study-one-more-skip="1">Skip</button>`}
       </div>
     </div>
   `;
@@ -3576,6 +3664,29 @@ async function recordStudyOneMoreEvent(entry, type) {
   studyEvents.push(event);
   await persistStudyEvent(event);
   return event;
+}
+
+async function recordKnownWord(entry, responseMs) {
+  if (!entry?.normalizedTerm) return null;
+  await getDeviceId();
+  const knownAt = nowIso();
+  const record = markDebugRecord({
+    term: entry.term,
+    normalizedTerm: entry.normalizedTerm,
+    knownAt,
+    updatedAt: knownAt,
+    source: "study-one-more",
+    level: entry.studyLevel,
+    frequencyRank: entry.frequencyRank,
+    responseMs,
+    deviceId,
+    syncVersion: 1,
+  });
+  const merged = mergeKnownSources([record], knownWords, activeStudyTermsFromItems(vocabularyItems, spellingItems));
+  knownWords = merged;
+  const saved = knownWords.find((item) => item.normalizedTerm === record.normalizedTerm) ?? record;
+  await persistKnownWord(saved);
+  return saved;
 }
 
 function quizEntryFromVocabulary(item) {
@@ -3862,6 +3973,7 @@ async function handleQuizAnswer(index) {
   }
   if (activeQuiz.mode === "study-one-more") {
     activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
+    if (passed) await recordKnownWord(activeQuiz.entry, responseMs);
     quizPanel.querySelector(".study-one-more-card")?.insertAdjacentHTML("beforeend", renderStudyOneMoreActions(passed));
     return;
   }
@@ -4421,6 +4533,7 @@ function buildUserDataSnapshot() {
     spellingItems,
     spellingEvents,
     userDictionary: userDictionaryEntries,
+    knownWords,
     autosaveEnabled: onReturnAction === "vocabulary" || onReturnAction === "both",
     onReturnAction,
     speakOnReturn,
@@ -4544,6 +4657,7 @@ async function deleteAllLocalUserData() {
   vocabularyItems = [];
   studyEvents = [];
   historyItems = [];
+  knownWords = [];
 
   try {
     const db = await getUserDb();
@@ -4604,6 +4718,7 @@ async function replaceUserDataAtomically({
   nextSpellingItems = [],
   nextSpellingEvents = [],
   nextUserDictionary = [],
+  nextKnownWords = [],
   kvValues,
   allowDuringDecryptBlock = false,
 }) {
@@ -4614,6 +4729,7 @@ async function replaceUserDataAtomically({
   const encryptedSpelling = await encrypt(nextSpellingItems, (item) => item.normalizedTerm);
   const encryptedSpellingEvents = await encrypt(nextSpellingEvents, (event) => event.id);
   const encryptedUserDictionary = await encrypt(nextUserDictionary, (entry) => entry.normalizedTerm);
+  const encryptedKnown = await encrypt(nextKnownWords, (record) => record.normalizedTerm);
   const encryptedKv = await Promise.all(
     Object.entries(kvValues).map(async ([key, value]) => ({
       key,
@@ -4623,7 +4739,7 @@ async function replaceUserDataAtomically({
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(
-      [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, STORE],
+      [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, KNOWN_STORE, STORE],
       "readwrite",
     );
     const vocabularyStore = tx.objectStore(VOCABULARY_STORE);
@@ -4631,17 +4747,20 @@ async function replaceUserDataAtomically({
     const spellingStore = tx.objectStore(SPELLING_STORE);
     const spellingEventStore = tx.objectStore(SPELLING_EVENT_STORE);
     const userDictStore = tx.objectStore(USER_DICTIONARY_STORE);
+    const knownStore = tx.objectStore(KNOWN_STORE);
     const kvStore = tx.objectStore(STORE);
     vocabularyStore.clear();
     eventStore.clear();
     spellingStore.clear();
     spellingEventStore.clear();
     userDictStore.clear();
+    knownStore.clear();
     encryptedVocabulary.forEach((record) => vocabularyStore.put(record.value, record.key));
     encryptedEvents.forEach((record) => eventStore.put(record.value, record.key));
     encryptedSpelling.forEach((record) => spellingStore.put(record.value, record.key));
     encryptedSpellingEvents.forEach((record) => spellingEventStore.put(record.value, record.key));
     encryptedUserDictionary.forEach((record) => userDictStore.put(record.value, record.key));
+    encryptedKnown.forEach((record) => knownStore.put(record.value, record.key));
     encryptedKv.forEach((record) => kvStore.put(record.value, record.key));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -4667,8 +4786,10 @@ async function recordSyncSummary(driveResult) {
     at: nowIso(),
     vocabWords: vocabularyItems.length,
     spellingWords: spellingItems.length,
+    knownWords: knownWords.length,
     vocabBytes: jsonByteLength(vocabularyItems),
     spellingBytes: jsonByteLength(spellingItems),
+    knownBytes: jsonByteLength(knownWords),
     driveBytes,
     driveModifiedTime: driveResult?.modifiedTime ?? null,
     // Legacy fields kept for back-compat with older readers.
@@ -4882,6 +5003,11 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   const nextSpellingItems = mergeVocabularySources(Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems : [], []);
   const nextSpellingEvents = mergeStudyEventSources(Array.isArray(snapshot.spellingEvents) ? snapshot.spellingEvents : [], []);
   const nextUserDictionary = mergeUserDictionarySources(Array.isArray(snapshot.userDictionary) ? snapshot.userDictionary : [], []);
+  const nextKnownWords = mergeKnownSources(
+    Array.isArray(snapshot.knownWords) ? snapshot.knownWords : [],
+    [],
+    activeStudyTermsFromItems(nextVocabularyItems, nextSpellingItems),
+  );
   const nextOnReturnAction = normalizeOnReturnAction(snapshot.onReturnAction ?? (snapshot.autosaveEnabled === false ? "none" : "vocabulary"));
   const nextSpeakOnReturn = Boolean(snapshot.speakOnReturn ?? false);
   const nextTheme = THEME_IDS.includes(snapshot.theme) ? snapshot.theme : DEFAULT_THEME;
@@ -4893,6 +5019,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
     nextSpellingItems,
     nextSpellingEvents,
     nextUserDictionary,
+    nextKnownWords,
     allowDuringDecryptBlock,
     kvValues: {
       history: nextHistoryItems,
@@ -4909,6 +5036,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   spellingItems = nextSpellingItems;
   spellingEvents = nextSpellingEvents;
   userDictionaryEntries = nextUserDictionary;
+  knownWords = nextKnownWords;
   onReturnAction = nextOnReturnAction;
   speakOnReturn = nextSpeakOnReturn;
   theme = nextTheme;
@@ -6054,6 +6182,7 @@ async function init() {
   spellingItems = mergeVocabularySources(await loadAllRecordValues(SPELLING_STORE), []);
   spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
   userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
+  knownWords = mergeKnownSources(await loadAllRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
   // Migrate the old autosave toggle into the new On Return action.
   const storedOnReturn = await loadValue("onReturnAction", null);
   if (storedOnReturn) {
@@ -7093,6 +7222,9 @@ window.WordLoverApp = {
   showUnknownTermDialog,
   getVocabulary: () => vocabularyItems,
   getStudyEvents: () => studyEvents,
+  getKnownWords: () => knownWords,
+  buildUserDataSnapshot,
+  mergeSnapshots,
   startDueReview,
   startNewWordStudy,
   studyOneMore: {

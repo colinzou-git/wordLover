@@ -16,20 +16,21 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v85";
+const SHELL_CACHE_NAME = "wordlover-shell-v86";
 const APP_DB = "wordlover-user";
-const APP_DB_VERSION = 6;
+const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
 const APP_VOCABULARY_STORE = "vocabularyRecords";
 const APP_STUDY_EVENT_STORE = "studyEventRecords";
+const APP_KNOWN_STORE = "knownRecords";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-11",
+  "/app.js?v=20260602-12",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-11",
-  "/wordlover-config.js?v=20260602-11",
+  "/styles.css?v=20260602-12",
+  "/wordlover-config.js?v=20260602-12",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -45,7 +46,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-11",
+  "/automated-tests.js?v=20260602-12",
 ];
 
 let lastResults = null;
@@ -126,6 +127,7 @@ function openAppDb() {
       if (!db.objectStoreNames.contains(APP_KV_STORE)) db.createObjectStore(APP_KV_STORE);
       if (!db.objectStoreNames.contains(APP_VOCABULARY_STORE)) db.createObjectStore(APP_VOCABULARY_STORE);
       if (!db.objectStoreNames.contains(APP_STUDY_EVENT_STORE)) db.createObjectStore(APP_STUDY_EVENT_STORE);
+      if (!db.objectStoreNames.contains(APP_KNOWN_STORE)) db.createObjectStore(APP_KNOWN_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -800,17 +802,20 @@ async function runMainAppStudySmoke() {
       spelling = [],
       introducedToday = [],
       firstTryPassed = [],
+      known = [],
       archivedIgnoredOrMastered = [],
     } = {}) => ({
       memorizeTerms: new Set(memorize),
       spellingTerms: new Set(spelling),
       introducedToday: new Set(introducedToday),
       firstTryPassed: new Set(firstTryPassed),
+      knownTerms: new Set(known),
       archivedIgnoredOrMastered: new Set(archivedIgnoredOrMastered),
     });
     const studyOneMoreTests = {
       excludesMemorizeWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ memorize: ["echo"] })).normalizedTerm === "delta",
       excludesSpellingWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ spelling: ["echo"] })).normalizedTerm === "delta",
+      excludesKnownWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ known: ["echo"] })).normalizedTerm === "delta",
       excludesWordsStudiedToday: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ introducedToday: ["echo"] })).normalizedTerm === "delta",
       choosesLowestFrequencyRankCandidate: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets()).normalizedTerm === "echo",
       fallsBackWhenNoCefrExists: frameWindow.WordLoverApp.studyOneMore.levelFor({ word: "fallback", normalized_word: "fallback", frq: 2500 }) === "very_easy"
@@ -888,12 +893,14 @@ async function runMainAppStudySmoke() {
     click("#studyNewWord");
     const firstTerm = await waitForStudyOneMoreCard();
     const firstCandidate = frameWindow.WordLoverApp.studyOneMore.current();
-    const answerStudyOneMore = () => {
+    const answerStudyOneMore = (wantCorrect = true) => {
       const quiz = frameWindow.WordLoverApp.getActiveQuiz();
       if (!quiz || quiz.mode !== "study-one-more") throw new Error("Study One More did not start a quiz.");
       const correctIndex = quiz.options.findIndex((option) => option.correct);
       if (correctIndex < 0) throw new Error("Study One More quiz did not include a correct option.");
-      click(`#quizPanel [data-quiz-option="${correctIndex}"]`);
+      const wrongIndex = quiz.options.findIndex((option) => !option.correct);
+      const index = wantCorrect ? correctIndex : (wrongIndex >= 0 ? wrongIndex : correctIndex);
+      click(`#quizPanel [data-quiz-option="${index}"]`);
     };
     const firstQuizIpa = frameDocument.querySelector("#quizPanel .word-ipa")?.textContent?.trim() ?? "";
     if (!firstQuizIpa) throw new Error("Main app study smoke did not show IPA in the Study One More card.");
@@ -918,6 +925,29 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
+    const knownAfterCorrect = frameWindow.WordLoverApp
+      .getKnownWords()
+      .find((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
+    if (!knownAfterCorrect) throw new Error("Correct first-try Study One More did not create a Known record.");
+    if (knownAfterCorrect.review || knownAfterCorrect.fsrsCard) throw new Error("Known record should not include FSRS review state.");
+    if ((frameDocument.querySelector("#quizPanel")?.textContent ?? "").includes("Mastered")) {
+      throw new Error("Study One More Known result should not be labeled Mastered.");
+    }
+    const snapshotWithKnown = frameWindow.WordLoverApp.buildUserDataSnapshot();
+    if (!snapshotWithKnown.knownWords?.some((record) => record.normalizedTerm === firstCandidate.normalizedTerm)) {
+      throw new Error("Sync snapshot did not include Known records.");
+    }
+    const olderKnownAt = "2026-01-01T00:00:00.000Z";
+    const newerKnownAt = "2026-02-01T00:00:00.000Z";
+    const mergedKnownSnapshot = frameWindow.WordLoverApp.mergeSnapshots(
+      { ...snapshotWithKnown, knownWords: [{ ...knownAfterCorrect, knownAt: olderKnownAt, updatedAt: olderKnownAt }] },
+      { ...snapshotWithKnown, knownWords: [{ ...knownAfterCorrect, knownAt: newerKnownAt, updatedAt: newerKnownAt }] },
+    );
+    const mergedKnown = mergedKnownSnapshot.knownWords.find((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
+    if (mergedKnown?.knownAt !== newerKnownAt) throw new Error("Known merge should keep the newest knownAt/updatedAt record.");
+    const masteredBeforeManualAdd = frameWindow.WordLoverApp
+      .getVocabulary()
+      .filter((item) => item.review?.masteredAt).length;
     if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before tapping Show.");
     click("[data-study-one-more-show]");
     if (!frameDocument.querySelector("[data-study-one-more-meaning]") || !/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) {
@@ -930,7 +960,10 @@ async function runMainAppStudySmoke() {
         const saved = frameWindow.WordLoverApp
           .getVocabulary()
           .some((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
-        if (saved && frameDocument.querySelector("[data-study-next]")) {
+        const knownCleared = !frameWindow.WordLoverApp
+          .getKnownWords()
+          .some((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
+        if (saved && knownCleared && frameDocument.querySelector("[data-study-next]")) {
           window.clearInterval(timer);
           resolve();
           return;
@@ -941,12 +974,16 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
+    const masteredAfterManualAdd = frameWindow.WordLoverApp
+      .getVocabulary()
+      .filter((item) => item.review?.masteredAt).length;
+    if (masteredAfterManualAdd !== masteredBeforeManualAdd) throw new Error("Known should not count as Mastered.");
     click("[data-study-next]");
     const secondTerm = await waitForStudyOneMoreCard(firstTerm);
     const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
     if (!secondCandidate || secondCandidate.normalizedTerm === firstCandidate.normalizedTerm) throw new Error("Study One More repeated an introduced-today word.");
     click("[data-quiz-reveal]");
-    answerStudyOneMore();
+    answerStudyOneMore(false);
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
@@ -961,6 +998,10 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
+    const knownAfterWrong = frameWindow.WordLoverApp
+      .getKnownWords()
+      .some((record) => record.normalizedTerm === secondCandidate.normalizedTerm);
+    if (knownAfterWrong) throw new Error("Incorrect Study One More answer should not create a Known record.");
     click('[data-study-one-more-add="spelling"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
