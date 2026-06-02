@@ -46,6 +46,12 @@ const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
 const historyList = document.querySelector("#history");
 const recentSearchPopover = document.querySelector("#recentSearchPopover");
+import {
+  reviveFsrsCard,
+  scheduleFromFsrsRating as scheduleWithFsrs,
+  serializeFsrsCard,
+} from "./fsrs-scheduler.js";
+
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
 const dictionarySource = document.querySelector("#dictionarySource");
@@ -100,9 +106,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v76";
+const APP_VERSION = "0.6.2-product.20260602-v80";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v76";
+const SHELL_CACHE_VERSION = "wordlover-shell-v80";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -117,11 +123,11 @@ const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
 const REVIEW_REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000;
-const REVIEW_GRACE_WINDOW_MS = 12 * 60 * 60 * 1000;
 const DICTIONARY_ESTIMATED_BYTES = 40 * 1024 * 1024;
 const DICTIONARY_MANIFEST_URL = "/dictionary-manifest.json";
 const DICTIONARY_VERSION_KEY = "dictionaryDataVersion";
 const MAX_CHECKPOINTS = 5;
+const PRODUCTION_GOOGLE_CLIENT_ID = "665953045468-gem626o90ch863ktk2686fb58qa9ql31.apps.googleusercontent.com";
 const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
@@ -194,6 +200,12 @@ let vocabularyView = {
   selectedTerm: null,
   query: "",
   track: "vocabulary",
+  addedFrom: "",
+  addedTo: "",
+  reviewedFrom: "",
+  reviewedTo: "",
+  reviewCountMin: "",
+  reviewCountMax: "",
 };
 let todayTrack = "vocabulary";
 let historyView = {
@@ -747,7 +759,7 @@ function renderAppMenu() {
       ? "Session expired. Tap Sign in with Google to reconnect."
       : getGoogleClientId()
         ? "Ready to connect Google."
-        : "Tap Sign in with Google to add your OAuth client ID.";
+        : "Production OAuth client is not available.";
   googleSignInButton.disabled = Boolean(googleAuth.accessToken);
   // Sync/Restore stay available whenever an OAuth client is configured: clicking them will
   // silently refresh (or prompt) the Google session as needed, so the user never has to manually
@@ -794,14 +806,14 @@ function applyFontScale(nextScale) {
 function getGoogleClientId() {
   const override = String(googleClientIdOverride ?? "").trim();
   if (override) return override;
-  return String(CONFIG.googleClientId ?? "").trim();
+  return PRODUCTION_GOOGLE_CLIENT_ID;
 }
 
 async function promptForGoogleClientId() {
   const current = getGoogleClientId();
   const values = await showModal({
-    title: "Google OAuth client ID",
-    body: "Paste your Google Cloud OAuth 2.0 client ID (Web application). It is stored locally on this device. Tap the link below to create one in Google Cloud Console under APIs & Services -> Credentials.",
+    title: "Google OAuth client ID override",
+    body: "WordFan uses the production OAuth client by default. Paste another Web-application OAuth client ID only for sign-in diagnostics or local project testing.",
     helpLink: {
       label: "Open Google Cloud Console -> Credentials",
       url: "https://console.cloud.google.com/apis/credentials",
@@ -813,11 +825,11 @@ async function promptForGoogleClientId() {
         type: "text",
         value: current,
         placeholder: "1234567890-abc...apps.googleusercontent.com",
-        hint: "Add your app origin (e.g. http://127.0.0.1:4173 or https://your-lan-ip) as an Authorized JavaScript origin.",
+        hint: "For an override, add this app origin as an Authorized JavaScript origin on that OAuth client.",
         required: true,
       },
     ],
-    submitText: "Save and sign in",
+    submitText: "Save override",
     cancelText: "Cancel",
   });
   if (!values?.clientId) return null;
@@ -1594,27 +1606,30 @@ function summarizeLines(lines) {
 }
 
 function createFsrsCard(now = nowIso()) {
-  return {
-    due: now,
-    stability: 0,
-    difficulty: 5,
-    elapsedDays: 0,
-    scheduledDays: 0,
-    reps: 0,
-    lapses: 0,
-    state: "new",
-  };
+  return serializeFsrsCard(reviveFsrsCard(null, now));
+}
+
+function fallbackReviewDueAt(review = {}) {
+  const existingDue = review.dueAt ?? review.fsrsCard?.due;
+  if (existingDue && Number.isFinite(Date.parse(existingDue))) return existingDue;
+  if (review.masteredAt || review.fsrsCard?.state === "mastered") {
+    const basis = Date.parse(review.lastReviewedAt ?? review.masteredAt ?? nowIso());
+    const preferred = Number.isFinite(basis) ? basis + 90 * NORMAL_DAY_MS : 0;
+    const future = Math.max(preferred, appNowMs() + NORMAL_DAY_MS);
+    return new Date(future).toISOString();
+  }
+  return nowIso();
 }
 
 function normalizeReviewState(review = {}) {
-  const fsrsCard = {
-    ...createFsrsCard(review.dueAt ?? nowIso()),
-    ...(review.fsrsCard ?? {}),
-  };
+  const rawCard = review.fsrsCard && typeof review.fsrsCard === "object" ? { ...review.fsrsCard } : review.fsrsCard;
+  if (rawCard && review.dueAt) rawCard.due = review.dueAt;
+  const fsrsCard = serializeFsrsCard(reviveFsrsCard(rawCard, fallbackReviewDueAt(review)));
   return {
+    ...review,
     lastRating: review.lastRating ?? "again",
-    intervalDays: review.intervalDays ?? 0,
-    dueAt: review.dueAt ?? fsrsCard.due ?? nowIso(),
+    intervalDays: review.intervalDays ?? fsrsCard.scheduled_days ?? 0,
+    dueAt: fsrsCard.due,
     reviewCount: review.reviewCount ?? 0,
     lastReviewedAt: review.lastReviewedAt ?? null,
     masteredAt: review.masteredAt ?? null,
@@ -2286,10 +2301,59 @@ function vocabularyItemMatchesQuery(item, query) {
   return haystackParts.some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery));
 }
 
-function getVocabularyViewItems(filter, active, query = "") {
+function dateOnly(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isDateInRange(value, from, to) {
+  if (!from && !to) return true;
+  const date = dateOnly(value);
+  if (!date) return false;
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+}
+
+function parseOptionalCount(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function hasVocabularyAdvancedFilters(view = vocabularyView) {
+  return Boolean(
+    view.addedFrom ||
+    view.addedTo ||
+    view.reviewedFrom ||
+    view.reviewedTo ||
+    view.reviewCountMin !== "" ||
+    view.reviewCountMax !== "",
+  );
+}
+
+function vocabularyItemMatchesAdvancedFilters(item, view = vocabularyView) {
+  if (!isDateInRange(item.savedAt, view.addedFrom, view.addedTo)) return false;
+  if (!isDateInRange(item.review?.lastReviewedAt, view.reviewedFrom, view.reviewedTo)) return false;
+  let min = parseOptionalCount(view.reviewCountMin);
+  let max = parseOptionalCount(view.reviewCountMax);
+  if (min !== null && max !== null && min > max) [min, max] = [max, min];
+  const reviewCount = Number(item.review?.reviewCount ?? 0);
+  if (min !== null && reviewCount < min) return false;
+  if (max !== null && reviewCount > max) return false;
+  return true;
+}
+
+function getVocabularyViewItems(filter, active, query = "", view = vocabularyView) {
   const filteredByStatus = filter === "all" ? active : active.filter((item) => getVocabularyRating(item) === filter);
   const filteredByQuery = query ? filteredByStatus.filter((item) => vocabularyItemMatchesQuery(item, query)) : filteredByStatus;
-  return [...filteredByQuery].sort((left, right) => {
+  const filteredByAdvanced = filteredByQuery.filter((item) => vocabularyItemMatchesAdvancedFilters(item, view));
+  return [...filteredByAdvanced].sort((left, right) => {
     if (filter !== "all") {
       const rightChanged = getVocabularyRatingChangedAt(right);
       const leftChanged = getVocabularyRatingChangedAt(left);
@@ -2320,22 +2384,61 @@ function renderVocabularyStats(stats) {
 }
 
 function renderVocabularyFilter(query, mode = "summary") {
+  const hasAdvanced = hasVocabularyAdvancedFilters();
+  const hasText = Boolean(query.trim());
   return `
-    <label class="vocab-filter-field">
-      <span>Filter</span>
-      <div class="vocab-search-row">
-        <input
-          id="vocabSearchInput"
-          type="search"
-          autocomplete="off"
-          placeholder="Search by word, meaning, or pronunciation"
-          value="${escapeHtml(query)}"
-          aria-label="Filter saved words"
-          data-vocab-filter-mode="${escapeHtml(mode)}"
-        />
-        ${query ? `<button class="secondary-button" type="button" data-action="vocab-clear-query">Clear</button>` : ""}
+    <div class="vocab-filter-panel" data-vocab-filter-mode="${escapeHtml(mode)}">
+      <label class="vocab-filter-field vocab-filter-search">
+        <span>Filter</span>
+        <div class="vocab-search-row">
+          <input
+            id="vocabSearchInput"
+            type="search"
+            autocomplete="off"
+            placeholder="Search by word, meaning, or pronunciation"
+            value="${escapeHtml(query)}"
+            aria-label="Filter saved words"
+          />
+          ${hasText ? `<button class="secondary-button" type="button" data-action="vocab-clear-query">Clear</button>` : ""}
+        </div>
+      </label>
+      <div class="vocab-filter-grid" aria-label="Word list filters">
+        <fieldset class="vocab-filter-group">
+          <legend>Added date</legend>
+          <label>
+            <span>From</span>
+            <input id="vocabAddedFrom" type="date" value="${escapeHtml(vocabularyView.addedFrom)}" data-vocab-filter-key="addedFrom" />
+          </label>
+          <label>
+            <span>To</span>
+            <input id="vocabAddedTo" type="date" value="${escapeHtml(vocabularyView.addedTo)}" data-vocab-filter-key="addedTo" />
+          </label>
+        </fieldset>
+        <fieldset class="vocab-filter-group">
+          <legend>Last review/practice</legend>
+          <label>
+            <span>From</span>
+            <input id="vocabReviewedFrom" type="date" value="${escapeHtml(vocabularyView.reviewedFrom)}" data-vocab-filter-key="reviewedFrom" />
+          </label>
+          <label>
+            <span>To</span>
+            <input id="vocabReviewedTo" type="date" value="${escapeHtml(vocabularyView.reviewedTo)}" data-vocab-filter-key="reviewedTo" />
+          </label>
+        </fieldset>
+        <fieldset class="vocab-filter-group">
+          <legend>Review times</legend>
+          <label>
+            <span>Min</span>
+            <input id="vocabReviewCountMin" type="number" min="0" inputmode="numeric" value="${escapeHtml(vocabularyView.reviewCountMin)}" data-vocab-filter-key="reviewCountMin" />
+          </label>
+          <label>
+            <span>Max</span>
+            <input id="vocabReviewCountMax" type="number" min="0" inputmode="numeric" value="${escapeHtml(vocabularyView.reviewCountMax)}" data-vocab-filter-key="reviewCountMax" />
+          </label>
+        </fieldset>
       </div>
-    </label>
+      ${hasAdvanced ? `<button class="secondary-button vocab-clear-filters" type="button" data-action="vocab-clear-advanced-filters">Clear date/count filters</button>` : ""}
+    </div>
   `;
 }
 
@@ -2377,6 +2480,7 @@ function renderVocabularyBrowser(stats) {
   const filter = vocabularyView.filter === "summary" ? "all" : vocabularyView.filter;
   const query = vocabularyView.query ?? "";
   const items = getVocabularyViewItems(filter, stats.active, query);
+  const hasAdvanced = hasVocabularyAdvancedFilters();
   const maxPage = Math.max(0, Math.ceil(items.length / VOCABULARY_PAGE_SIZE) - 1);
   if (vocabularyView.page > maxPage) vocabularyView.page = maxPage;
   if (vocabularyView.page < 0) vocabularyView.page = 0;
@@ -2385,8 +2489,8 @@ function renderVocabularyBrowser(stats) {
   const selectedItem = vocabularyView.selectedTerm ? getBrowserItem(vocabularyView.selectedTerm) : null;
   const rangeStart = items.length ? start + 1 : 0;
   const rangeEnd = Math.min(start + VOCABULARY_PAGE_SIZE, items.length);
-  const emptyMessage = query
-    ? `No matches for "${escapeHtml(query)}" in this status.`
+  const emptyMessage = query || hasAdvanced
+    ? `No words match these filters.`
     : `No words in this status yet.`;
 
   return `
@@ -2436,6 +2540,16 @@ function preserveVocabSearchFocus() {
   }
 }
 
+function preserveVocabFilterFocus(id) {
+  const input = id ? vocabularyList.querySelector(`#${CSS.escape(id)}`) : null;
+  if (!(input instanceof HTMLInputElement)) return;
+  input.focus();
+  if (input.type === "search" || input.type === "number") {
+    const position = input.value.length;
+    input.setSelectionRange(position, position);
+  }
+}
+
 function renderVocabulary() {
   for (const tab of vocabularyTrackTabs) {
     tab.setAttribute("aria-selected", String(tab.dataset.vocabTrack === vocabularyView.track));
@@ -2462,17 +2576,22 @@ function renderVocabulary() {
 
 function getDueVocabularyItems() {
   const now = appNowMs();
-  const cutoff = now + REVIEW_GRACE_WINDOW_MS;
   return vocabularyItems
     .filter((item) => {
-      if (item.archivedAt || item.review?.masteredAt) return false;
-      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= cutoff;
+      if (item.archivedAt) return false;
+      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= now;
     })
     .sort((left, right) => {
       const leftDue = Date.parse(left.review?.dueAt ?? "0") || 0;
       const rightDue = Date.parse(right.review?.dueAt ?? "0") || 0;
       return leftDue - rightDue;
     });
+}
+
+function getDueTodayVocabularyItems() {
+  const end = startOfDay(new Date(appNowMs()));
+  end.setDate(end.getDate() + 1);
+  return vocabularyItems.filter((item) => !item.archivedAt && (!item.review?.dueAt || Date.parse(item.review.dueAt) < end.getTime()));
 }
 
 function getPracticeVocabularyItems() {
@@ -2503,27 +2622,32 @@ function ensureVocabularyReviewStates() {
 
 function getDueSpellingItems() {
   const now = appNowMs();
-  const cutoff = now + REVIEW_GRACE_WINDOW_MS;
   return spellingItems
     .filter((item) => {
-      if (item.archivedAt || item.review?.masteredAt) return false;
-      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= cutoff;
+      if (item.archivedAt) return false;
+      return !item.review?.dueAt || Date.parse(item.review.dueAt) <= now;
     })
     .sort((left, right) => (Date.parse(left.review?.dueAt ?? "0") || 0) - (Date.parse(right.review?.dueAt ?? "0") || 0));
+}
+
+function getDueTodaySpellingItems() {
+  const end = startOfDay(new Date(appNowMs()));
+  end.setDate(end.getDate() + 1);
+  return spellingItems.filter((item) => !item.archivedAt && (!item.review?.dueAt || Date.parse(item.review.dueAt) < end.getTime()));
 }
 
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
   const mastered = vocabularyItems.filter((item) => isToday(item.review?.masteredAt)).length;
-  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
+  return { newSaved, reviewed, mastered, dueCount: getDueVocabularyItems().length, dueTodayCount: getDueTodayVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
 function getSpellingTodayStats() {
   const newSaved = spellingItems.filter((item) => isToday(item.savedAt)).length;
   const reviewed = spellingEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
   const mastered = spellingItems.filter((item) => isToday(item.review?.masteredAt)).length;
-  return { newSaved, reviewed, mastered, dueCount: getDueSpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
+  return { newSaved, reviewed, mastered, dueCount: getDueSpellingItems().length, dueTodayCount: getDueTodaySpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
 }
 
 function renderStudyStats() {
@@ -2550,17 +2674,17 @@ function renderStudyStats() {
       startSpellingReviewButton.textContent = stats.dueCount ? `Spelling Review (${stats.dueCount})` : "No spelling due";
     }
     studySummary.textContent = stats.dueCount
-      ? `${stats.dueCount} spelling word${stats.dueCount === 1 ? " is" : "s are"} due today.`
+      ? `${stats.dueCount} spelling word${stats.dueCount === 1 ? " is" : "s are"} due now.`
       : stats.activeCount
-        ? "No spelling words are due right now."
+        ? (stats.dueTodayCount ? `${stats.dueTodayCount} spelling word${stats.dueTodayCount === 1 ? " is" : "s are"} due later today.` : "No spelling words are due right now.")
         : "Add words to the spelling list to start.";
   } else {
     startReviewButton.disabled = stats.activeCount === 0;
     startReviewButton.textContent = stats.dueCount ? `Review due (${stats.dueCount})` : stats.activeCount ? "Practice review" : "No review";
     studySummary.textContent = stats.dueCount
-      ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} ready to review.`
+      ? `${stats.dueCount} saved ${stats.dueCount === 1 ? "term is" : "terms are"} due now.`
       : stats.activeCount
-        ? "No words are due right now. You can still practice saved words."
+        ? (stats.dueTodayCount ? `${stats.dueTodayCount} saved ${stats.dueTodayCount === 1 ? "term is" : "terms are"} due later today. You can still practice saved words.` : "No words are due right now. You can still practice saved words.")
         : "No saved words to review yet.";
   }
   renderGoalsPanel();
@@ -2828,56 +2952,8 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function daysBetween(fromIso, toMs = appNowMs()) {
-  const fromMs = Date.parse(fromIso);
-  if (!Number.isFinite(fromMs)) return 0;
-  return Math.max(0, (toMs - fromMs) / NORMAL_DAY_MS);
-}
-
 function scheduleFromFsrsRating(reviewState, rating) {
-  const review = normalizeReviewState(reviewState);
-  const previousCard = review.fsrsCard ?? createFsrsCard(review.dueAt ?? nowIso());
-  const elapsedDays = daysBetween(previousCard.lastReview ?? review.lastReviewedAt ?? previousCard.due ?? nowIso());
-  const previousStability = Number(previousCard.stability ?? 0);
-  const previousDifficulty = Number(previousCard.difficulty ?? 5);
-  const reps = Number(previousCard.reps ?? review.reviewCount ?? 0) + 1;
-  const lapses = Number(previousCard.lapses ?? 0) + (rating === "again" ? 1 : 0);
-
-  const difficultyDelta = { again: 1.2, hard: 0.6, good: -0.15, easy: -0.45 }[rating] ?? 0;
-  const difficulty = clamp(previousDifficulty + difficultyDelta, 1, 10);
-  let stability = previousStability;
-  let intervalDays = 0;
-
-  if (rating === "again") {
-    stability = clamp(previousStability * 0.35, 0.05, 1);
-    intervalDays = 0;
-  } else if (rating === "hard") {
-    stability = previousStability ? clamp(previousStability * (1.15 + Math.max(0, elapsedDays) * 0.02), 0.5, 3650) : 1;
-    intervalDays = Math.max(1, Math.round(stability));
-  } else if (rating === "good") {
-    stability = previousStability ? clamp(previousStability * (1.75 + (10 - difficulty) * 0.03), 2, 3650) : 3;
-    intervalDays = Math.max(1, Math.round(stability));
-  } else {
-    stability = previousStability ? clamp(previousStability * (2.5 + (10 - difficulty) * 0.05), 4, 3650) : 7;
-    intervalDays = Math.max(2, Math.round(stability));
-  }
-
-  const masteredAt = stability >= 90 && reps >= 3 && rating !== "again" ? nowIso() : null;
-  const dueAt = masteredAt ? null : new Date(appNowMs() + (intervalDays === 0 ? 10 * 60 * 1000 : intervalDays * NORMAL_DAY_MS)).toISOString();
-  const fsrsCard = {
-    ...previousCard,
-    due: dueAt,
-    stability,
-    difficulty,
-    elapsedDays,
-    scheduledDays: intervalDays,
-    reps,
-    lapses,
-    state: masteredAt ? "mastered" : reps <= 1 ? "learning" : "review",
-    lastReview: nowIso(),
-  };
-
-  return { fsrsCard, intervalDays, dueAt, masteredAt };
+  return scheduleWithFsrs(normalizeReviewState(reviewState), rating, nowIso());
 }
 
 function inferFsrsRating(passed, responseMs) {
@@ -2893,8 +2969,8 @@ async function persistStudyEvents() {
 }
 
 async function recordReviewRating(item, rating, quizResult, responseMs) {
-  const schedule = scheduleFromFsrsRating(item.review ?? {}, rating);
   const reviewedAt = nowIso();
+  const schedule = scheduleWithFsrs(normalizeReviewState(item.review ?? {}), rating, reviewedAt);
   item.review = {
     ...(item.review ?? {}),
     lastRating: rating,
@@ -2918,6 +2994,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
     quizResult,
     mastered: Boolean(schedule.masteredAt),
     occurredAt: reviewedAt,
+    fsrsLog: schedule.fsrsLog,
     deviceId,
   });
   studyEvents.push(event);
@@ -3110,8 +3187,8 @@ async function completeCurrentSpellingWord() {
 }
 
 async function recordSpellingReview(item, rating, retries) {
-  const schedule = scheduleFromFsrsRating(item.review ?? {}, rating);
   const reviewedAt = nowIso();
+  const schedule = scheduleWithFsrs(normalizeReviewState(item.review ?? {}), rating, reviewedAt);
   item.review = {
     ...(item.review ?? {}),
     lastRating: rating,
@@ -3134,6 +3211,7 @@ async function recordSpellingReview(item, rating, retries) {
     retries,
     mastered: Boolean(schedule.masteredAt),
     occurredAt: reviewedAt,
+    fsrsLog: schedule.fsrsLog,
     deviceId,
   });
   spellingEvents.push(event);
@@ -5796,7 +5874,19 @@ vocabularyList.addEventListener("click", (event) => {
     return;
   }
   if (action === "vocab-summary") {
-    vocabularyView = { ...vocabularyView, filter: "summary", page: 0, selectedTerm: null, query: "" };
+    vocabularyView = {
+      ...vocabularyView,
+      filter: "summary",
+      page: 0,
+      selectedTerm: null,
+      query: "",
+      addedFrom: "",
+      addedTo: "",
+      reviewedFrom: "",
+      reviewedTo: "",
+      reviewCountMin: "",
+      reviewCountMax: "",
+    };
     renderVocabulary();
     return;
   }
@@ -5818,6 +5908,21 @@ vocabularyList.addEventListener("click", (event) => {
     preserveVocabSearchFocus();
     return;
   }
+  if (action === "vocab-clear-advanced-filters") {
+    vocabularyView = {
+      ...vocabularyView,
+      addedFrom: "",
+      addedTo: "",
+      reviewedFrom: "",
+      reviewedTo: "",
+      reviewCountMin: "",
+      reviewCountMax: "",
+      page: 0,
+      selectedTerm: null,
+    };
+    renderVocabulary();
+    return;
+  }
   if (action === "open") {
     termInput.value = term;
     renderSuggestions([]);
@@ -5831,15 +5936,27 @@ vocabularyList.addEventListener("click", (event) => {
   if (action === "restore") void archiveBrowserItem(term, false);
 });
 
-vocabularyList.addEventListener("input", (event) => {
-  if (!(event.target instanceof HTMLInputElement) || event.target.id !== "vocabSearchInput") return;
-  vocabularyView.query = event.target.value;
+function handleVocabularyFilterInput(event) {
+  if (!(event.target instanceof HTMLInputElement)) return;
+  const target = event.target;
+  if (target.id === "vocabSearchInput") {
+    vocabularyView.query = target.value;
+  } else if (target.dataset.vocabFilterKey) {
+    const key = target.dataset.vocabFilterKey;
+    if (!["addedFrom", "addedTo", "reviewedFrom", "reviewedTo", "reviewCountMin", "reviewCountMax"].includes(key)) return;
+    vocabularyView[key] = target.value;
+  } else {
+    return;
+  }
   vocabularyView.page = 0;
   vocabularyView.selectedTerm = null;
-  if (vocabularyView.filter === "summary" && vocabularyView.query.trim()) vocabularyView.filter = "all";
+  if (vocabularyView.filter === "summary" && (vocabularyView.query.trim() || hasVocabularyAdvancedFilters())) vocabularyView.filter = "all";
   renderVocabulary();
-  preserveVocabSearchFocus();
-});
+  preserveVocabFilterFocus(target.id);
+}
+
+vocabularyList.addEventListener("input", handleVocabularyFilterInput);
+vocabularyList.addEventListener("change", handleVocabularyFilterInput);
 
 clearSearchButton.addEventListener("click", () => {
   clearSearchField();
@@ -5888,7 +6005,20 @@ for (const tab of vocabularyTrackTabs) {
   tab.addEventListener("click", () => {
     const next = tab.dataset.vocabTrack;
     if (!next || next === vocabularyView.track) return;
-    vocabularyView = { ...vocabularyView, track: next, filter: "summary", page: 0, selectedTerm: null };
+    vocabularyView = {
+      ...vocabularyView,
+      track: next,
+      filter: "summary",
+      page: 0,
+      selectedTerm: null,
+      query: "",
+      addedFrom: "",
+      addedTo: "",
+      reviewedFrom: "",
+      reviewedTo: "",
+      reviewCountMin: "",
+      reviewCountMax: "",
+    };
     renderVocabulary();
   });
 }
@@ -6076,7 +6206,7 @@ googleClientIdConfigButton.addEventListener("click", async () => {
     googleTokenClient = null;
     googleTokenClientClientId = null;
     preloadGoogleIdentity();
-    googleAuthStatus.textContent = "Saved Google client ID. Tap Sign in with Google to authenticate.";
+    googleAuthStatus.textContent = "Saved OAuth client ID override. Tap Sign in with Google to authenticate.";
   }
   renderAppMenu();
 });

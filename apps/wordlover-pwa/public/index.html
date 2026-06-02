@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260602-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260602-6" />
     <title>WordFan</title>
   </head>
   <body>
@@ -101,6 +101,7 @@
               <h3><span class="settings-card-icon" aria-hidden="true">⚙</span>Diagnostics & updates</h3>
               <div class="menu-actions diagnostics-actions">
                 <button id="authDiagnosticsToggle" class="secondary-button" type="button">Sign-in diagnostics</button>
+                <button id="googleClientIdConfig" class="secondary-button" type="button">Set client ID</button>
                 <button id="authDiagnosticsSend" class="secondary-button" type="button">Send diagnostics</button>
               </div>
               <pre id="authDiagnostics" class="auth-diagnostics" hidden></pre>
@@ -120,14 +121,8 @@
               <h3><span class="settings-card-icon" aria-hidden="true">○</span>Account & cloud sync</h3>
               <strong id="googleAccount">Not signed in</strong>
               <p id="googleAuthStatus" class="small">Connect Google to sync Drive data and enable Gemini details.</p>
-              <p class="small">
-                Need a Google OAuth client ID?
-                <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Open Google Cloud Console</a>
-                and create a Web-application OAuth client. Add your app origin (e.g. <code>http://127.0.0.1:4173</code> or your iPhone HTTPS LAN URL) as an Authorized JavaScript origin, then tap <strong>Set client ID</strong> below to paste it.
-              </p>
               <div class="menu-actions account-actions">
                 <button id="googleSignIn" type="button">Sign in with Google</button>
-                <button id="googleClientIdConfig" class="secondary-button" type="button">Set client ID</button>
                 <button id="geminiApiKeyConfig" class="secondary-button" type="button">Set Gemini key</button>
                 <button id="googleSyncNow" class="secondary-button" type="button" disabled>Sync now</button>
                 <button id="googleRestore" class="secondary-button" type="button" disabled>Restore</button>
@@ -304,8 +299,15 @@
         </div>
       </details>
     </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "ts-fsrs": "/vendor/ts-fsrs/index.mjs"
+        }
+      }
+    </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260602-2"></script>
-    <script type="module" src="/app.js?v=20260602-2"></script>
+    <script src="/wordlover-config.js?v=20260602-6"></script>
+    <script type="module" src="/app.js?v=20260602-6"></script>
   </body>
 </html>

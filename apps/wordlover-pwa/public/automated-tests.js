@@ -1,3 +1,9 @@
+import {
+  State,
+  reviveFsrsCard,
+  scheduleFromFsrsRating,
+} from "./fsrs-scheduler.js";
+
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
 const sendButton = document.querySelector("#sendResults");
@@ -10,9 +16,9 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v76";
+const SHELL_CACHE_NAME = "wordlover-shell-v80";
 const APP_DB = "wordlover-user";
-const APP_DB_VERSION = 5;
+const APP_DB_VERSION = 6;
 const APP_KV_STORE = "kv";
 const APP_VOCABULARY_STORE = "vocabularyRecords";
 const APP_STUDY_EVENT_STORE = "studyEventRecords";
@@ -20,13 +26,15 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-2",
-  "/styles.css?v=20260602-2",
-  "/wordlover-config.js?v=20260602-2",
+  "/app.js?v=20260602-6",
+  "/fsrs-scheduler.js",
+  "/styles.css?v=20260602-6",
+  "/wordlover-config.js?v=20260602-6",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
+  "/vendor/ts-fsrs/index.mjs",
   "/wa-sqlite-opfs-worker.js",
   "/vendor/wa-sqlite/LICENSE",
   "/vendor/wa-sqlite/dist/wa-sqlite-async.mjs",
@@ -37,7 +45,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-2",
+  "/automated-tests.js?v=20260602-6",
 ];
 
 let lastResults = null;
@@ -248,35 +256,58 @@ function inferFsrsRatingForTest(passed, responseMs) {
   return "hard";
 }
 
-function scheduleFromFsrsRatingForTest(rating, nowMs, debugMode = false, reviewState = {}) {
-  const normalDayMs = 24 * 60 * 60 * 1000;
-  const debugDayMs = 20 * 1000;
-  const realDelay = (virtualMs) => (debugMode ? virtualMs / (normalDayMs / debugDayMs) : virtualMs);
-  const reps = (reviewState.reps ?? 0) + 1;
-  const previousStability = reviewState.stability ?? 0;
-  const nextStability = rating === "again" ? Math.max(0.05, previousStability * 0.35) : rating === "hard" ? previousStability || 1 : rating === "good" ? previousStability * 1.75 || 3 : previousStability * 2.5 || 7;
-  const mastered = nextStability >= 90 && reps >= 3 && rating !== "again";
-  if (mastered) return { dueInMs: null, mastered: true, stability: nextStability, reps };
-  if (rating === "again") return { dueInMs: realDelay(10 * 60 * 1000), mastered: false, stability: nextStability, reps };
-  const intervalDays = Math.max(rating === "easy" ? 2 : 1, Math.round(nextStability));
-  return { dueInMs: realDelay(intervalDays * normalDayMs), mastered: false, stability: nextStability, reps };
-}
-
 function runReviewQuizRatingTests() {
+  const baseNow = "2026-06-02T12:00:00.000Z";
+  const nowMs = Date.parse(baseNow);
+  const minutesUntilDue = (schedule) => (Date.parse(schedule.dueAt) - nowMs) / 60_000;
+  const daysUntilDue = (schedule) => (Date.parse(schedule.dueAt) - nowMs) / (24 * 60 * 60 * 1000);
   const ratings = [
     { name: "wrong answer maps to Again", actual: inferFsrsRatingForTest(false, 700), expected: "again" },
     { name: "fast correct answer maps to Easy", actual: inferFsrsRatingForTest(true, 2500), expected: "easy" },
     { name: "medium correct answer maps to Good", actual: inferFsrsRatingForTest(true, 9000), expected: "good" },
     { name: "slow correct answer maps to Hard", actual: inferFsrsRatingForTest(true, 20000), expected: "hard" },
   ];
-  const nowMs = Date.now();
-  const debugHard = scheduleFromFsrsRatingForTest("hard", nowMs, true);
-  const normalHard = scheduleFromFsrsRatingForTest("hard", nowMs, false);
+  const again = scheduleFromFsrsRating({}, "again", baseNow);
+  const hard = scheduleFromFsrsRating({}, "hard", baseNow);
+  const good = scheduleFromFsrsRating({}, "good", baseNow);
+  const easy = scheduleFromFsrsRating({}, "easy", baseNow);
+  let repeatedAgain = scheduleFromFsrsRating({}, "again", baseNow);
+  for (let i = 0; i < 5; i += 1) {
+    repeatedAgain = scheduleFromFsrsRating({
+      fsrsCard: repeatedAgain.fsrsCard,
+      dueAt: repeatedAgain.dueAt,
+      reviewCount: i + 1,
+      lastRating: "again",
+    }, "again", new Date(Date.parse(repeatedAgain.dueAt) + 1000).toISOString());
+  }
+  const migratedMastered = scheduleFromFsrsRating({
+    masteredAt: "2026-01-01T00:00:00.000Z",
+    dueAt: "2026-06-02T12:00:00.000Z",
+    fsrsCard: {
+      due: "2026-06-02T12:00:00.000Z",
+      stability: 120,
+      difficulty: 3,
+      elapsedDays: 90,
+      scheduledDays: 90,
+      reps: 3,
+      lapses: 0,
+      state: "mastered",
+      lastReview: "2026-03-01T12:00:00.000Z",
+    },
+  }, "good", baseNow);
+  const revivedOldCard = reviveFsrsCard({
+    due: "2026-06-02T12:00:00.000Z",
+    elapsedDays: 2,
+    scheduledDays: 5,
+    lastReview: "2026-06-01T12:00:00.000Z",
+    state: "review",
+  }, baseNow);
   const scheduleChecks = [
-    { name: "debug hard due is about 20 seconds", pass: debugHard.dueInMs >= 19_000 && debugHard.dueInMs <= 21_000 },
-    { name: "normal hard due is about one day", pass: normalHard.dueInMs === 24 * 60 * 60 * 1000 },
-    { name: "first easy does not immediately master", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true).mastered === false },
-    { name: "high-stability easy can master after repeated reviews", pass: scheduleFromFsrsRatingForTest("easy", nowMs, true, { stability: 45, reps: 2 }).mastered === true },
+    { name: "Again schedules soon but not immediately", pass: minutesUntilDue(again) > 0 && minutesUntilDue(again) <= 2 },
+    { name: "Hard <= Good <= Easy interval ordering", pass: daysUntilDue(hard) <= daysUntilDue(good) && daysUntilDue(good) <= daysUntilDue(easy) },
+    { name: "Mastered cards still have future dueAt", pass: Boolean(migratedMastered.masteredAt) && Date.parse(migratedMastered.dueAt) > nowMs },
+    { name: "repeated Again creates valid dates", pass: Number.isFinite(Date.parse(repeatedAgain.dueAt)) && Date.parse(repeatedAgain.dueAt) > nowMs },
+    { name: "old camelCase FSRS card migrates to Date fields", pass: revivedOldCard.due instanceof Date && revivedOldCard.last_review instanceof Date && revivedOldCard.state === State.Review },
   ];
   const ratingPass = ratings.every((item) => item.actual === item.expected);
   const schedulePass = scheduleChecks.every((item) => item.pass);
@@ -808,8 +839,43 @@ async function runMainAppStudySmoke() {
     const detailBefore = frameDocument.querySelector(".vocab-detail");
     if (detailBefore) throw new Error("Vocabulary word details should stay hidden until a word is clicked.");
     wordButtons[0].click();
-    const detailAfter = frameDocument.querySelector(".vocab-detail")?.textContent ?? "";
-    if (!detailAfter.trim()) throw new Error("Vocabulary word detail did not appear after clicking a word.");
+    const detailAfter = await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const text = frameDocument.querySelector(".vocab-detail")?.textContent ?? "";
+        if (text.trim()) {
+          window.clearInterval(timer);
+          resolve(text);
+          return;
+        }
+        if (performance.now() - startedAt > 5000) {
+          window.clearInterval(timer);
+          reject(new Error("Vocabulary word detail did not appear after clicking a word."));
+        }
+      }, 100);
+    });
+    if (!String(detailAfter).trim()) throw new Error("Vocabulary word detail did not appear after clicking a word.");
+
+    const dueTestEntry = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("fsrs due queue test", "due queue meaning", "due queue");
+    const dueLookup = frameWindow.WordLoverApp.lookupTerm(dueTestEntry.word);
+    const dueVocab = await frameWindow.WordLoverApp.saveVocabularyItem(dueLookup, "debug-fsrs-due-test");
+    const duePast = new Date(Date.now() - 60_000).toISOString();
+    dueVocab.review.dueAt = duePast;
+    dueVocab.review.fsrsCard = { ...(dueVocab.review.fsrsCard ?? {}), due: duePast };
+    dueVocab.archivedAt = new Date().toISOString();
+    const archivedExcluded = !frameWindow.WordLoverApp.getDueVocabularyItems().some((item) => item.normalizedTerm === dueVocab.normalizedTerm);
+    dueVocab.archivedAt = null;
+    dueVocab.review.masteredAt = new Date().toISOString();
+    const masteredDueIncluded = frameWindow.WordLoverApp.getDueVocabularyItems().some((item) => item.normalizedTerm === dueVocab.normalizedTerm);
+    if (!archivedExcluded) throw new Error("Archived cards should be excluded from the active due queue.");
+    if (!masteredDueIncluded) throw new Error("Mastered cards should still be reviewed when dueAt arrives.");
+
+    const dueSpelling = await frameWindow.WordLoverApp.saveSpellingItem(dueLookup, "debug-fsrs-due-test");
+    dueSpelling.review.dueAt = duePast;
+    dueSpelling.review.fsrsCard = { ...(dueSpelling.review.fsrsCard ?? {}), due: duePast };
+    const spellingDueIncluded = frameWindow.WordLoverApp.getDueSpellingItems().some((item) => item.normalizedTerm === dueSpelling.normalizedTerm);
+    if (!spellingDueIncluded) throw new Error("Spelling due queue should use the same dueAt scheduler semantics as vocabulary.");
+
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const refreshedReviewText = frameDocument.querySelector("#startReview")?.textContent ?? "";
     if (!refreshedReviewText) throw new Error("Review schedule refresh did not leave a valid review button state.");
@@ -829,6 +895,9 @@ async function runMainAppStudySmoke() {
       againCount,
       pageWordCount: wordButtons.length,
       visibleIpaCount,
+      archivedExcluded,
+      masteredDueIncluded,
+      spellingDueIncluded,
       detailRevealedAfterClick: true,
       refreshedReviewText,
       updateStatusText,

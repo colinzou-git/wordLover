@@ -1,0 +1,15 @@
+{
+  "name": "wordfan-pwa",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": {
+    "ts-fsrs": "^5.4.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}
