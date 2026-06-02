@@ -8,7 +8,7 @@ WordFan-gh-pages
 
 That avoids the deletion/locked-folder errors you had when switching branches inside the same working directory.
 
-Best future workflow: **keep source work on **`main`** / feature branches, and keep deployment in a separate **`gh-pages`** worktree**. Do **not** keep switching the same folder between `main` and `gh-pages`; that caused the locked-folder cleanup problems.
+Best future workflow: **keep source work on `main` / feature branches, and keep deployment in a separate `gh-pages` worktree**. Do **not** keep switching the same folder between `main` and `gh-pages`; that caused the locked-folder cleanup problems.
 
 ## One-time setup
 
@@ -83,7 +83,9 @@ git pull origin main
 Then copy the app’s public folder into your `gh-pages` worktree:
 
 ```plaintext
-robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git
+cd C:\Users\colin\Documents\WordFan
+
+robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git /XF .git
 "wordfan.app" | Set-Content ..\WordFan-gh-pages\CNAME -NoNewline
 
 ```

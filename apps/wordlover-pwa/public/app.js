@@ -100,9 +100,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260601-v74";
+const APP_VERSION = "0.6.2-product.20260602-v76";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v74";
+const SHELL_CACHE_VERSION = "wordlover-shell-v76";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -111,7 +111,7 @@ const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue",
 const DEFAULT_THEME = "sunrise";
 const DEFAULT_FONT_SCALE = 1;
 const FONT_SCALE_MIN = 0.9;
-const FONT_SCALE_MAX = 1.4;
+const FONT_SCALE_MAX = 2;
 const FONT_SCALE_STEP = 0.1;
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
@@ -3489,6 +3489,21 @@ async function runLookup({ commit = false } = {}) {
   }
 }
 
+function runLoadedLookupForReturn() {
+  const value = termInput.value;
+  try {
+    const data = lookupTerm(value);
+    renderResult(data);
+    if (data.status === "found") {
+      void addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
+    }
+    return data;
+  } catch (error) {
+    result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+    return null;
+  }
+}
+
 let invalidFlagHandle = 0;
 function flagSearchInputInvalid() {
   termInput.classList.add("input-invalid");
@@ -3500,8 +3515,18 @@ function flagSearchInputInvalid() {
 async function handleReturnKey() {
   const value = termInput.value;
   if (!value.trim()) return;
-  const data = await runLookup({ commit: true });
-  if (speakOnReturn && data?.status === "found") speakTerm(data.term);
+  let data = null;
+  let spokeDuringKeypress = false;
+  if (loaded) {
+    data = runLoadedLookupForReturn();
+    if (speakOnReturn && data?.status === "found") {
+      speakTerm(data.term);
+      spokeDuringKeypress = true;
+    }
+  } else {
+    data = await runLookup({ commit: true });
+  }
+  if (!spokeDuringKeypress && speakOnReturn && data?.status === "found") speakTerm(data.term);
   if (onReturnAction === "vocabulary") {
     if (data?.status === "found") await saveWithUndo(data, ["vocabulary"], "return");
   } else if (onReturnAction === "spelling") {
