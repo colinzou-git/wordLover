@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v84";
+const SHELL_CACHE_NAME = "wordlover-shell-v85";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 6;
 const APP_KV_STORE = "kv";
@@ -26,10 +26,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-10",
+  "/app.js?v=20260602-11",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-10",
-  "/wordlover-config.js?v=20260602-10",
+  "/styles.css?v=20260602-11",
+  "/wordlover-config.js?v=20260602-11",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -45,7 +45,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-10",
+  "/automated-tests.js?v=20260602-11",
 ];
 
 let lastResults = null;
@@ -640,6 +640,18 @@ async function runExportImportPoc() {
 }
 
 async function runMockGoogleDriveSyncPoc(exportImportResult) {
+  const stages = [];
+  const localSnapshot = { vocabularyItems: [{ term: "local", normalizedTerm: "local" }] };
+  const remoteSnapshot = { vocabularyItems: [{ term: "remote", normalizedTerm: "remote" }] };
+  stages.push("merge-in-memory");
+  const mergedSnapshot = {
+    vocabularyItems: [...localSnapshot.vocabularyItems, ...remoteSnapshot.vocabularyItems],
+  };
+  stages.push("revision-check");
+  stages.push("upload");
+  const uploadedSnapshot = mergedSnapshot;
+  stages.push("checkpoint");
+  stages.push("apply-local");
   const snapshot = {
     provider: "mock-google-drive",
     statusSequence: ["pending", "synced"],
@@ -647,14 +659,19 @@ async function runMockGoogleDriveSyncPoc(exportImportResult) {
     dataFormatVersion: "test-1",
     createdAt: new Date().toISOString(),
     encryptedArchiveBytes: exportImportResult.archiveBytes,
+    stages,
   };
   await saveStoreValue(KV_STORE, "mockDriveManifest", snapshot);
   const restored = await loadStoreValue(KV_STORE, "mockDriveManifest");
+  const expectedStages = ["merge-in-memory", "revision-check", "upload", "checkpoint", "apply-local"];
+  const stageOrderSafe = JSON.stringify(restored?.stages ?? []) === JSON.stringify(expectedStages);
   return {
     mode: "mock",
     oauthPerformed: false,
-    synced: restored?.statusSequence?.at(-1) === "synced",
+    synced: restored?.statusSequence?.at(-1) === "synced" && stageOrderSafe && uploadedSnapshot.vocabularyItems.length === 2,
     statusSequence: restored?.statusSequence ?? [],
+    stageOrderSafe,
+    stages: restored?.stages ?? [],
     note: "Real Google Drive OAuth/upload needs user account authorization and cannot be completed silently by automation.",
   };
 }

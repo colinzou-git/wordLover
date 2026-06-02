@@ -108,9 +108,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v84";
+const APP_VERSION = "0.6.2-product.20260602-v85";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v84";
+const SHELL_CACHE_VERSION = "wordlover-shell-v85";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -255,6 +255,8 @@ let driveSyncState = "idle";
 let lastSyncSummary = null;
 let pendingAppReloadUrl = null;
 let googleClientIdOverride = "";
+let dataDecryptBlock = null;
+let dataDecryptWarningOpen = false;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -550,6 +552,62 @@ async function getLocalDataPassphrase() {
   return configured || DEFAULT_LOCAL_PASSPHRASE;
 }
 
+function getLocalDataPassphraseSource() {
+  return String(CONFIG.localDevelopmentPassphrase ?? "").trim()
+    ? "configured-local-passphrase"
+    : "default-local-development-passphrase";
+}
+
+function isUsingDefaultLocalDataPassphrase() {
+  return getLocalDataPassphraseSource() === "default-local-development-passphrase";
+}
+
+function syncEncryptionNotice() {
+  return isUsingDefaultLocalDataPassphrase()
+    ? "Backup encryption: using the legacy default local passphrase; keep it stable until a migration or account-bound design exists."
+    : "";
+}
+
+function showDataDecryptWarning() {
+  if (!dataDecryptBlock || dataDecryptWarningOpen) return;
+  dataDecryptWarningOpen = true;
+  const where = dataDecryptBlock.storeName
+    ? `${dataDecryptBlock.storeName}${dataDecryptBlock.key ? ` / ${dataDecryptBlock.key}` : ""}`
+    : dataDecryptBlock.key ?? "local user data";
+  void showModal({
+    title: "Data cannot be decrypted",
+    body: `WordFan could not decrypt ${where}. To avoid replacing your data with an empty set, saving, checkpointing, and sync are blocked on this device. Export diagnostics or restore a known-good backup before continuing.`,
+    submitText: "OK",
+    allowCancel: false,
+    danger: true,
+  }).finally(() => {
+    dataDecryptWarningOpen = false;
+  });
+}
+
+function blockUserDataAfterDecryptFailure(scope, error) {
+  if (!dataDecryptBlock) {
+    dataDecryptBlock = {
+      at: nowIso(),
+      ...scope,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    recordAuthDiag("local-decrypt-failure", dataDecryptBlock);
+  }
+  showDataDecryptWarning();
+}
+
+function clearDataDecryptBlock() {
+  dataDecryptBlock = null;
+  dataDecryptWarningOpen = false;
+}
+
+function assertUserDataWritable(action, { allowDuringDecryptBlock = false } = {}) {
+  if (!dataDecryptBlock || allowDuringDecryptBlock) return;
+  showDataDecryptWarning();
+  throw new Error(`Data cannot be decrypted. ${action} is blocked until diagnostics are exported or a backup is restored.`);
+}
+
 async function getEncryptionKey() {
   if (!window.crypto?.subtle) {
     throw new Error("Web Crypto is required for encrypted local user data.");
@@ -612,6 +670,7 @@ async function decryptValue(record) {
 }
 
 async function saveValue(key, value) {
+  assertUserDataWritable(`Saving "${key}"`);
   await saveRawValue(STORE, key, await encryptValue(value));
 }
 
@@ -624,16 +683,19 @@ async function loadValue(key, fallback) {
   }
   try {
     return await decryptValue(value);
-  } catch {
+  } catch (error) {
+    blockUserDataAfterDecryptFailure({ storeName: STORE, key }, error);
     return fallback;
   }
 }
 
 async function saveRecordValue(storeName, key, value) {
+  assertUserDataWritable(`Saving "${key}"`);
   await saveRawValue(storeName, key, await encryptValue(value));
 }
 
 async function deleteRecordValue(storeName, key) {
+  assertUserDataWritable(`Deleting "${key}"`);
   await deleteRawValue(storeName, key);
 }
 
@@ -641,12 +703,20 @@ async function loadAllRecordValues(storeName) {
   const db = await getUserDb();
   const tx = db.transaction(storeName, "readonly");
   const values = await requestToPromise(tx.objectStore(storeName).getAll());
-  const results = await Promise.allSettled(
-    values.map((value) => (isEncryptedRecord(value) ? decryptValue(value) : value)),
-  );
-  return results
-    .filter((result) => result.status === "fulfilled")
-    .map((result) => result.value);
+  const results = [];
+  for (const value of values) {
+    if (!isEncryptedRecord(value)) {
+      results.push(value);
+      continue;
+    }
+    try {
+      results.push(await decryptValue(value));
+    } catch (error) {
+      blockUserDataAfterDecryptFailure({ storeName }, error);
+      return [];
+    }
+  }
+  return results;
 }
 
 async function getDeviceId() {
@@ -756,13 +826,15 @@ function renderAppMenu() {
         `Drive backup: ${formatBytes(s.driveBytes ?? s.sizeBytes)} total`,
       ];
       if (driveSyncState === "error" && lastSyncInfo?.error) lines.push(`Last attempt failed: ${lastSyncInfo.error}`);
+      if (syncEncryptionNotice()) lines.push(syncEncryptionNotice());
       syncDetails.innerHTML = lines.map((line) => escapeHtml(line)).join("<br>");
     } else if (signedInOrGranted) {
-      syncDetails.textContent = driveSyncState === "error" && lastSyncInfo?.error
+      const detail = driveSyncState === "error" && lastSyncInfo?.error
         ? `Not synced yet · last attempt failed: ${lastSyncInfo.error}`
         : "Not synced yet on this device. Tap Sync now.";
+      syncDetails.textContent = [detail, syncEncryptionNotice()].filter(Boolean).join(" ");
     } else {
-      syncDetails.textContent = "";
+      syncDetails.textContent = syncEncryptionNotice();
     }
   }
   memoryNote.textContent = MEMORY_TARGET_NOTE;
@@ -4083,6 +4155,11 @@ function authDiagnosticsSnapshot() {
     hasToken: Boolean(googleAuth.accessToken),
     scopes: googleAuth.scopes ?? [],
     vocabularyCount: vocabularyItems.length,
+    dataDecryptBlocked: dataDecryptBlock,
+    syncEncryption: {
+      passphraseSource: getLocalDataPassphraseSource(),
+      warning: syncEncryptionNotice(),
+    },
     lastSync: lastSyncInfo,
     events: authDiagnostics.slice(),
   };
@@ -4365,6 +4442,7 @@ async function encryptSnapshotPayload(snapshot) {
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
     encryptedAt: nowIso(),
+    passphraseSource: getLocalDataPassphraseSource(),
     kdf: "PBKDF2-SHA256",
     iterations: 200000,
     salt: bytesToBase64(salt),
@@ -4397,6 +4475,7 @@ async function pruneOldCheckpoints() {
 }
 
 async function createCheckpoint(reason = "manual") {
+  assertUserDataWritable(`Creating checkpoint "${reason}"`);
   const snapshot = buildUserDataSnapshot();
   const integrity = validateUserDataSnapshot(snapshot);
   const envelope = await encryptSnapshotPayload(snapshot);
@@ -4526,7 +4605,9 @@ async function replaceUserDataAtomically({
   nextSpellingEvents = [],
   nextUserDictionary = [],
   kvValues,
+  allowDuringDecryptBlock = false,
 }) {
+  assertUserDataWritable("Replacing local user data", { allowDuringDecryptBlock });
   const encrypt = (records, keyOf) => Promise.all(records.map(async (record) => ({ key: keyOf(record), value: await encryptValue(record) })));
   const encryptedVocabulary = await encrypt(nextVocabularyItems, (item) => item.normalizedTerm);
   const encryptedEvents = await encrypt(nextStudyEvents, (event) => event.id);
@@ -4634,14 +4715,33 @@ function explainDriveError(status, body) {
 async function listGoogleDriveSnapshots() {
   const fileName = CONFIG.googleDriveFileName ?? "wordlover-user-data.json";
   const response = await googleFetch(
-    `${GOOGLE_DRIVE_FILES_URL}?spaces=appDataFolder&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&q=${driveNameQuery(fileName)}`,
+    `${GOOGLE_DRIVE_FILES_URL}?spaces=appDataFolder&fields=files(id,name,modifiedTime,headRevisionId)&orderBy=modifiedTime desc&q=${driveNameQuery(fileName)}`,
   );
   if (!response.ok) throw new Error(explainDriveError(response.status, await response.text()));
   const data = await response.json();
   return data.files ?? [];
 }
 
+async function getGoogleDriveSnapshotMetadata(fileId) {
+  const response = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${fileId}?fields=id,name,modifiedTime,headRevisionId,size`);
+  if (!response.ok) throw new Error(explainDriveError(response.status, await response.text()));
+  const data = await response.json();
+  data.etag = response.headers.get("ETag");
+  return data;
+}
+
+function assertDriveRevisionUnchanged(before, latest) {
+  if (!before?.id || !latest?.id) return;
+  if (before.headRevisionId && latest.headRevisionId && before.headRevisionId !== latest.headRevisionId) {
+    throw new Error("Drive backup changed while sync was running. Sync again so WordFan can merge the latest revision safely.");
+  }
+  if (!before.headRevisionId && before.modifiedTime && latest.modifiedTime && before.modifiedTime !== latest.modifiedTime) {
+    throw new Error("Drive backup changed while sync was running. Sync again so WordFan can merge the latest revision safely.");
+  }
+}
+
 async function syncToGoogleDrive() {
+  assertUserDataWritable("Google Drive sync");
   // Capture the error (and the stage it failed at) so a failed sync is diagnosable from the
   // diagnostics snapshot — the most common failure is the very first Drive list call (e.g. the
   // Drive API not enabled for the OAuth client's project -> 403).
@@ -4676,6 +4776,7 @@ async function syncToGoogleDriveInner() {
   lastSyncInfo.action = existing?.id ? "merge" : "create";
 
   let snapshotToUpload;
+  let mergedSnapshotToApply = null;
   if (existing?.id) {
     lastSyncInfo.stage = "read";
     const readResponse = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${existing.id}?alt=media`);
@@ -4692,10 +4793,9 @@ async function syncToGoogleDriveInner() {
     }
     lastSyncInfo.remoteCount = Array.isArray(remoteSnapshot.vocabularyItems) ? remoteSnapshot.vocabularyItems.length : 0;
     googleAuthStatus.textContent = "Merging Drive backup with local data...";
-    const merged = mergeSnapshots(buildUserDataSnapshot(), remoteSnapshot);
-    await applyUserDataSnapshot(merged, { createPreRestoreCheckpoint: false });
-    snapshotToUpload = buildUserDataSnapshot();
-    lastSyncInfo.mergedCount = vocabularyItems.length;
+    mergedSnapshotToApply = mergeSnapshots(buildUserDataSnapshot(), remoteSnapshot);
+    snapshotToUpload = mergedSnapshotToApply;
+    lastSyncInfo.mergedCount = Array.isArray(mergedSnapshotToApply.vocabularyItems) ? mergedSnapshotToApply.vocabularyItems.length : 0;
   } else {
     snapshotToUpload = buildUserDataSnapshot();
     lastSyncInfo.mergedCount = vocabularyItems.length;
@@ -4705,15 +4805,33 @@ async function syncToGoogleDriveInner() {
   lastSyncInfo.stage = "upload";
   const encryptedSnapshot = await encryptSnapshotPayload(snapshotToUpload);
   if (existing?.id) {
-    const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size`, {
+    lastSyncInfo.stage = "revision-check";
+    const latestMetadata = await getGoogleDriveSnapshotMetadata(existing.id);
+    assertDriveRevisionUnchanged(existing, latestMetadata);
+    lastSyncInfo.stage = "upload";
+    const uploadHeaders = { "Content-Type": "application/json" };
+    if (latestMetadata.etag) uploadHeaders["If-Match"] = latestMetadata.etag;
+    const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: uploadHeaders,
       body: JSON.stringify(encryptedSnapshot),
     });
     if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
     const resultData = await response.json();
+    if (mergedSnapshotToApply) {
+      googleAuthStatus.textContent = "Checkpointing before applying merged Drive data...";
+      lastSyncInfo.stage = "checkpoint";
+      await createCheckpoint("pre-sync-merge");
+      googleAuthStatus.textContent = "Applying merged Drive data locally...";
+      lastSyncInfo.stage = "apply";
+      await applyUserDataSnapshot(mergedSnapshotToApply, { createPreRestoreCheckpoint: false });
+    }
     await recordSyncSummary(resultData);
-    googleAuthStatus.textContent = `Synced. Found ${lastSyncInfo.filesFound} Drive backup(s); it had ${lastSyncInfo.remoteCount} word(s). After merge you have ${lastSyncInfo.mergedCount} word(s).`;
+    const notice = syncEncryptionNotice();
+    googleAuthStatus.textContent = [
+      `Synced. Found ${lastSyncInfo.filesFound} Drive backup(s); it had ${lastSyncInfo.remoteCount} word(s). After merge you have ${lastSyncInfo.mergedCount} word(s).`,
+      notice,
+    ].filter(Boolean).join(" ");
     driveSyncState = "synced";
     syncStatus.textContent = "Synced";
     return resultData;
@@ -4735,7 +4853,7 @@ async function syncToGoogleDriveInner() {
     JSON.stringify(encryptedSnapshot),
     `--${boundary}--`,
   ].join("\r\n");
-  const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size`, {
+  const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size,headRevisionId`, {
     method: "POST",
     headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
     body,
@@ -4743,18 +4861,21 @@ async function syncToGoogleDriveInner() {
   if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
   const resultData = await response.json();
   await recordSyncSummary(resultData);
-  googleAuthStatus.textContent = lastSyncInfo.localCountBefore === 0
+  const uploadMessage = lastSyncInfo.localCountBefore === 0
     ? `No existing Drive backup found in this account, and this device has 0 words — nothing to sync yet. Add words (or Sync on the device that has them) first. If the other device IS signed into the same Google account here, check both devices use the SAME OAuth client ID.`
     : `No existing Drive backup found — uploaded your ${lastSyncInfo.localCountBefore} local word(s) as the first backup.`;
+  const notice = syncEncryptionNotice();
+  googleAuthStatus.textContent = [uploadMessage, notice].filter(Boolean).join(" ");
   driveSyncState = "synced";
   syncStatus.textContent = "Synced";
   return resultData;
 }
 
 async function applyUserDataSnapshot(snapshot, options = {}) {
-  const { createPreRestoreCheckpoint = true } = options;
+  const { createPreRestoreCheckpoint = true, allowDuringDecryptBlock = false } = options;
+  assertUserDataWritable("Applying user-data snapshot", { allowDuringDecryptBlock });
   validateUserDataSnapshot(snapshot);
-  if (createPreRestoreCheckpoint) await createCheckpoint("pre-restore");
+  if (createPreRestoreCheckpoint && !dataDecryptBlock) await createCheckpoint("pre-restore");
   const nextHistoryItems = Array.isArray(snapshot.historyItems) ? snapshot.historyItems : [];
   const nextVocabularyItems = mergeVocabularySources(Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [], []);
   const nextStudyEvents = mergeStudyEventSources(Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents : [], []);
@@ -4772,6 +4893,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
     nextSpellingItems,
     nextSpellingEvents,
     nextUserDictionary,
+    allowDuringDecryptBlock,
     kvValues: {
       history: nextHistoryItems,
       onReturnAction: nextOnReturnAction,
@@ -4791,6 +4913,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   speakOnReturn = nextSpeakOnReturn;
   theme = nextTheme;
   lastMetrics = nextLastMetrics;
+  if (allowDuringDecryptBlock) clearDataDecryptBlock();
 
   syncSettingsControls();
   applyTheme(theme);
@@ -4833,7 +4956,7 @@ async function restoreFromGoogleDrive() {
   if (!response.ok) throw new Error(`Google Drive restore failed: ${response.status} ${await response.text()}`);
   const envelope = await response.json();
   const snapshot = await decryptSnapshotPayload(envelope);
-  await applyUserDataSnapshot(snapshot);
+  await applyUserDataSnapshot(snapshot, { allowDuringDecryptBlock: true });
   googleAuthStatus.textContent = `Restored encrypted Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
   syncStatus.textContent = navigator.onLine ? "Synced" : "Offline";
   return snapshot;
