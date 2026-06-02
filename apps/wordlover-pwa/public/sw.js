@@ -1,10 +1,10 @@
-const CACHE_NAME = "wordlover-shell-v80";
+const CACHE_NAME = "wordlover-shell-v83";
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-6",
+  "/app.js?v=20260602-9",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-6",
-  "/wordlover-config.js?v=20260602-6",
+  "/styles.css?v=20260602-9",
+  "/wordlover-config.js?v=20260602-9",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -20,7 +20,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-6",
+  "/automated-tests.js?v=20260602-9",
 ];
 
 self.addEventListener("install", (event) => {

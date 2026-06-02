@@ -68,6 +68,8 @@ const statReviewed = document.querySelector("#statReviewed");
 const statMastered = document.querySelector("#statMastered");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
+const studyOneMoreLevelSelect = document.querySelector("#studyOneMoreLevel");
+const studyOneMoreHint = document.querySelector("#studyOneMoreHint");
 const startSpellingReviewButton = document.querySelector("#startSpellingReview");
 const startSpellingPracticeMoreButton = document.querySelector("#startSpellingPracticeMore");
 const quizPanel = document.querySelector("#quizPanel");
@@ -106,9 +108,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v80";
+const APP_VERSION = "0.6.2-product.20260602-v83";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v80";
+const SHELL_CACHE_VERSION = "wordlover-shell-v83";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -141,6 +143,19 @@ const FSRS_RATING_LABELS = {
 };
 const FSRS_RATINGS = Object.keys(FSRS_RATING_LABELS);
 const VOCABULARY_PAGE_SIZE = 10;
+const EARLY_PRACTICE_DUE_EXTENSION_CAPS = {
+  hard: 0,
+  good: NORMAL_DAY_MS,
+  easy: 3 * NORMAL_DAY_MS,
+};
+const STUDY_ONE_MORE_LEVELS = [
+  { id: "very_easy", label: "Very Easy" },
+  { id: "easy", label: "Easy" },
+  { id: "medium", label: "Medium" },
+  { id: "hard", label: "Hard" },
+  { id: "advanced", label: "Advanced" },
+  { id: "toefl", label: "TOEFL" },
+];
 const GEMINI_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -208,6 +223,8 @@ let vocabularyView = {
   reviewCountMax: "",
 };
 let todayTrack = "vocabulary";
+let studyOneMoreLevel = "very_easy";
+let activeStudyOneMoreEntry = null;
 let historyView = {
   granularity: "days",
   anchorMs: null,
@@ -2662,6 +2679,8 @@ function renderStudyStats() {
 
   startReviewButton.hidden = isSpelling;
   studyNewWordButton.hidden = isSpelling;
+  if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.hidden = isSpelling;
+  if (studyOneMoreHint) studyOneMoreHint.hidden = isSpelling;
   if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
   if (startSpellingPracticeMoreButton) {
     startSpellingPracticeMoreButton.hidden = !isSpelling;
@@ -2956,6 +2975,57 @@ function scheduleFromFsrsRating(reviewState, rating) {
   return scheduleWithFsrs(normalizeReviewState(reviewState), rating, nowIso());
 }
 
+function daysBetweenMs(fromMs, toMs) {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
+  return Math.max(0, (toMs - fromMs) / NORMAL_DAY_MS);
+}
+
+function applyVocabularyReviewSchedulingPolicy({
+  reviewState = {},
+  rating = "again",
+  reviewedAt = nowIso(),
+  mode = "review",
+} = {}) {
+  const normalized = normalizeReviewState(reviewState);
+  const fullSchedule = scheduleWithFsrs(normalized, rating, reviewedAt);
+  const reviewedAtMs = Date.parse(reviewedAt);
+  const originalDueMs = Date.parse(normalized.dueAt);
+  const fullDueMs = Date.parse(fullSchedule.dueAt);
+  const earlyPractice = mode === "practice" && Number.isFinite(originalDueMs) && Number.isFinite(reviewedAtMs) && originalDueMs > reviewedAtMs;
+  if (!earlyPractice || rating === "again") {
+    return {
+      ...fullSchedule,
+      schedulingPolicy: earlyPractice ? "early-practice-full-again" : "scheduled-review-full",
+      originalDueAt: normalized.dueAt,
+      fsrsDueAt: fullSchedule.dueAt,
+    };
+  }
+  const capMs = EARLY_PRACTICE_DUE_EXTENSION_CAPS[rating] ?? 0;
+  const cappedDueMs = Math.max(originalDueMs, Math.min(Number.isFinite(fullDueMs) ? fullDueMs : originalDueMs, originalDueMs + capMs));
+  const dueAt = new Date(cappedDueMs).toISOString();
+  const intervalDays = daysBetweenMs(reviewedAtMs, cappedDueMs);
+  const fsrsCard = {
+    ...fullSchedule.fsrsCard,
+    due: dueAt,
+    scheduled_days: Math.max(0, Math.round(intervalDays)),
+    scheduledDays: Math.max(0, Math.round(intervalDays)),
+  };
+  if (fsrsCard.last_review || fsrsCard.lastReview) {
+    fsrsCard.last_review = reviewedAt;
+    fsrsCard.lastReview = reviewedAt;
+  }
+  return {
+    ...fullSchedule,
+    fsrsCard,
+    intervalDays,
+    dueAt,
+    masteredAt: normalized.masteredAt ?? null,
+    schedulingPolicy: "early-practice-capped",
+    originalDueAt: normalized.dueAt,
+    fsrsDueAt: fullSchedule.dueAt,
+  };
+}
+
 function inferFsrsRating(passed, responseMs) {
   if (!passed) return "again";
   if (responseMs <= 5000) return "easy";
@@ -2968,9 +3038,14 @@ async function persistStudyEvents() {
   renderStudyStats();
 }
 
-async function recordReviewRating(item, rating, quizResult, responseMs) {
+async function recordReviewRating(item, rating, quizResult, responseMs, mode = "review") {
   const reviewedAt = nowIso();
-  const schedule = scheduleWithFsrs(normalizeReviewState(item.review ?? {}), rating, reviewedAt);
+  const schedule = applyVocabularyReviewSchedulingPolicy({
+    reviewState: item.review ?? {},
+    rating,
+    reviewedAt,
+    mode,
+  });
   item.review = {
     ...(item.review ?? {}),
     lastRating: rating,
@@ -2995,6 +3070,11 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
     mastered: Boolean(schedule.masteredAt),
     occurredAt: reviewedAt,
     fsrsLog: schedule.fsrsLog,
+    schedulingPolicy: schedule.schedulingPolicy,
+    originalDueAt: schedule.originalDueAt,
+    fsrsDueAt: schedule.fsrsDueAt,
+    appliedDueAt: schedule.dueAt,
+    practiceMode: mode,
     deviceId,
   });
   studyEvents.push(event);
@@ -3006,6 +3086,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs) {
 
 function hideQuiz() {
   activeQuiz = null;
+  activeStudyOneMoreEntry = null;
   quizPanel.hidden = true;
   quizPanel.innerHTML = "";
 }
@@ -3237,6 +3318,174 @@ function meaningPreviewFromEntry(entry) {
   return topLines(entry.translation, 1)[0] ?? topLines(entry.definition, 1)[0] ?? "No meaning available";
 }
 
+function normalizeStudyOneMoreLevel(level) {
+  return STUDY_ONE_MORE_LEVELS.some((item) => item.id === level) ? level : "very_easy";
+}
+
+function frequencyRankOf(candidate) {
+  const frq = Number(candidate?.frq ?? candidate?.frequencyRank);
+  if (Number.isFinite(frq) && frq > 0) return frq;
+  const bnc = Number(candidate?.bnc);
+  return Number.isFinite(bnc) && bnc > 0 ? bnc : Number.POSITIVE_INFINITY;
+}
+
+function hasToeflTag(candidate) {
+  if (Number(candidate?.is_toefl ?? candidate?.isToefl) === 1) return true;
+  const tags = Array.isArray(candidate?.tags)
+    ? candidate.tags
+    : String(candidate?.tag ?? "").split(/\s+/).filter(Boolean);
+  return tags.some((tag) => tag.toLowerCase() === "toefl");
+}
+
+function fallbackStudyOneMoreLevel(candidate) {
+  const rank = frequencyRankOf(candidate);
+  const length = normalizeTerm(candidate?.normalized_word ?? candidate?.normalizedTerm ?? candidate?.word ?? candidate?.term).length;
+  if (rank <= 3000 && length <= 8) return "very_easy";
+  if (rank <= 8000 && length <= 12) return "easy";
+  if (rank <= 20000) return "medium";
+  if (rank <= 50000) return "hard";
+  return "advanced";
+}
+
+function candidateMatchesStudyOneMoreLevel(candidate, level) {
+  const normalizedLevel = normalizeStudyOneMoreLevel(level);
+  if (normalizedLevel === "toefl") return hasToeflTag(candidate);
+  return fallbackStudyOneMoreLevel(candidate) === normalizedLevel;
+}
+
+function introducedByStudyOneMore(event) {
+  return ["study-one-more-introduced", "study-one-more-skipped", "new-word-first-pass"].includes(event?.type);
+}
+
+function buildStudyOneMoreExclusionSets({
+  vocabulary = vocabularyItems,
+  spelling = spellingItems,
+  events = studyEvents,
+} = {}) {
+  const memorizeTerms = new Set();
+  const spellingTerms = new Set();
+  const archivedIgnoredOrMastered = new Set();
+  for (const item of vocabulary ?? []) {
+    const term = item?.normalizedTerm;
+    if (!term) continue;
+    if (!item.archivedAt) memorizeTerms.add(term);
+    if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
+  }
+  for (const item of spelling ?? []) {
+    const term = item?.normalizedTerm;
+    if (!term) continue;
+    if (!item.archivedAt) spellingTerms.add(term);
+    if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
+  }
+  const introducedToday = new Set();
+  const firstTryPassed = new Set();
+  for (const event of events ?? []) {
+    if (!event?.normalizedTerm) continue;
+    if (event.type === "new-word-first-pass") firstTryPassed.add(event.normalizedTerm);
+    if (introducedByStudyOneMore(event) && isToday(event.occurredAt)) introducedToday.add(event.normalizedTerm);
+  }
+  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, archivedIgnoredOrMastered };
+}
+
+function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyOneMoreExclusionSets()) {
+  const normalizedLevel = normalizeStudyOneMoreLevel(level);
+  return [...(rows ?? [])]
+    .map((row) => {
+      const normalizedTerm = normalizeTerm(row.normalized_word ?? row.normalizedTerm ?? row.word ?? row.term);
+      return {
+        ...row,
+        normalizedTerm,
+        frequencyRank: frequencyRankOf(row),
+        studyLevel: normalizedLevel === "toefl" ? "toefl" : fallbackStudyOneMoreLevel({ ...row, normalizedTerm }),
+      };
+    })
+    .filter((row) => row.normalizedTerm)
+    .filter((row) => candidateMatchesStudyOneMoreLevel(row, normalizedLevel))
+    .filter((row) => !exclusions.memorizeTerms?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.spellingTerms?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.introducedToday?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.firstTryPassed?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.archivedIgnoredOrMastered?.has(row.normalizedTerm))
+    .sort((left, right) => {
+      const leftRank = Number.isFinite(left.frequencyRank) ? left.frequencyRank : Number.MAX_SAFE_INTEGER;
+      const rightRank = Number.isFinite(right.frequencyRank) ? right.frequencyRank : Number.MAX_SAFE_INTEGER;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return String(left.word ?? left.term).localeCompare(String(right.word ?? right.term));
+    })[0] ?? null;
+}
+
+function studyOneMoreEntryFromRow(row, level) {
+  const englishMeanings = topLines(row.definition);
+  const chineseMeanings = topLines(row.translation);
+  const exampleSentence = topLines(row.detail, 1).find((line) => /[.!?]$/.test(line)) ?? "";
+  return {
+    status: "found",
+    term: row.word,
+    normalizedTerm: row.normalizedTerm ?? row.normalized_word,
+    entryType: "word",
+    phonetic: row.phonetic ?? "",
+    englishMeanings,
+    englishMeaningSource: row.definition_source ?? "unknown",
+    chineseMeanings,
+    tags: row.tag ? String(row.tag).split(/\s+/).filter(Boolean) : [],
+    frequencyRank: row.frequencyRank,
+    studyLevel: level,
+    exampleSentence,
+  };
+}
+
+function renderStudyOneMoreEntry(entry) {
+  activeStudyOneMoreEntry = entry;
+  const levelLabel = STUDY_ONE_MORE_LEVELS.find((level) => level.id === entry.studyLevel)?.label ?? "Very Easy";
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <div class="study-one-more-card">
+      <div class="quiz-question">
+        <span>${escapeHtml(levelLabel)} candidate</span>
+        <div class="quiz-word-row">
+          <strong>${escapeHtml(entry.term)}</strong>
+          ${renderIpa(entry.phonetic)}
+          ${renderSpeakerButton(entry.term)}
+          ${renderAiChatButton(entry.term)}
+        </div>
+        <p class="muted">High-frequency word not already in your Memorize or Spelling list.</p>
+      </div>
+      <div class="quiz-english">
+        <span class="quiz-english-label">English</span>
+        ${entry.englishMeanings.length ? entry.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : "<p>No English definition.</p>"}
+      </div>
+      <div class="quiz-english">
+        <span class="quiz-english-label">Chinese</span>
+        ${entry.chineseMeanings.length ? entry.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : "<p>No Chinese meaning.</p>"}
+      </div>
+      ${entry.exampleSentence ? `<div class="quiz-english"><span class="quiz-english-label">Example</span><p>${escapeHtml(entry.exampleSentence)}</p></div>` : ""}
+      <div class="quiz-actions">
+        <button type="button" data-study-one-more-add="memorize">Add to Memorize</button>
+        <button class="secondary-button" type="button" data-study-one-more-add="spelling">Add to Spelling</button>
+        <button class="secondary-button" type="button" data-study-one-more-skip="1">Skip</button>
+      </div>
+    </div>
+  `;
+  quizPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function recordStudyOneMoreEvent(entry, type) {
+  if (!entry?.normalizedTerm) return null;
+  const event = markDebugRecord({
+    id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type,
+    term: entry.term,
+    normalizedTerm: entry.normalizedTerm,
+    level: entry.studyLevel,
+    frequencyRank: entry.frequencyRank,
+    occurredAt: nowIso(),
+    deviceId,
+  });
+  studyEvents.push(event);
+  await persistStudyEvent(event);
+  return event;
+}
+
 function quizEntryFromVocabulary(item) {
   const englishMeanings = item.user?.englishMeanings?.length
     ? item.user.englishMeanings
@@ -3394,55 +3643,79 @@ async function startDueReview() {
   renderQuiz(quizEntryFromVocabulary(reviewItem), item ? "review" : "practice");
 }
 
-function pickNewStudyEntry() {
+function pickNewStudyEntry(level = studyOneMoreLevel) {
   if (!dictionaryDb) return null;
-  const saved = new Set(vocabularyItems.map((item) => item.normalizedTerm));
-  const alreadyKnown = new Set(
-    studyEvents
-      .filter((event) => event.type === "new-word-first-pass")
-      .map((event) => event.normalizedTerm)
-      .filter(Boolean),
-  );
+  const normalizedLevel = normalizeStudyOneMoreLevel(level);
   const statement = dictionaryDb.prepare(`
-    SELECT word, normalized_word, phonetic, definition, translation
+    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, is_toefl, frq, bnc, detail
     FROM dictionary_entries
-    WHERE is_toefl = 1
-      AND translation IS NOT NULL
+    WHERE translation IS NOT NULL
       AND definition IS NOT NULL
       AND instr(normalized_word, ' ') = 0
-    ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, word
-    LIMIT 250
+    ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, length(word), word
   `);
-  const candidates = [];
+  const rows = [];
   try {
     while (statement.step()) {
       const row = statement.getAsObject();
-      if (!saved.has(row.normalized_word) && !alreadyKnown.has(row.normalized_word)) {
-        candidates.push({
-          term: row.word,
-          normalizedTerm: row.normalized_word,
-          phonetic: row.phonetic,
-          correct: meaningPreviewFromEntry(row),
-          englishMeanings: topLines(row.definition),
-        });
-      }
+      rows.push(row);
     }
   } finally {
     statement.free();
   }
-  if (!candidates.length) return null;
-  return candidates[0];
+  const candidate = pickStudyOneMoreCandidateFromRows(rows, normalizedLevel);
+  return candidate ? studyOneMoreEntryFromRow(candidate, normalizedLevel) : null;
 }
 
 async function startNewWordStudy() {
   if (!(await ensureDictionaryLoaded())) return;
-  const entry = pickNewStudyEntry();
+  const level = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect?.value ?? studyOneMoreLevel);
+  studyOneMoreLevel = level;
+  const entry = pickNewStudyEntry(level);
   if (!entry) {
     quizPanel.hidden = false;
-    quizPanel.innerHTML = `<p class="muted">No unsaved TOEFL candidate found right now.</p>`;
+    const label = STUDY_ONE_MORE_LEVELS.find((item) => item.id === level)?.label ?? "Very Easy";
+    quizPanel.innerHTML = `<p class="muted">No ${escapeHtml(label)} candidate found right now.</p>`;
     return;
   }
-  renderQuiz(entry, "new");
+  await recordStudyOneMoreEvent(entry, "study-one-more-introduced");
+  renderStudyOneMoreEntry(entry);
+}
+
+async function addStudyOneMoreCandidate(target) {
+  if (!activeStudyOneMoreEntry) return;
+  const entry = activeStudyOneMoreEntry;
+  const data = lookupTerm(entry.term);
+  if (data.status !== "found") return;
+  if (target === "spelling") {
+    await saveSpellingItem(data, "study-one-more");
+  } else {
+    await saveVocabularyItem(data, "study-one-more");
+  }
+  activeStudyOneMoreEntry = null;
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <p class="muted">Added "${escapeHtml(entry.term)}" to ${target === "spelling" ? "Spelling" : "Memorize"}.</p>
+    <div class="quiz-actions">
+      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
+      <button type="button" data-study-next="1">Study another</button>
+    </div>
+  `;
+}
+
+async function skipStudyOneMoreCandidate() {
+  if (activeStudyOneMoreEntry) {
+    await recordStudyOneMoreEvent(activeStudyOneMoreEntry, "study-one-more-skipped");
+  }
+  activeStudyOneMoreEntry = null;
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <p class="muted">Skipped. WordFan will avoid this word for the rest of today.</p>
+    <div class="quiz-actions">
+      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
+      <button type="button" data-study-next="1">Study another</button>
+    </div>
+  `;
 }
 
 function renderFsrsRatingChoices(passed) {
@@ -3491,7 +3764,7 @@ async function handleFsrsRating(rating) {
   const { sourceItem } = activeQuiz.entry;
   const { quizResult, responseMs } = activeQuiz.pendingResult;
   const wasPracticeMode = activeQuiz.mode === "practice";
-  await recordReviewRating(sourceItem, rating, quizResult, responseMs);
+  await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}. Loading next word...</p>`;
   activeQuiz = null;
@@ -5982,6 +6255,10 @@ studyNewWordButton.addEventListener("click", () => {
   void startNewWordStudy();
 });
 
+studyOneMoreLevelSelect?.addEventListener("change", () => {
+  studyOneMoreLevel = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect.value);
+});
+
 startSpellingReviewButton?.addEventListener("click", () => {
   startSpellingReview();
 });
@@ -6065,6 +6342,15 @@ quizPanel.addEventListener("click", (event) => {
   const ratingButton = target.closest("[data-fsrs-rating]");
   if (ratingButton instanceof HTMLButtonElement) {
     void handleFsrsRating(ratingButton.dataset.fsrsRating);
+    return;
+  }
+  const studyOneMoreAdd = target.closest("[data-study-one-more-add]");
+  if (studyOneMoreAdd instanceof HTMLButtonElement) {
+    void addStudyOneMoreCandidate(studyOneMoreAdd.dataset.studyOneMoreAdd === "spelling" ? "spelling" : "memorize");
+    return;
+  }
+  if (target.closest("[data-study-one-more-skip]")) {
+    void skipStudyOneMoreCandidate();
     return;
   }
   if (target.closest("[data-quiz-close]")) {
@@ -6644,6 +6930,22 @@ window.WordLoverApp = {
   getStudyEvents: () => studyEvents,
   startDueReview,
   startNewWordStudy,
+  studyOneMore: {
+    levels: () => STUDY_ONE_MORE_LEVELS.map((level) => ({ ...level })),
+    levelFor: fallbackStudyOneMoreLevel,
+    matchesLevel: candidateMatchesStudyOneMoreLevel,
+    pickFromCandidates: pickStudyOneMoreCandidateFromRows,
+    current: () => activeStudyOneMoreEntry,
+    setLevel: (level) => {
+      studyOneMoreLevel = normalizeStudyOneMoreLevel(level);
+      if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.value = studyOneMoreLevel;
+      return studyOneMoreLevel;
+    },
+  },
+  reviewScheduling: {
+    applyPolicy: applyVocabularyReviewSchedulingPolicy,
+    earlyPracticeCaps: () => ({ ...EARLY_PRACTICE_DUE_EXTENSION_CAPS }),
+  },
   getActiveQuiz: () => activeQuiz,
   checkForAppUpdate,
   refreshReviewScheduleViews,

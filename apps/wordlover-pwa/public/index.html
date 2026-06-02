@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260602-6" />
+    <link rel="stylesheet" href="/styles.css?v=20260602-9" />
     <title>WordFan</title>
   </head>
   <body>
@@ -194,11 +194,22 @@
           </div>
           <div class="study-actions">
             <button id="startReview" type="button" disabled>Review due</button>
-            <button id="studyNewWord" class="secondary-button" type="button">Study one more</button>
+            <div class="study-one-more-control">
+              <button id="studyNewWord" class="secondary-button" type="button">Study one more</button>
+              <select id="studyOneMoreLevel" aria-label="Study one more level">
+                <option value="very_easy" selected>Very Easy</option>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+                <option value="advanced">Advanced</option>
+                <option value="toefl">TOEFL</option>
+              </select>
+            </div>
             <button id="startSpellingReview" type="button" hidden disabled>Spelling Review</button>
             <button id="startSpellingPracticeMore" class="secondary-button" type="button" hidden disabled>Spelling Practice More</button>
           </div>
         </div>
+        <p id="studyOneMoreHint" class="small muted study-one-more-hint">Adds one high-frequency word not already in your Memorize or Spelling list.</p>
         <div class="track-tabs" id="todayTrackTabs" role="tablist" aria-label="Memorize or spelling">
           <button type="button" data-today-track="vocabulary" aria-selected="true">Memorize</button>
           <button type="button" data-today-track="spelling" aria-selected="false">Spelling</button>
@@ -307,7 +318,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260602-6"></script>
-    <script type="module" src="/app.js?v=20260602-6"></script>
+    <script src="/wordlover-config.js?v=20260602-9"></script>
+    <script type="module" src="/app.js?v=20260602-9"></script>
   </body>
 </html>

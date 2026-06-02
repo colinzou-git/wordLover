@@ -1271,6 +1271,22 @@ h1 {
   justify-content: flex-end;
 }
 
+.study-one-more-control {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.study-one-more-control select {
+  min-height: 38px;
+  min-width: 132px;
+  width: auto;
+}
+
+.study-one-more-hint {
+  margin: -4px 0 12px;
+}
+
 label {
   display: block;
   font-weight: 800;
@@ -1628,6 +1644,11 @@ li button {
 .quiz-english p {
   margin: 2px 0;
   line-height: 1.35;
+}
+
+.study-one-more-card {
+  display: grid;
+  gap: 10px;
 }
 
 .quiz-english-label {

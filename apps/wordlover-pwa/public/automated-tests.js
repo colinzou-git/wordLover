@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v80";
+const SHELL_CACHE_NAME = "wordlover-shell-v83";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 6;
 const APP_KV_STORE = "kv";
@@ -26,10 +26,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-6",
+  "/app.js?v=20260602-9",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-6",
-  "/wordlover-config.js?v=20260602-6",
+  "/styles.css?v=20260602-9",
+  "/wordlover-config.js?v=20260602-9",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -45,7 +45,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-6",
+  "/automated-tests.js?v=20260602-9",
 ];
 
 let lastResults = null;
@@ -79,9 +79,10 @@ function requestToPromise(request) {
 
 function unlockMainAppFrame(frame) {
   const passphraseInput = frame.contentDocument?.querySelector("#passphrase");
-  if (!passphraseInput) return false;
-  passphraseInput.value = "wordlover-localhost-development-passphrase";
-  frame.contentDocument.querySelector("[data-modal-submit]")?.click();
+  if (passphraseInput) passphraseInput.value = "wordlover-localhost-development-passphrase";
+  const submit = frame.contentDocument?.querySelector("[data-modal-submit]");
+  if (!submit) return false;
+  submit.click();
   return true;
 }
 
@@ -746,18 +747,18 @@ async function runMainAppStudySmoke() {
       if (!button) throw new Error(`Main app study smoke missing button: ${selector}`);
       button.click();
     };
-    const waitForQuizTerm = async (previousTerm = null) =>
+    const waitForStudyOneMoreCard = async (previousTerm = null) =>
       new Promise((resolve, reject) => {
         const startedAt = performance.now();
         const timer = window.setInterval(() => {
-          const term = frameDocument.querySelector("#quizPanel .quiz-question strong")?.textContent?.trim();
+          const term = frameDocument.querySelector("#quizPanel .study-one-more-card .quiz-question strong")?.textContent?.trim();
           if (term && term !== previousTerm) {
             window.clearInterval(timer);
             resolve(term);
             return;
           }
           const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
-          if (/No unsaved TOEFL candidate/i.test(panelText)) {
+          if (/No .* candidate found/i.test(panelText)) {
             window.clearInterval(timer);
             reject(new Error(`Main app study smoke found no new candidate after ${previousTerm ?? "start"}.`));
             return;
@@ -769,49 +770,148 @@ async function runMainAppStudySmoke() {
         }, 100);
       });
 
+    const candidateRows = [
+      { word: "alpha", normalized_word: "alpha", frq: 100, bnc: 100, definition: "alpha definition", translation: "alpha" },
+      { word: "bravo", normalized_word: "bravo", frq: 90, bnc: 90, definition: "bravo definition", translation: "bravo" },
+      { word: "charlie", normalized_word: "charlie", frq: 80, bnc: 80, definition: "charlie definition", translation: "charlie" },
+      { word: "delta", normalized_word: "delta", frq: 70, bnc: 70, definition: "delta definition", translation: "delta" },
+      { word: "echo", normalized_word: "echo", frq: 60, bnc: 60, definition: "echo definition", translation: "echo" },
+      { word: "zulu", normalized_word: "zulu", frq: 500, bnc: 500, definition: "zulu definition", translation: "zulu" },
+    ];
+    const fakeSets = ({
+      memorize = [],
+      spelling = [],
+      introducedToday = [],
+      firstTryPassed = [],
+      archivedIgnoredOrMastered = [],
+    } = {}) => ({
+      memorizeTerms: new Set(memorize),
+      spellingTerms: new Set(spelling),
+      introducedToday: new Set(introducedToday),
+      firstTryPassed: new Set(firstTryPassed),
+      archivedIgnoredOrMastered: new Set(archivedIgnoredOrMastered),
+    });
+    const studyOneMoreTests = {
+      excludesMemorizeWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ memorize: ["echo"] })).normalizedTerm === "delta",
+      excludesSpellingWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ spelling: ["echo"] })).normalizedTerm === "delta",
+      excludesWordsStudiedToday: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ introducedToday: ["echo"] })).normalizedTerm === "delta",
+      choosesLowestFrequencyRankCandidate: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets()).normalizedTerm === "echo",
+      fallsBackWhenNoCefrExists: frameWindow.WordLoverApp.studyOneMore.levelFor({ word: "fallback", normalized_word: "fallback", frq: 2500 }) === "very_easy"
+        && frameWindow.WordLoverApp.studyOneMore.levelFor({ word: "intermediate", normalized_word: "intermediate", frq: 9000 }) === "medium",
+    };
+    if (!Object.values(studyOneMoreTests).every(Boolean)) {
+      throw new Error(`Study One More selection tests failed: ${JSON.stringify(studyOneMoreTests)}`);
+    }
+    const earlyPracticeReviewedAt = "2026-06-02T12:00:00.000Z";
+    const earlyPracticeOriginalDue = "2026-06-12T12:00:00.000Z";
+    const futureReviewState = {
+      dueAt: earlyPracticeOriginalDue,
+      masteredAt: null,
+      fsrsCard: {
+        due: earlyPracticeOriginalDue,
+        stability: 90,
+        difficulty: 3,
+        elapsed_days: 30,
+        scheduled_days: 30,
+        reps: 5,
+        lapses: 0,
+        state: 2,
+        last_review: "2026-05-01T12:00:00.000Z",
+      },
+    };
+    const dueReviewState = {
+      ...futureReviewState,
+      dueAt: earlyPracticeReviewedAt,
+      fsrsCard: { ...futureReviewState.fsrsCard, due: earlyPracticeReviewedAt },
+    };
+    const dueGood = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: dueReviewState,
+      rating: "good",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "review",
+    });
+    const earlyAgain = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "again",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+    });
+    const earlyHard = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "hard",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+    });
+    const earlyGood = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "good",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+    });
+    const earlyEasy = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "easy",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+    });
+    const originalDueMs = Date.parse(earlyPracticeOriginalDue);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const reviewSchedulingTests = {
+      dueReviewUsesFullFsrs: dueGood.schedulingPolicy === "scheduled-review-full" && dueGood.dueAt === dueGood.fsrsDueAt,
+      earlyAgainUsesFullFsrs: earlyAgain.schedulingPolicy === "early-practice-full-again" && earlyAgain.dueAt === earlyAgain.fsrsDueAt,
+      earlyHardDoesNotExtendDue: earlyHard.schedulingPolicy === "early-practice-capped" && Date.parse(earlyHard.dueAt) === originalDueMs,
+      earlyGoodExtensionCapped: earlyGood.schedulingPolicy === "early-practice-capped" && Date.parse(earlyGood.dueAt) <= originalDueMs + dayMs,
+      earlyEasyExtensionCapped: earlyEasy.schedulingPolicy === "early-practice-capped" && Date.parse(earlyEasy.dueAt) <= originalDueMs + 3 * dayMs,
+      earlyCorrectKeepsDueAtFuture: [earlyHard, earlyGood, earlyEasy].every((schedule) => Date.parse(schedule.dueAt) >= originalDueMs),
+    };
+    if (!Object.values(reviewSchedulingTests).every(Boolean)) {
+      throw new Error(`Early practice scheduling tests failed: ${JSON.stringify({ reviewSchedulingTests, dueGood, earlyAgain, earlyHard, earlyGood, earlyEasy })}`);
+    }
+
     click("#studyNewWord");
-    const firstTerm = await waitForQuizTerm();
-    const firstQuiz = frameWindow.WordLoverApp.getActiveQuiz();
+    const firstTerm = await waitForStudyOneMoreCard();
+    const firstCandidate = frameWindow.WordLoverApp.studyOneMore.current();
     const firstQuizIpa = frameDocument.querySelector("#quizPanel .word-ipa")?.textContent?.trim() ?? "";
-    if (!firstQuizIpa) throw new Error("Main app study smoke did not show IPA in the quiz question.");
-    const firstCorrectIndex = firstQuiz.options.findIndex((option) => option.correct);
-    if (firstCorrectIndex < 0) throw new Error("Main app study smoke could not find first correct quiz option.");
-    click(`#quizPanel [data-quiz-option="${firstCorrectIndex}"]`);
+    if (!firstQuizIpa) throw new Error("Main app study smoke did not show IPA in the Study One More card.");
+    if (!firstCandidate || firstCandidate.studyLevel !== "very_easy") throw new Error("Study One More did not default to a Very Easy candidate.");
+    if (!/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) throw new Error("Study One More card did not show an English definition.");
+    click('[data-study-one-more-add="memorize"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
-        if (frameDocument.querySelector("[data-study-next]")) {
+        const saved = frameWindow.WordLoverApp
+          .getVocabulary()
+          .some((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
+        if (saved && frameDocument.querySelector("[data-study-next]")) {
           window.clearInterval(timer);
           resolve();
           return;
         }
         if (performance.now() - startedAt > 10000) {
           window.clearInterval(timer);
-          reject(new Error("Main app study smoke did not show Study another after first answer."));
+          reject(new Error("Main app study smoke did not save the Study One More word to Memorize."));
         }
       }, 100);
     });
     click("[data-study-next]");
-    const secondTerm = await waitForQuizTerm(firstTerm);
-    const secondQuiz = frameWindow.WordLoverApp.getActiveQuiz();
-    const wrongIndex = secondQuiz.options.findIndex((option) => !option.correct);
-    if (wrongIndex < 0) throw new Error("Main app study smoke could not find a wrong quiz option.");
-    click(`#quizPanel [data-quiz-option="${wrongIndex}"]`);
+    const secondTerm = await waitForStudyOneMoreCard(firstTerm);
+    const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    if (!secondCandidate || secondCandidate.normalizedTerm === firstCandidate.normalizedTerm) throw new Error("Study One More repeated an introduced-today word.");
+    click('[data-study-one-more-add="spelling"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
-        const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
         const saved = frameWindow.WordLoverApp
-          .getVocabulary()
-          .some((item) => item.normalizedTerm === secondQuiz.entry.normalizedTerm);
-        if (/Missed on the first try/i.test(panelText) && saved) {
+          .getSpelling()
+          .some((item) => item.normalizedTerm === secondCandidate.normalizedTerm);
+        if (saved && frameDocument.querySelector("[data-study-next]")) {
           window.clearInterval(timer);
           resolve();
           return;
         }
         if (performance.now() - startedAt > 10000) {
           window.clearInterval(timer);
-          reject(new Error(`Main app study smoke did not save missed new word "${secondTerm}". Panel: ${panelText.slice(0, 500)}`));
+          reject(new Error(`Main app study smoke did not save Study One More word "${secondTerm}" to Spelling.`));
         }
       }, 100);
     });
@@ -889,7 +989,10 @@ async function runMainAppStudySmoke() {
       passed: Boolean(firstTerm && secondTerm && firstTerm !== secondTerm),
       firstTerm,
       secondTerm,
-      missedSecondTermSaved: true,
+      studyOneMoreMemorizeSaved: true,
+      studyOneMoreSpellingSaved: true,
+      studyOneMoreTests,
+      reviewSchedulingTests,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,
