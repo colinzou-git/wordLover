@@ -130,7 +130,7 @@ git merge $feature
 git push origin main
 
 # Deploy public folder to gh-pages worktree
-robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git
+robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git /XF .git
 "wordfan.app" | Set-Content ..\WordFan-gh-pages\CNAME -NoNewline
 
 cd ..\WordFan-gh-pages
