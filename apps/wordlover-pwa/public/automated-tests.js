@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v83";
+const SHELL_CACHE_NAME = "wordlover-shell-v84";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 6;
 const APP_KV_STORE = "kv";
@@ -26,10 +26,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-9",
+  "/app.js?v=20260602-10",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-9",
-  "/wordlover-config.js?v=20260602-9",
+  "/styles.css?v=20260602-10",
+  "/wordlover-config.js?v=20260602-10",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -45,7 +45,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-9",
+  "/automated-tests.js?v=20260602-10",
 ];
 
 let lastResults = null;
@@ -871,10 +871,41 @@ async function runMainAppStudySmoke() {
     click("#studyNewWord");
     const firstTerm = await waitForStudyOneMoreCard();
     const firstCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    const answerStudyOneMore = () => {
+      const quiz = frameWindow.WordLoverApp.getActiveQuiz();
+      if (!quiz || quiz.mode !== "study-one-more") throw new Error("Study One More did not start a quiz.");
+      const correctIndex = quiz.options.findIndex((option) => option.correct);
+      if (correctIndex < 0) throw new Error("Study One More quiz did not include a correct option.");
+      click(`#quizPanel [data-quiz-option="${correctIndex}"]`);
+    };
     const firstQuizIpa = frameDocument.querySelector("#quizPanel .word-ipa")?.textContent?.trim() ?? "";
     if (!firstQuizIpa) throw new Error("Main app study smoke did not show IPA in the Study One More card.");
     if (!firstCandidate || firstCandidate.studyLevel !== "very_easy") throw new Error("Study One More did not default to a Very Easy candidate.");
-    if (!/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) throw new Error("Study One More card did not show an English definition.");
+    if (frameDocument.querySelector("#quizPanel [data-quiz-option]")) throw new Error("Study One More showed meaning choices before Reveal options.");
+    if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before the quiz.");
+    click("[data-quiz-reveal]");
+    if (!frameDocument.querySelector("#quizPanel [data-quiz-option]")) throw new Error("Study One More did not show quiz options after Reveal options.");
+    if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning after Reveal options.");
+    answerStudyOneMore();
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (frameDocument.querySelector("[data-study-one-more-show]")) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Study One More did not show actions after finishing the quiz."));
+        }
+      }, 100);
+    });
+    if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before tapping Show.");
+    click("[data-study-one-more-show]");
+    if (!frameDocument.querySelector("[data-study-one-more-meaning]") || !/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) {
+      throw new Error("Study One More did not show the full meaning after tapping Show.");
+    }
     click('[data-study-one-more-add="memorize"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -897,6 +928,22 @@ async function runMainAppStudySmoke() {
     const secondTerm = await waitForStudyOneMoreCard(firstTerm);
     const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
     if (!secondCandidate || secondCandidate.normalizedTerm === firstCandidate.normalizedTerm) throw new Error("Study One More repeated an introduced-today word.");
+    click("[data-quiz-reveal]");
+    answerStudyOneMore();
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (frameDocument.querySelector("[data-study-one-more-add=\"spelling\"]")) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Study One More did not keep add buttons after the second quiz."));
+        }
+      }, 100);
+    });
     click('[data-study-one-more-add="spelling"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();

@@ -138,6 +138,7 @@ git status
 git add .
 git commit -m "Publish WordFan app"
 git push origin gh-pages
+cd ..\WordFan\
 
 ```
 

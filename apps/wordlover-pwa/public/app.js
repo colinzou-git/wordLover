@@ -108,9 +108,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v83";
+const APP_VERSION = "0.6.2-product.20260602-v84";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v83";
+const SHELL_CACHE_VERSION = "wordlover-shell-v84";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3431,25 +3431,13 @@ function studyOneMoreEntryFromRow(row, level) {
     frequencyRank: row.frequencyRank,
     studyLevel: level,
     exampleSentence,
+    correct: meaningPreviewFromEntry(row),
   };
 }
 
-function renderStudyOneMoreEntry(entry) {
-  activeStudyOneMoreEntry = entry;
-  const levelLabel = STUDY_ONE_MORE_LEVELS.find((level) => level.id === entry.studyLevel)?.label ?? "Very Easy";
-  quizPanel.hidden = false;
-  quizPanel.innerHTML = `
-    <div class="study-one-more-card">
-      <div class="quiz-question">
-        <span>${escapeHtml(levelLabel)} candidate</span>
-        <div class="quiz-word-row">
-          <strong>${escapeHtml(entry.term)}</strong>
-          ${renderIpa(entry.phonetic)}
-          ${renderSpeakerButton(entry.term)}
-          ${renderAiChatButton(entry.term)}
-        </div>
-        <p class="muted">High-frequency word not already in your Memorize or Spelling list.</p>
-      </div>
+function renderStudyOneMoreMeaning(entry) {
+  return `
+    <div class="study-one-more-meaning" data-study-one-more-meaning="1">
       <div class="quiz-english">
         <span class="quiz-english-label">English</span>
         ${entry.englishMeanings.length ? entry.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : "<p>No English definition.</p>"}
@@ -3459,10 +3447,42 @@ function renderStudyOneMoreEntry(entry) {
         ${entry.chineseMeanings.length ? entry.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : "<p>No Chinese meaning.</p>"}
       </div>
       ${entry.exampleSentence ? `<div class="quiz-english"><span class="quiz-english-label">Example</span><p>${escapeHtml(entry.exampleSentence)}</p></div>` : ""}
+    </div>
+  `;
+}
+
+function renderStudyOneMoreActions(passed) {
+  return `
+    <div class="study-one-more-result">
+      <p class="muted">${passed ? "Correct. You knew this one." : "Not quite. You can add it for review or skip it for today."}</p>
       <div class="quiz-actions">
+        <button class="secondary-button" type="button" data-study-one-more-show="1">Show</button>
         <button type="button" data-study-one-more-add="memorize">Add to Memorize</button>
         <button class="secondary-button" type="button" data-study-one-more-add="spelling">Add to Spelling</button>
         <button class="secondary-button" type="button" data-study-one-more-skip="1">Skip</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStudyOneMoreEntry(entry) {
+  activeStudyOneMoreEntry = entry;
+  activeQuiz = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `quiz-${Date.now()}`,
+    mode: "study-one-more",
+    entry,
+    answered: false,
+    startedAt: performance.now(),
+    options: buildQuizOptions(entry),
+    stepwise: true,
+    optionsRevealed: false,
+  };
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <div class="study-one-more-card">
+      ${renderQuizQuestionMarkup(entry, "study-one-more", false)}
+      <div class="quiz-actions">
+        <button type="button" data-quiz-reveal="1">Reveal options</button>
       </div>
     </div>
   `;
@@ -3561,15 +3581,15 @@ function renderQuizEnglishMeaning(entry) {
 function renderQuizQuestionMarkup(entry, mode, optionsRevealed) {
   return `
     <div class="quiz-question">
-      <span>${mode === "review" ? "Review" : mode === "practice" ? "Practice" : "First check"}</span>
+      <span>${mode === "review" ? "Review" : mode === "practice" ? "Practice" : mode === "study-one-more" ? "Study one more" : "First check"}</span>
       <div class="quiz-word-row">
         <strong>${escapeHtml(entry.term)}</strong>
         ${renderIpa(entry.phonetic)}
         ${renderSpeakerButton(entry.term)}
         ${renderAiChatButton(entry.term)}
       </div>
-      ${optionsRevealed ? renderQuizEnglishMeaning(entry) : ""}
-      <p class="muted">${optionsRevealed ? "Choose the closest meaning." : "Try to recall the meaning. Tap when ready."}</p>
+      ${optionsRevealed && mode !== "study-one-more" ? renderQuizEnglishMeaning(entry) : ""}
+      <p class="muted">${mode === "study-one-more" ? "Choose the closest meaning before viewing the definition." : optionsRevealed ? "Choose the closest meaning." : "Try to recall the meaning. Tap when ready."}</p>
     </div>
   `;
 }
@@ -3623,10 +3643,13 @@ function revealQuizOptions() {
   if (!activeQuiz || activeQuiz.optionsRevealed) return;
   activeQuiz.optionsRevealed = true;
   activeQuiz.startedAt = performance.now();
-  quizPanel.innerHTML = `
-    ${renderQuizQuestionMarkup(activeQuiz.entry, activeQuiz.mode, true)}
-    ${renderQuizOptionsMarkup(activeQuiz.options)}
-  `;
+  const content = `
+      ${renderQuizQuestionMarkup(activeQuiz.entry, activeQuiz.mode, true)}
+      ${renderQuizOptionsMarkup(activeQuiz.options)}
+    `;
+  quizPanel.innerHTML = activeQuiz.mode === "study-one-more"
+    ? `<div class="study-one-more-card">${content}</div>`
+    : content;
 }
 
 async function startDueReview() {
@@ -3693,6 +3716,7 @@ async function addStudyOneMoreCandidate(target) {
     await saveVocabularyItem(data, "study-one-more");
   }
   activeStudyOneMoreEntry = null;
+  activeQuiz = null;
   quizPanel.hidden = false;
   quizPanel.innerHTML = `
     <p class="muted">Added "${escapeHtml(entry.term)}" to ${target === "spelling" ? "Spelling" : "Memorize"}.</p>
@@ -3708,6 +3732,7 @@ async function skipStudyOneMoreCandidate() {
     await recordStudyOneMoreEvent(activeStudyOneMoreEntry, "study-one-more-skipped");
   }
   activeStudyOneMoreEntry = null;
+  activeQuiz = null;
   quizPanel.hidden = false;
   quizPanel.innerHTML = `
     <p class="muted">Skipped. WordFan will avoid this word for the rest of today.</p>
@@ -3716,6 +3741,14 @@ async function skipStudyOneMoreCandidate() {
       <button type="button" data-study-next="1">Study another</button>
     </div>
   `;
+}
+
+function showStudyOneMoreMeaning() {
+  if (!activeStudyOneMoreEntry || quizPanel.querySelector("[data-study-one-more-meaning]")) return;
+  const actions = quizPanel.querySelector(".study-one-more-result");
+  if (actions) {
+    actions.insertAdjacentHTML("beforebegin", renderStudyOneMoreMeaning(activeStudyOneMoreEntry));
+  }
 }
 
 function renderFsrsRatingChoices(passed) {
@@ -3740,7 +3773,7 @@ async function handleQuizAnswer(index) {
   if (!activeQuiz || activeQuiz.answered) return;
   const selected = activeQuiz.options[index];
   if (!selected) return;
-  if (!activeQuiz.optionsRevealed) revealQuizOptions();
+  if (!activeQuiz.optionsRevealed && activeQuiz.stepwise) revealQuizOptions();
   activeQuiz.answered = true;
   quizPanel.querySelectorAll("[data-quiz-option]").forEach((button, buttonIndex) => {
     const option = activeQuiz.options[buttonIndex];
@@ -3753,6 +3786,11 @@ async function handleQuizAnswer(index) {
   const rating = inferFsrsRating(passed, responseMs);
   if (activeQuiz.mode === "new") {
     await handleNewWordQuizResult(passed, rating, responseMs);
+    return;
+  }
+  if (activeQuiz.mode === "study-one-more") {
+    activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
+    quizPanel.querySelector(".study-one-more-card")?.insertAdjacentHTML("beforeend", renderStudyOneMoreActions(passed));
     return;
   }
   activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
@@ -6347,6 +6385,10 @@ quizPanel.addEventListener("click", (event) => {
   const studyOneMoreAdd = target.closest("[data-study-one-more-add]");
   if (studyOneMoreAdd instanceof HTMLButtonElement) {
     void addStudyOneMoreCandidate(studyOneMoreAdd.dataset.studyOneMoreAdd === "spelling" ? "spelling" : "memorize");
+    return;
+  }
+  if (target.closest("[data-study-one-more-show]")) {
+    showStudyOneMoreMeaning();
     return;
   }
   if (target.closest("[data-study-one-more-skip]")) {
