@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v88";
+const SHELL_CACHE_NAME = "wordlover-shell-v89";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -27,10 +27,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-14",
+  "/app.js?v=20260603-15",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260603-14",
-  "/wordlover-config.js?v=20260603-14",
+  "/styles.css?v=20260603-15",
+  "/wordlover-config.js?v=20260603-15",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -46,7 +46,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-14",
+  "/automated-tests.js?v=20260603-15",
 ];
 
 let lastResults = null;
@@ -759,8 +759,8 @@ async function runMainAppStudySmoke() {
       }, 250);
     });
 
-    const frameWindow = frame.contentWindow;
-    const frameDocument = frame.contentDocument;
+    let frameWindow = frame.contentWindow;
+    let frameDocument = frame.contentDocument;
     const click = (selector) => {
       const button = frameDocument.querySelector(selector);
       if (!button) throw new Error(`Main app study smoke missing button: ${selector}`);
@@ -962,6 +962,58 @@ async function runMainAppStudySmoke() {
     if (!eventSourcedMergeRebuiltFsrs) {
       throw new Error(`Merged FSRS state should replay review events and ignore practice events: ${JSON.stringify(replayMergedItem?.review)}`);
     }
+
+    await frameWindow.WordLoverApp.uiPreferences.set({
+      todayTrack: "spelling",
+      vocabularyTrack: "spelling",
+      historyTrack: "spelling",
+    });
+    const uiPreferenceSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
+    const uiPreferencesIncludedInSnapshot =
+      uiPreferenceSnapshot.uiPreferences?.todayTrack === "spelling"
+      && uiPreferenceSnapshot.uiPreferences?.vocabularyTrack === "spelling"
+      && uiPreferenceSnapshot.uiPreferences?.historyTrack === "spelling";
+    frame.src = `/?suite-study-smoke=${Date.now()}&prefs-reload=1`;
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const reloadedWindow = frame.contentWindow;
+        unlockMainAppFrame(frame);
+        const input = frame.contentDocument?.querySelector("#termInput");
+        const loaded = Boolean(reloadedWindow?.WordLoverApp?.getState?.().loaded && input && !input.disabled);
+        if (loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 30000) {
+          window.clearInterval(timer);
+          reject(new Error("Timed out waiting for UI preference reload."));
+        }
+      }, 250);
+    });
+    frameWindow = frame.contentWindow;
+    frameDocument = frame.contentDocument;
+    const reloadedUiPreferences = frameWindow.WordLoverApp.uiPreferences.state();
+    const uiPreferencesSurviveReload =
+      reloadedUiPreferences.todayTrack === "spelling"
+      && reloadedUiPreferences.vocabularyTrack === "spelling"
+      && reloadedUiPreferences.historyTrack === "spelling"
+      && uiPreferencesIncludedInSnapshot;
+    if (!uiPreferencesSurviveReload) {
+      throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
+    }
+
+    await frameWindow.WordLoverApp.auth.setGrantForTest(true);
+    frameWindow.WordLoverApp.auth.clearTokenForTest();
+    const expiredAuthStatus = frameWindow.WordLoverApp.auth.statusText();
+    const googleExpiredSessionAutoReconnectMessage =
+      /Reconnecting automatically/i.test(expiredAuthStatus)
+      && !/Tap Sign in with Google/i.test(expiredAuthStatus);
+    if (!googleExpiredSessionAutoReconnectMessage) {
+      throw new Error(`Expired Google auth should auto-reconnect without manual Sign-in copy: ${expiredAuthStatus}`);
+    }
+    await frameWindow.WordLoverApp.auth.setGrantForTest(false);
 
     click("#studyNewWord");
     const firstTerm = await waitForStudyOneMoreCard();
@@ -1237,6 +1289,8 @@ async function runMainAppStudySmoke() {
       studyOneMoreTests,
       reviewSchedulingTests,
       eventSourcedMergeRebuiltFsrs,
+      uiPreferencesSurviveReload,
+      googleExpiredSessionAutoReconnectMessage,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,

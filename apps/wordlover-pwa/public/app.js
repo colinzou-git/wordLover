@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v88";
+const APP_VERSION = "0.6.2-product.20260603-v89";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v88";
+const SHELL_CACHE_VERSION = "wordlover-shell-v89";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -260,6 +260,7 @@ let pendingAppReloadUrl = null;
 let googleClientIdOverride = "";
 let dataDecryptBlock = null;
 let dataDecryptWarningOpen = false;
+let googleReconnectPromise = null;
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -267,6 +268,43 @@ function formatMs(value) {
 
 function normalizeTerm(term) {
   return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeTrack(value) {
+  return value === "spelling" ? "spelling" : "vocabulary";
+}
+
+function currentUiPreferences() {
+  return {
+    todayTrack: normalizeTrack(todayTrack),
+    vocabularyTrack: normalizeTrack(vocabularyView.track),
+    historyTrack: normalizeTrack(historyView.track),
+  };
+}
+
+function applyUiPreferences(preferences = {}) {
+  todayTrack = normalizeTrack(preferences.todayTrack ?? todayTrack);
+  vocabularyView = {
+    ...vocabularyView,
+    track: normalizeTrack(preferences.vocabularyTrack ?? vocabularyView.track),
+  };
+  historyView = {
+    ...historyView,
+    track: normalizeTrack(preferences.historyTrack ?? historyView.track),
+  };
+  return currentUiPreferences();
+}
+
+function normalizeUiPreferences(preferences = {}, fallback = currentUiPreferences()) {
+  return {
+    todayTrack: normalizeTrack(preferences.todayTrack ?? fallback.todayTrack),
+    vocabularyTrack: normalizeTrack(preferences.vocabularyTrack ?? fallback.vocabularyTrack),
+    historyTrack: normalizeTrack(preferences.historyTrack ?? fallback.historyTrack),
+  };
+}
+
+async function persistUiPreferences() {
+  await saveValue("uiPreferences", currentUiPreferences());
 }
 
 function escapeHtml(value) {
@@ -852,7 +890,7 @@ function renderAppMenu() {
         ? `Signed in as ${googleAuth.profile.email}. Drive sync and AI ready.`
         : "Signed in with Google. Drive sync and AI ready.")
     : hasGoogleGrant()
-      ? "Session expired. Tap Sign in with Google to reconnect."
+      ? "Google session expired. Reconnecting automatically..."
       : getGoogleClientId()
         ? "Ready to connect Google."
         : "Production OAuth client is not available.";
@@ -1900,6 +1938,7 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
     onReturnAction: newer.onReturnAction ?? localSnapshot.onReturnAction ?? (newer.autosaveEnabled === false ? "none" : "vocabulary"),
     speakOnReturn: newer.speakOnReturn ?? localSnapshot.speakOnReturn ?? false,
     theme: newer.theme ?? localSnapshot.theme,
+    uiPreferences: newer.uiPreferences ?? localSnapshot.uiPreferences ?? null,
     studyGoals: newer.studyGoals ?? localSnapshot.studyGoals ?? null,
     lastMetrics: newer.lastMetrics ?? localSnapshot.lastMetrics,
   };
@@ -4572,9 +4611,41 @@ function stopAutoSync() {
   }
 }
 
+function canAutoReconnectGoogle() {
+  return Boolean(getGoogleClientId() && hasGoogleGrant() && navigator.onLine && !googleAuth.accessToken);
+}
+
+function autoReconnectGoogleSession(reason = "background", { syncAfter = false, includeGemini = false } = {}) {
+  if (!canAutoReconnectGoogle()) return Promise.resolve(null);
+  if (googleReconnectPromise) return googleReconnectPromise;
+  recordAuthDiag("auto-reconnect-start", { reason, includeGemini, syncAfter });
+  renderAppMenu();
+  googleReconnectPromise = ensureGoogleToken(includeGemini, { interactive: false })
+    .then((token) => {
+      recordAuthDiag("auto-reconnect-success", { reason });
+      if (syncAfter) void runAutoSync(`reconnect-${reason}`);
+      return token;
+    })
+    .catch((error) => {
+      recordAuthDiag("auto-reconnect-failed", { reason, message: error instanceof Error ? error.message : String(error) });
+      if (!appMenu.hidden && googleAuthStatus) {
+        googleAuthStatus.textContent = "Google session expired. WordFan will keep trying to reconnect automatically when this device is online.";
+      }
+      return null;
+    })
+    .finally(() => {
+      googleReconnectPromise = null;
+      renderAppMenu();
+    });
+  return googleReconnectPromise;
+}
+
 async function runAutoSync(reason) {
-  if (!googleAuth.accessToken) return;
   if (!navigator.onLine) return;
+  if (!googleAuth.accessToken) {
+    await autoReconnectGoogleSession(`autosync-${reason}`);
+    if (!googleAuth.accessToken) return;
+  }
   const now = Date.now();
   // Daily guarantee: startup/interval always run if we have not synced yet today.
   const dailyReason = reason === "startup" || reason === "interval";
@@ -4628,6 +4699,7 @@ function buildUserDataSnapshot() {
     onReturnAction,
     speakOnReturn,
     theme,
+    uiPreferences: currentUiPreferences(),
     studyGoals,
     lastMetrics,
   };
@@ -5107,6 +5179,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   const nextOnReturnAction = normalizeOnReturnAction(snapshot.onReturnAction ?? (snapshot.autosaveEnabled === false ? "none" : "vocabulary"));
   const nextSpeakOnReturn = Boolean(snapshot.speakOnReturn ?? false);
   const nextTheme = THEME_IDS.includes(snapshot.theme) ? snapshot.theme : DEFAULT_THEME;
+  const nextUiPreferences = normalizeUiPreferences(snapshot.uiPreferences ?? {});
   const nextLastMetrics = snapshot.lastMetrics ?? lastMetrics;
 
   await replaceUserDataAtomically({
@@ -5122,6 +5195,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
       onReturnAction: nextOnReturnAction,
       speakOnReturn: nextSpeakOnReturn,
       theme: nextTheme,
+      uiPreferences: nextUiPreferences,
       lastMetrics: nextLastMetrics,
     },
   });
@@ -5136,6 +5210,7 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   onReturnAction = nextOnReturnAction;
   speakOnReturn = nextSpeakOnReturn;
   theme = nextTheme;
+  applyUiPreferences(nextUiPreferences);
   lastMetrics = nextLastMetrics;
   if (allowDuringDecryptBlock) clearDataDecryptBlock();
 
@@ -6220,6 +6295,7 @@ async function init() {
   applyTheme(theme);
   fontScale = normalizeFontScale(await loadValue("fontScale", DEFAULT_FONT_SCALE));
   applyFontScale(fontScale);
+  applyUiPreferences(await loadValue("uiPreferences", {}));
   debugMode = await loadValue("debugMode", debugMode);
   googleClientIdOverride = String(await loadValue("googleClientIdOverride", "") ?? "").trim();
   geminiApiKeyOverride = String(await loadValue("geminiApiKeyOverride", "") ?? "").trim();
@@ -6254,9 +6330,7 @@ async function init() {
     } else if (hasGoogleGrant() && navigator.onLine) {
       // Token expired but the user already consented on this device: refresh silently in the
       // background so the session stays alive without forcing a re-login, then auto-sync.
-      void ensureGoogleToken(false, { interactive: false })
-        .then(() => { renderAppMenu(); void runAutoSync("startup"); })
-        .catch(() => {});
+      void autoReconnectGoogleSession("startup", { syncAfter: true });
     }
   } else {
     googleAuth.profile = await loadValue("googleProfile", null);
@@ -6264,6 +6338,9 @@ async function init() {
   }
   // Preload Google Identity now so the sign-in popup can open synchronously on tap (iOS).
   preloadGoogleIdentity();
+  if (hasGoogleGrant() && !googleAuth.accessToken && navigator.onLine) {
+    void autoReconnectGoogleSession("startup-legacy", { syncAfter: true });
+  }
   renderDebugState();
   renderAppMenu();
   historyItems = await loadValue("history", []);
@@ -6664,6 +6741,7 @@ for (const tab of todayTrackTabs) {
     hideQuiz();
     hideSpellingReview();
     renderStudyStats();
+    void persistUiPreferences();
   });
 }
 
@@ -6686,6 +6764,7 @@ for (const tab of vocabularyTrackTabs) {
       reviewCountMax: "",
     };
     renderVocabulary();
+    void persistUiPreferences();
   });
 }
 
@@ -6771,6 +6850,7 @@ function setAppMenuOpen(open) {
     renderAppMenu();
     // Warm up Google Identity so a Sign-in tap opens the popup synchronously (iOS activation).
     preloadGoogleIdentity();
+    void autoReconnectGoogleSession("settings-open");
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
   }
 }
@@ -6968,6 +7048,7 @@ for (const tab of historyTrackTabs) {
     if (!next || next === historyView.track) return;
     historyView = { ...historyView, track: next };
     renderHistoryChart();
+    void persistUiPreferences();
   });
 }
 
@@ -7010,6 +7091,7 @@ runReviewAutomationButton.addEventListener("click", () => {
 
 window.addEventListener("online", () => {
   renderAppMenu();
+  void autoReconnectGoogleSession("online", { syncAfter: true });
   void runAutoSync("online");
   // If the dictionary never installed (first run was offline), install it now that we're online.
   if (!loaded) void ensureDictionaryLoaded();
@@ -7017,11 +7099,13 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", renderAppMenu);
 window.addEventListener("focus", () => {
   refreshReviewScheduleViews();
+  void autoReconnectGoogleSession("focus");
   void runAutoSync("focus");
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     refreshReviewScheduleViews();
+    void autoReconnectGoogleSession("visibility");
     void runAutoSync("visibility");
   }
 });
@@ -7432,7 +7516,22 @@ window.WordLoverApp = {
       }, "test");
       return getSpellingItem(term);
     },
-    setTodayTrack: (track) => { todayTrack = track === "spelling" ? "spelling" : "vocabulary"; renderStudyStats(); },
+    setTodayTrack: (track) => {
+      todayTrack = normalizeTrack(track);
+      renderStudyStats();
+      void persistUiPreferences();
+    },
+  },
+  uiPreferences: {
+    state: () => currentUiPreferences(),
+    set: async (preferences = {}) => {
+      applyUiPreferences(preferences);
+      await persistUiPreferences();
+      renderVocabulary();
+      renderStudyStats();
+      renderHistoryChart();
+      return currentUiPreferences();
+    },
   },
   runAutomatedSearchSmoke,
   applyTheme: (next) => {
@@ -7488,6 +7587,20 @@ window.WordLoverApp = {
     }),
     expireToken: () => {
       googleAuth.expiresAt = Date.now() - 1000;
+      googleAuth.accessToken = null;
+      renderAppMenu();
+    },
+    setGrantForTest: async (granted) => {
+      await setGoogleGrant(Boolean(granted));
+      renderAppMenu();
+    },
+    statusText: () => googleAuthStatus?.textContent ?? "",
+    autoReconnect: (reason = "test") => autoReconnectGoogleSession(reason),
+    canAutoReconnect: canAutoReconnectGoogle,
+    clearTokenForTest: () => {
+      googleAuth.accessToken = null;
+      googleAuth.expiresAt = 0;
+      renderAppMenu();
     },
     describeSignInError: (message, options) => describeSignInError(new Error(String(message)), options),
     isStandalone: isStandalonePwa,
