@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js";
+} from "./fsrs-scheduler.js?v=20260603-17";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v90";
+const APP_VERSION = "0.6.2-product.20260603-v91";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v90";
+const SHELL_CACHE_VERSION = "wordlover-shell-v91";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -1818,19 +1818,20 @@ function mergeStudyEventSources(recordEvents, legacyEvents) {
 
 function mergeHistoryItems(localItems, remoteItems) {
   const byTerm = new Map();
+  const timeOf = (item) => Date.parse(item?.queriedAt ?? item?.searchedAt ?? 0) || 0;
   for (const item of [...(remoteItems ?? []), ...(localItems ?? [])]) {
     if (!item?.term) continue;
+    const at = item.queriedAt ?? item.searchedAt ?? null;
+    const normalizedItem = at ? { ...item, queriedAt: item.queriedAt ?? at, searchedAt: item.searchedAt ?? at } : item;
     const existing = byTerm.get(item.term);
     if (!existing) {
-      byTerm.set(item.term, item);
+      byTerm.set(item.term, normalizedItem);
       continue;
     }
-    const existingAt = Date.parse(existing.queriedAt ?? 0) || 0;
-    const incomingAt = Date.parse(item.queriedAt ?? 0) || 0;
-    if (incomingAt >= existingAt) byTerm.set(item.term, item);
+    if (timeOf(normalizedItem) >= timeOf(existing)) byTerm.set(item.term, normalizedItem);
   }
   return [...byTerm.values()]
-    .sort((left, right) => (right.queriedAt ?? "").localeCompare(left.queriedAt ?? ""))
+    .sort((left, right) => timeOf(right) - timeOf(left))
     .slice(0, 10);
 }
 
@@ -4180,11 +4181,16 @@ async function handleNewWordQuizResult(passed, rating, responseMs) {
 }
 
 async function addHistory(item) {
-  markDebugRecord(item);
-  historyItems = [item, ...historyItems.filter((entry) => entry.term !== item.term)].slice(0, 10);
+  const at = item.queriedAt ?? item.searchedAt ?? nowIso();
+  const normalizedItem = markDebugRecord({
+    ...item,
+    searchedAt: item.searchedAt ?? at,
+    queriedAt: item.queriedAt ?? at,
+  });
+  historyItems = [normalizedItem, ...historyItems.filter((entry) => entry.term !== normalizedItem.term)].slice(0, 10);
   await saveValue("history", historyItems);
   renderHistory();
-  if (item?.term) prefetchAiChat(item.term);
+  if (normalizedItem?.term) prefetchAiChat(normalizedItem.term);
 }
 
 async function runLookup({ commit = false } = {}) {
@@ -4202,7 +4208,8 @@ async function runLookup({ commit = false } = {}) {
     const data = lookupTerm(value);
     renderResult(data);
     if (commit && data.status === "found") {
-      await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
+      const at = nowIso();
+      await addHistory({ term: data.term, searchedAt: at, queriedAt: at, queryMs: data.queryMs ?? 0 });
     }
     return data;
   } catch (error) {
@@ -4217,7 +4224,8 @@ function runLoadedLookupForReturn() {
     const data = lookupTerm(value);
     renderResult(data);
     if (data.status === "found") {
-      void addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
+      const at = nowIso();
+      void addHistory({ term: data.term, searchedAt: at, queriedAt: at, queryMs: data.queryMs ?? 0 });
     }
     return data;
   } catch (error) {
@@ -6077,7 +6085,8 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
   const data = lookupTerm(term);
   renderResult(data);
   if (data.status === "found") {
-    await addHistory({ term: data.term, searchedAt: nowIso(), queryMs: data.queryMs ?? 0 });
+    const at = nowIso();
+    await addHistory({ term: data.term, searchedAt: at, queriedAt: at, queryMs: data.queryMs ?? 0 });
   }
   if (shouldReport) {
     await sendSmokeResult({

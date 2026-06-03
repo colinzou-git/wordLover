@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js";
+} from "./fsrs-scheduler.js?v=20260603-17";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v90";
+const SHELL_CACHE_NAME = "wordlover-shell-v91";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-16",
-  "/fsrs-scheduler.js",
-  "/styles.css?v=20260603-16",
-  "/wordlover-config.js?v=20260603-16",
+  "/app.js?v=20260603-17",
+  "/fsrs-scheduler.js?v=20260603-17",
+  "/styles.css?v=20260603-17",
+  "/wordlover-config.js?v=20260603-17",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-16",
+  "/automated-tests.js?v=20260603-17",
 ];
 
 let lastResults = null;
@@ -916,11 +916,34 @@ async function runMainAppStudySmoke() {
       throw new Error(`Early practice scheduling tests failed: ${JSON.stringify({ reviewSchedulingTests, dueGood, earlyAgain, earlyHard, earlyGood, earlyEasy, spellingEarlyGood, spellingEarlyMiss })}`);
     }
 
-    const localTodayKey = frameWindow.WordLoverApp.dateKeys.localDateKey(Date.parse("2026-06-03T00:30:00.000Z"));
-    const utcDateKeyAtCaliforniaEvening = frameWindow.WordLoverApp.dateKeys.localDateKey(Date.parse("2026-06-03T00:30:00.000Z"));
-    const localDateKeyUsesLocalTime = localTodayKey === utcDateKeyAtCaliforniaEvening && localTodayKey !== "2026-06-03";
+    const localDateProbeMs = Date.parse("2026-06-03T00:30:00.000Z");
+    const localDateProbe = new Date(localDateProbeMs);
+    const expectedLocalDateKey = `${localDateProbe.getFullYear()}-${String(localDateProbe.getMonth() + 1).padStart(2, "0")}-${String(localDateProbe.getDate()).padStart(2, "0")}`;
+    const localTodayKey = frameWindow.WordLoverApp.dateKeys.localDateKey(localDateProbeMs);
+    const localDateKeyUsesLocalTime = localTodayKey === expectedLocalDateKey;
     if (!localDateKeyUsesLocalTime) {
-      throw new Error(`localDateKey should use the browser's local date, not UTC. Got ${localTodayKey}.`);
+      throw new Error(`localDateKey should use the browser's local date. Got ${localTodayKey}, expected ${expectedLocalDateKey}.`);
+    }
+
+    await frameWindow.WordLoverApp.runAutomatedSearchSmoke("abandon", false);
+    const savedHistoryEntry = frameWindow.WordLoverApp.getState().historyItems.find((item) => item.term === "abandon");
+    const historyWritesBothTimestampFields = Boolean(savedHistoryEntry?.searchedAt && savedHistoryEntry?.queriedAt);
+    const historyMergeSnapshot = frameWindow.WordLoverApp.mergeSnapshots(
+      {
+        ...frameWindow.WordLoverApp.buildUserDataSnapshot(),
+        historyItems: [{ term: "history timestamp test", searchedAt: "2026-06-01T00:00:00.000Z" }],
+      },
+      {
+        ...frameWindow.WordLoverApp.buildUserDataSnapshot(),
+        historyItems: [{ term: "history timestamp test", searchedAt: "2026-06-02T00:00:00.000Z" }],
+      },
+    );
+    const mergedHistoryEntry = historyMergeSnapshot.historyItems.find((item) => item.term === "history timestamp test");
+    const historyMergeUsesSearchedAtFallback =
+      mergedHistoryEntry?.searchedAt === "2026-06-02T00:00:00.000Z"
+      && mergedHistoryEntry?.queriedAt === "2026-06-02T00:00:00.000Z";
+    if (!historyWritesBothTimestampFields || !historyMergeUsesSearchedAtFallback) {
+      throw new Error(`Recent history timestamps should write and merge both fields: ${JSON.stringify({ savedHistoryEntry, mergedHistoryEntry })}`);
     }
 
     const replayBase = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("event sourced fsrs test", "event sourced meaning", "event sourced");
@@ -1370,6 +1393,8 @@ async function runMainAppStudySmoke() {
       uiPreferencesSurviveReload,
       googleExpiredSessionAutoReconnectMessage,
       localDateKeyUsesLocalTime,
+      historyWritesBothTimestampFields,
+      historyMergeUsesSearchedAtFallback,
       studyOneMoreMissCreatesAgainReview,
       firstQuizIpa,
       vocabularyStatsRendered: true,
