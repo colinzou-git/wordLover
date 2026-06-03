@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v87";
+const SHELL_CACHE_NAME = "wordlover-shell-v88";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -27,10 +27,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-13",
+  "/app.js?v=20260603-14",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260603-13",
-  "/wordlover-config.js?v=20260603-13",
+  "/styles.css?v=20260603-14",
+  "/wordlover-config.js?v=20260603-14",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -46,7 +46,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-13",
+  "/automated-tests.js?v=20260603-14",
 ];
 
 let lastResults = null;
@@ -876,18 +876,91 @@ async function runMainAppStudySmoke() {
       reviewedAt: earlyPracticeReviewedAt,
       mode: "practice",
     });
+    const spellingEarlyGood = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "good",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+      track: "spelling",
+    });
+    const spellingEarlyMiss = frameWindow.WordLoverApp.reviewScheduling.applyPolicy({
+      reviewState: futureReviewState,
+      rating: "good",
+      reviewedAt: earlyPracticeReviewedAt,
+      mode: "practice",
+      track: "spelling",
+      hadMiss: true,
+    });
     const originalDueMs = Date.parse(earlyPracticeOriginalDue);
-    const dayMs = 24 * 60 * 60 * 1000;
     const reviewSchedulingTests = {
       dueReviewUsesFullFsrs: dueGood.schedulingPolicy === "scheduled-review-full" && dueGood.dueAt === dueGood.fsrsDueAt,
-      earlyAgainUsesFullFsrs: earlyAgain.schedulingPolicy === "early-practice-full-again" && earlyAgain.dueAt === earlyAgain.fsrsDueAt,
-      earlyHardDoesNotExtendDue: earlyHard.schedulingPolicy === "early-practice-capped" && Date.parse(earlyHard.dueAt) === originalDueMs,
-      earlyGoodExtensionCapped: earlyGood.schedulingPolicy === "early-practice-capped" && Date.parse(earlyGood.dueAt) <= originalDueMs + dayMs,
-      earlyEasyExtensionCapped: earlyEasy.schedulingPolicy === "early-practice-capped" && Date.parse(earlyEasy.dueAt) <= originalDueMs + 3 * dayMs,
-      earlyCorrectKeepsDueAtFuture: [earlyHard, earlyGood, earlyEasy].every((schedule) => Date.parse(schedule.dueAt) >= originalDueMs),
+      earlyAgainUsesFullFsrs: earlyAgain.schedulingPolicy === "early-practice-full-failure" && earlyAgain.dueAt === earlyAgain.fsrsDueAt,
+      earlyHardIsRecordOnly: earlyHard.schedulingPolicy === "early-practice-record-only" && earlyHard.recordOnlyPractice === true,
+      earlyCorrectKeepsRealDueAndCard: [earlyHard, earlyGood, earlyEasy].every((schedule) =>
+        schedule.dueAt === earlyPracticeOriginalDue
+        && schedule.fsrsCard.reps === futureReviewState.fsrsCard.reps
+        && schedule.fsrsCard.stability === futureReviewState.fsrsCard.stability
+      ),
+      spellingEarlyPracticeUsesSamePolicy: spellingEarlyGood.schedulingPolicy === "early-practice-record-only" && spellingEarlyGood.recordOnlyPractice === true,
+      spellingEarlyMissUsesFullFsrs: spellingEarlyMiss.schedulingPolicy === "early-practice-full-failure" && spellingEarlyMiss.recordOnlyPractice === false,
     };
     if (!Object.values(reviewSchedulingTests).every(Boolean)) {
-      throw new Error(`Early practice scheduling tests failed: ${JSON.stringify({ reviewSchedulingTests, dueGood, earlyAgain, earlyHard, earlyGood, earlyEasy })}`);
+      throw new Error(`Early practice scheduling tests failed: ${JSON.stringify({ reviewSchedulingTests, dueGood, earlyAgain, earlyHard, earlyGood, earlyEasy, spellingEarlyGood, spellingEarlyMiss })}`);
+    }
+
+    const replayBase = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("event sourced fsrs test", "event sourced meaning", "event sourced");
+    const replayLookup = frameWindow.WordLoverApp.lookupTerm(replayBase.word);
+    const replayItem = await frameWindow.WordLoverApp.saveVocabularyItem(replayLookup, "event-source-test");
+    const replaySnapshotBase = frameWindow.WordLoverApp.buildUserDataSnapshot();
+    const replayEvents = [
+      {
+        id: "replay-local-good",
+        type: "review",
+        term: replayItem.term,
+        normalizedTerm: replayItem.normalizedTerm,
+        rating: "good",
+        occurredAt: "2026-06-01T08:00:00.000Z",
+      },
+      {
+        id: "replay-remote-again",
+        type: "review",
+        term: replayItem.term,
+        normalizedTerm: replayItem.normalizedTerm,
+        rating: "again",
+        occurredAt: "2026-06-02T08:00:00.000Z",
+      },
+      {
+        id: "replay-practice-easy",
+        type: "practice",
+        term: replayItem.term,
+        normalizedTerm: replayItem.normalizedTerm,
+        rating: "easy",
+        occurredAt: "2026-06-02T09:00:00.000Z",
+      },
+    ];
+    const staleLocalItem = {
+      ...replayItem,
+      savedAt: "2026-06-01T07:00:00.000Z",
+      updatedAt: "2026-06-03T00:00:00.000Z",
+      review: { ...replayItem.review, reviewCount: 99, lastRating: "easy" },
+    };
+    const staleRemoteItem = {
+      ...replayItem,
+      savedAt: "2026-06-01T07:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+      review: { ...replayItem.review, reviewCount: 1, lastRating: "good" },
+    };
+    const replayMerged = frameWindow.WordLoverApp.mergeSnapshots(
+      { ...replaySnapshotBase, vocabularyItems: [staleLocalItem], studyEvents: [replayEvents[0], replayEvents[2]] },
+      { ...replaySnapshotBase, vocabularyItems: [staleRemoteItem], studyEvents: [replayEvents[1]] },
+    );
+    const replayMergedItem = replayMerged.vocabularyItems.find((item) => item.normalizedTerm === replayItem.normalizedTerm);
+    const eventSourcedMergeRebuiltFsrs =
+      replayMergedItem?.review?.reviewCount === 2
+      && replayMergedItem.review.lastRating === "again"
+      && replayMerged.studyEvents.length === 3;
+    if (!eventSourcedMergeRebuiltFsrs) {
+      throw new Error(`Merged FSRS state should replay review events and ignore practice events: ${JSON.stringify(replayMergedItem?.review)}`);
     }
 
     click("#studyNewWord");
@@ -1163,6 +1236,7 @@ async function runMainAppStudySmoke() {
       studyOneMoreSpellingSaved: true,
       studyOneMoreTests,
       reviewSchedulingTests,
+      eventSourcedMergeRebuiltFsrs,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,

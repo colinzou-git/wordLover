@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v87";
+const APP_VERSION = "0.6.2-product.20260603-v88";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v87";
+const SHELL_CACHE_VERSION = "wordlover-shell-v88";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -1818,18 +1818,63 @@ function activeStudyTermsFromItems(vocabulary = [], spelling = []) {
   return terms;
 }
 
+function rebuildReviewStateFromEvents(item, events = []) {
+  const normalizedTerm = item?.normalizedTerm ?? normalizeTerm(item?.term ?? "");
+  if (!normalizedTerm) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? nowIso() });
+  const reviewEvents = (events ?? [])
+    .filter((event) => event?.type === "review" && event.normalizedTerm === normalizedTerm && event.rating && event.occurredAt)
+    .slice()
+    .sort((left, right) => (left.occurredAt ?? "").localeCompare(right.occurredAt ?? ""));
+  if (!reviewEvents.length) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? nowIso() });
+
+  const createdAt = item?.savedAt ?? reviewEvents[0].occurredAt ?? nowIso();
+  let review = normalizeReviewState({
+    dueAt: createdAt,
+    fsrsCard: createFsrsCard(createdAt),
+  });
+  for (const event of reviewEvents) {
+    const schedule = scheduleWithFsrs(review, event.rating, event.occurredAt);
+    review = {
+      ...review,
+      lastRating: event.rating,
+      intervalDays: schedule.intervalDays,
+      dueAt: schedule.dueAt,
+      masteredAt: schedule.masteredAt,
+      lastReviewedAt: event.occurredAt,
+      reviewCount: (review.reviewCount ?? 0) + 1,
+      fsrsCard: schedule.fsrsCard,
+    };
+  }
+  return normalizeReviewState(review);
+}
+
+function rebuildItemsReviewStateFromEvents(items = [], events = []) {
+  return (items ?? []).map((item) => ({
+    ...item,
+    review: rebuildReviewStateFromEvents(item, events),
+  }));
+}
+
 function mergeSnapshots(localSnapshot, remoteSnapshot) {
   const localUpdated = Date.parse(localSnapshot?.exportedAt ?? 0) || 0;
   const remoteUpdated = Date.parse(remoteSnapshot?.exportedAt ?? 0) || 0;
   const newer = remoteUpdated > localUpdated ? remoteSnapshot : localSnapshot;
-  const mergedVocabularyItems = mergeVocabularySources(
+  const mergedStudyEvents = mergeStudyEventSources(
+    localSnapshot.studyEvents ?? [],
+    remoteSnapshot?.studyEvents ?? [],
+  );
+  const mergedSpellingEvents = mergeStudyEventSources(
+    localSnapshot.spellingEvents ?? [],
+    remoteSnapshot?.spellingEvents ?? [],
+  );
+  const mergedVocabularyItems = rebuildItemsReviewStateFromEvents(mergeVocabularySources(
     localSnapshot.vocabularyItems ?? [],
     remoteSnapshot?.vocabularyItems ?? [],
-  );
-  const mergedSpellingItems = mergeVocabularySources(
+  ), mergedStudyEvents);
+  const mergedSpellingItems = rebuildItemsReviewStateFromEvents(mergeVocabularySources(
     localSnapshot.spellingItems ?? [],
     remoteSnapshot?.spellingItems ?? [],
-  );
+  ), mergedSpellingEvents);
   const mergedKnownWords = mergeKnownSources(
     localSnapshot.knownWords ?? [],
     remoteSnapshot?.knownWords ?? [],
@@ -1843,15 +1888,9 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
     profile: localSnapshot.profile ?? remoteSnapshot?.profile ?? null,
     historyItems: mergeHistoryItems(localSnapshot.historyItems, remoteSnapshot?.historyItems),
     vocabularyItems: mergedVocabularyItems,
-    studyEvents: mergeStudyEventSources(
-      localSnapshot.studyEvents ?? [],
-      remoteSnapshot?.studyEvents ?? [],
-    ),
+    studyEvents: mergedStudyEvents,
     spellingItems: mergedSpellingItems,
-    spellingEvents: mergeStudyEventSources(
-      localSnapshot.spellingEvents ?? [],
-      remoteSnapshot?.spellingEvents ?? [],
-    ),
+    spellingEvents: mergedSpellingEvents,
     userDictionary: mergeUserDictionarySources(
       localSnapshot.userDictionary ?? [],
       remoteSnapshot?.userDictionary ?? [],
@@ -1905,6 +1944,21 @@ async function deleteVocabularyRecord(item) {
 async function persistStudyEvent(event) {
   await saveRecordValue(STUDY_EVENT_STORE, event.id, event);
   renderStudyStats();
+}
+
+async function saveReviewItemAndEvent({ itemStore, eventStore, itemKey, item, event }) {
+  assertUserDataWritable(`Saving review for "${itemKey}"`);
+  const encryptedItem = await encryptValue(item);
+  const encryptedEvent = await encryptValue(event);
+  const db = await getUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([itemStore, eventStore], "readwrite");
+    tx.objectStore(itemStore).put(encryptedItem, itemKey);
+    tx.objectStore(eventStore).put(encryptedEvent, event.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("Review transaction aborted."));
+  });
 }
 
 // --- Spelling track persistence (mirrors the vocabulary track) ---
@@ -3127,51 +3181,45 @@ function daysBetweenMs(fromMs, toMs) {
   return Math.max(0, (toMs - fromMs) / NORMAL_DAY_MS);
 }
 
-function applyVocabularyReviewSchedulingPolicy({
+function applyReviewSchedulingPolicy({
   reviewState = {},
   rating = "again",
   reviewedAt = nowIso(),
   mode = "review",
+  track = "vocabulary",
+  hadMiss = false,
 } = {}) {
   const normalized = normalizeReviewState(reviewState);
   const fullSchedule = scheduleWithFsrs(normalized, rating, reviewedAt);
   const reviewedAtMs = Date.parse(reviewedAt);
   const originalDueMs = Date.parse(normalized.dueAt);
-  const fullDueMs = Date.parse(fullSchedule.dueAt);
   const earlyPractice = mode === "practice" && Number.isFinite(originalDueMs) && Number.isFinite(reviewedAtMs) && originalDueMs > reviewedAtMs;
-  if (!earlyPractice || rating === "again") {
+  const earlyFailure = rating === "again" || hadMiss;
+  if (!earlyPractice || earlyFailure) {
     return {
       ...fullSchedule,
-      schedulingPolicy: earlyPractice ? "early-practice-full-again" : "scheduled-review-full",
+      schedulingPolicy: earlyPractice ? "early-practice-full-failure" : "scheduled-review-full",
       originalDueAt: normalized.dueAt,
       fsrsDueAt: fullSchedule.dueAt,
+      track,
+      recordOnlyPractice: false,
     };
-  }
-  const capMs = EARLY_PRACTICE_DUE_EXTENSION_CAPS[rating] ?? 0;
-  const cappedDueMs = Math.max(originalDueMs, Math.min(Number.isFinite(fullDueMs) ? fullDueMs : originalDueMs, originalDueMs + capMs));
-  const dueAt = new Date(cappedDueMs).toISOString();
-  const intervalDays = daysBetweenMs(reviewedAtMs, cappedDueMs);
-  const fsrsCard = {
-    ...fullSchedule.fsrsCard,
-    due: dueAt,
-    scheduled_days: Math.max(0, Math.round(intervalDays)),
-    scheduledDays: Math.max(0, Math.round(intervalDays)),
-  };
-  if (fsrsCard.last_review || fsrsCard.lastReview) {
-    fsrsCard.last_review = reviewedAt;
-    fsrsCard.lastReview = reviewedAt;
   }
   return {
     ...fullSchedule,
-    fsrsCard,
-    intervalDays,
-    dueAt,
+    fsrsCard: normalized.fsrsCard,
+    intervalDays: normalized.intervalDays,
+    dueAt: normalized.dueAt,
     masteredAt: normalized.masteredAt ?? null,
-    schedulingPolicy: "early-practice-capped",
+    schedulingPolicy: "early-practice-record-only",
     originalDueAt: normalized.dueAt,
     fsrsDueAt: fullSchedule.dueAt,
+    track,
+    recordOnlyPractice: true,
   };
 }
+
+const applyVocabularyReviewSchedulingPolicy = applyReviewSchedulingPolicy;
 
 function inferFsrsRating(passed, responseMs) {
   if (!passed) return "again";
@@ -3187,28 +3235,17 @@ async function persistStudyEvents() {
 
 async function recordReviewRating(item, rating, quizResult, responseMs, mode = "review") {
   const reviewedAt = nowIso();
-  const schedule = applyVocabularyReviewSchedulingPolicy({
+  const schedule = applyReviewSchedulingPolicy({
     reviewState: item.review ?? {},
     rating,
     reviewedAt,
     mode,
+    track: "vocabulary",
+    hadMiss: rating === "again" || quizResult === "miss",
   });
-  item.review = {
-    ...(item.review ?? {}),
-    lastRating: rating,
-    intervalDays: schedule.intervalDays,
-    dueAt: schedule.dueAt,
-    masteredAt: schedule.masteredAt,
-    lastReviewedAt: reviewedAt,
-    reviewCount: (item.review?.reviewCount ?? 0) + 1,
-    fsrsCard: schedule.fsrsCard,
-  };
-  item.updatedAt = reviewedAt;
-  item.syncVersion = (item.syncVersion ?? 0) + 1;
-  item.isSynced = false;
   const event = markDebugRecord({
     id: crypto.randomUUID ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    type: "review",
+    type: schedule.recordOnlyPractice ? "practice" : "review",
     term: item.term,
     normalizedTerm: item.normalizedTerm,
     rating,
@@ -3225,8 +3262,31 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
     deviceId,
   });
   studyEvents.push(event);
-  await saveRecordValue(VOCABULARY_STORE, item.normalizedTerm, item);
-  await persistStudyEvent(event);
+  if (schedule.recordOnlyPractice) {
+    await persistStudyEvent(event);
+  } else {
+    item.review = {
+      ...(item.review ?? {}),
+      lastRating: rating,
+      intervalDays: schedule.intervalDays,
+      dueAt: schedule.dueAt,
+      masteredAt: schedule.masteredAt,
+      lastReviewedAt: reviewedAt,
+      reviewCount: (item.review?.reviewCount ?? 0) + 1,
+      fsrsCard: schedule.fsrsCard,
+    };
+    item.updatedAt = reviewedAt;
+    item.syncVersion = (item.syncVersion ?? 0) + 1;
+    item.isSynced = false;
+    await saveReviewItemAndEvent({
+      itemStore: VOCABULARY_STORE,
+      eventStore: STUDY_EVENT_STORE,
+      itemKey: item.normalizedTerm,
+      item,
+      event,
+    });
+    renderStudyStats();
+  }
   hideQuiz();
   renderHistoryChart();
 }
@@ -3280,26 +3340,26 @@ function getPracticeSpellingItems() {
     });
 }
 
-function startSpellingSessionWith(queue, emptyMessage) {
+function startSpellingSessionWith(queue, emptyMessage, mode = "review") {
   spellingReviewPanel.hidden = false;
   if (!queue.length) {
     activeSpellingSession = null;
     spellingReviewPanel.innerHTML = `<p class="muted">${escapeHtml(emptyMessage)}</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
     return;
   }
-  activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false };
+  activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false, mode };
   quizPanel.hidden = true;
   renderSpellingPrompt();
 }
 
 function startSpellingReview() {
-  startSpellingSessionWith(getDueSpellingItems(), "No spelling words are due today.");
+  startSpellingSessionWith(getDueSpellingItems(), "No spelling words are due today.", "review");
 }
 
 // Practice mode: drill every active spelling word (least-recently-practiced first),
 // regardless of whether it is due.
 function startSpellingPractice() {
-  startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.");
+  startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.", "practice");
 }
 
 function renderSpellingPrompt() {
@@ -3405,6 +3465,7 @@ function completeCurrentSpellingWord() {
   if (!item || !session) return;
   const rating = ratingFromRetries(session.retries);
   const retries = session.retries;
+  const mode = session.mode ?? "review";
   session.completed += 1;
   session.index += 1;
   session.retries = 0;
@@ -3416,14 +3477,43 @@ function completeCurrentSpellingWord() {
     // IndexedDB/FSRS work cannot make a first-try-correct answer appear stuck.
     renderSpellingPrompt();
   }
-  void recordSpellingReview(item, rating, retries).catch((error) => {
+  void recordSpellingReview(item, rating, retries, mode).catch((error) => {
     console.error("Failed to persist spelling review:", error);
   });
 }
 
-async function recordSpellingReview(item, rating, retries) {
+async function recordSpellingReview(item, rating, retries, mode = "review") {
   const reviewedAt = nowIso();
-  const schedule = scheduleWithFsrs(normalizeReviewState(item.review ?? {}), rating, reviewedAt);
+  const schedule = applyReviewSchedulingPolicy({
+    reviewState: item.review ?? {},
+    rating,
+    reviewedAt,
+    mode,
+    track: "spelling",
+    hadMiss: retries > 0,
+  });
+  const event = markDebugRecord({
+    id: crypto.randomUUID ? crypto.randomUUID() : `spelling-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type: schedule.recordOnlyPractice ? "practice" : "review",
+    term: item.term,
+    normalizedTerm: item.normalizedTerm,
+    rating,
+    retries,
+    mastered: Boolean(schedule.masteredAt),
+    occurredAt: reviewedAt,
+    fsrsLog: schedule.fsrsLog,
+    schedulingPolicy: schedule.schedulingPolicy,
+    originalDueAt: schedule.originalDueAt,
+    fsrsDueAt: schedule.fsrsDueAt,
+    appliedDueAt: schedule.dueAt,
+    practiceMode: mode,
+    deviceId,
+  });
+  spellingEvents.push(event);
+  if (schedule.recordOnlyPractice) {
+    await persistSpellingEvent(event);
+    return;
+  }
   item.review = {
     ...(item.review ?? {}),
     lastRating: rating,
@@ -3437,21 +3527,14 @@ async function recordSpellingReview(item, rating, retries) {
   item.updatedAt = reviewedAt;
   item.syncVersion = (item.syncVersion ?? 0) + 1;
   item.isSynced = false;
-  const event = markDebugRecord({
-    id: crypto.randomUUID ? crypto.randomUUID() : `spelling-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    type: "review",
-    term: item.term,
-    normalizedTerm: item.normalizedTerm,
-    rating,
-    retries,
-    mastered: Boolean(schedule.masteredAt),
-    occurredAt: reviewedAt,
-    fsrsLog: schedule.fsrsLog,
-    deviceId,
+  await saveReviewItemAndEvent({
+    itemStore: SPELLING_STORE,
+    eventStore: SPELLING_EVENT_STORE,
+    itemKey: item.normalizedTerm,
+    item,
+    event,
   });
-  spellingEvents.push(event);
-  await saveRecordValue(SPELLING_STORE, item.normalizedTerm, item);
-  await persistSpellingEvent(event);
+  renderSpellingViews();
 }
 
 function finishSpellingSession() {
@@ -5005,10 +5088,16 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   validateUserDataSnapshot(snapshot);
   if (createPreRestoreCheckpoint && !dataDecryptBlock) await createCheckpoint("pre-restore");
   const nextHistoryItems = Array.isArray(snapshot.historyItems) ? snapshot.historyItems : [];
-  const nextVocabularyItems = mergeVocabularySources(Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [], []);
   const nextStudyEvents = mergeStudyEventSources(Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents : [], []);
-  const nextSpellingItems = mergeVocabularySources(Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems : [], []);
   const nextSpellingEvents = mergeStudyEventSources(Array.isArray(snapshot.spellingEvents) ? snapshot.spellingEvents : [], []);
+  const nextVocabularyItems = rebuildItemsReviewStateFromEvents(
+    mergeVocabularySources(Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems : [], []),
+    nextStudyEvents,
+  );
+  const nextSpellingItems = rebuildItemsReviewStateFromEvents(
+    mergeVocabularySources(Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems : [], []),
+    nextSpellingEvents,
+  );
   const nextUserDictionary = mergeUserDictionarySources(Array.isArray(snapshot.userDictionary) ? snapshot.userDictionary : [], []);
   const nextKnownWords = mergeKnownSources(
     Array.isArray(snapshot.knownWords) ? snapshot.knownWords : [],
@@ -6181,13 +6270,16 @@ async function init() {
   const vocabularyRecords = await loadAllRecordValues(VOCABULARY_STORE);
   const legacyVocabularyItems = await loadValue("vocabularyItems", []);
   vocabularyItems = mergeVocabularySources(vocabularyRecords, legacyVocabularyItems);
-  if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length) await persistVocabulary();
   const studyEventRecords = await loadAllRecordValues(STUDY_EVENT_STORE);
   const legacyStudyEvents = await loadValue("studyEvents", []);
   studyEvents = mergeStudyEventSources(studyEventRecords, legacyStudyEvents);
+  vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
+  if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length || studyEvents.length) await persistVocabulary();
   if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await persistStudyEvents();
   spellingItems = mergeVocabularySources(await loadAllRecordValues(SPELLING_STORE), []);
   spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
+  spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
+  if (spellingEvents.length) await persistSpelling();
   userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
   knownWords = mergeKnownSources(await loadAllRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
   // Migrate the old autosave toggle into the new On Return action.
@@ -7320,6 +7412,7 @@ window.WordLoverApp = {
       retries: activeSpellingSession.retries,
       consecutive: activeSpellingSession.consecutive,
       completed: activeSpellingSession.completed,
+      mode: activeSpellingSession.mode,
       queueLength: activeSpellingSession.queue.length,
       currentTerm: currentSpellingItem()?.term ?? null,
       awaitingRetry: activeSpellingSession.awaitingRetry,
