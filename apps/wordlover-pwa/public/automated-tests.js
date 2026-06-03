@@ -16,7 +16,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v86";
+const SHELL_CACHE_NAME = "wordlover-shell-v87";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -27,10 +27,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260602-12",
+  "/app.js?v=20260603-13",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260602-12",
-  "/wordlover-config.js?v=20260602-12",
+  "/styles.css?v=20260603-13",
+  "/wordlover-config.js?v=20260603-13",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -46,7 +46,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260602-12",
+  "/automated-tests.js?v=20260603-13",
 ];
 
 let lastResults = null;
@@ -1081,6 +1081,71 @@ async function runMainAppStudySmoke() {
     const spellingDueIncluded = frameWindow.WordLoverApp.getDueSpellingItems().some((item) => item.normalizedTerm === dueSpelling.normalizedTerm);
     if (!spellingDueIncluded) throw new Error("Spelling due queue should use the same dueAt scheduler semantics as vocabulary.");
 
+    const waitForSpellingState = (predicate, message) => new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const state = frameWindow.WordLoverApp.spelling.state();
+        if (predicate(state)) {
+          window.clearInterval(timer);
+          resolve(state);
+          return;
+        }
+        if (performance.now() - startedAt > 5000) {
+          window.clearInterval(timer);
+          reject(new Error(`${message}. State: ${JSON.stringify(state)}`));
+        }
+      }, 100);
+    });
+    const spellingFirstTryOne = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingfirsttryone", "first try one meaning", "first try one");
+    const spellingFirstTryTwo = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingfirsttrytwo", "first try two meaning", "first try two");
+    for (const item of [spellingFirstTryOne, spellingFirstTryTwo]) {
+      item.review.dueAt = duePast;
+      item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: duePast };
+    }
+    frameWindow.WordLoverApp.spelling.start();
+    const spellingFirstTryBefore = frameWindow.WordLoverApp.spelling.state();
+    if (!spellingFirstTryBefore?.currentTerm || spellingFirstTryBefore.queueLength < 2) throw new Error("Spelling first-try auto-advance test did not start a multi-word session.");
+    frameWindow.WordLoverApp.spelling.answer(spellingFirstTryBefore.currentTerm);
+    const spellingFirstTryAfter = await waitForSpellingState(
+      (state) => state && state.completed >= 1 && state.currentTerm !== spellingFirstTryBefore.currentTerm,
+      "Spelling did not auto-advance after a first-try correct answer",
+    );
+    frameWindow.WordLoverApp.spelling.close();
+
+    const spellingRetryOne = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingretryone", "retry one meaning", "retry one");
+    const spellingRetryTwo = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingretrytwo", "retry two meaning", "retry two");
+    for (const item of [spellingRetryOne, spellingRetryTwo]) {
+      item.review.dueAt = duePast;
+      item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: duePast };
+    }
+    frameWindow.WordLoverApp.spelling.start();
+    const spellingRetryBefore = frameWindow.WordLoverApp.spelling.state();
+    if (!spellingRetryBefore?.currentTerm || spellingRetryBefore.queueLength < 2) throw new Error("Spelling retry design test did not start a multi-word session.");
+    frameWindow.WordLoverApp.spelling.answer(`${spellingRetryBefore.currentTerm}-wrong`);
+    if (!frameWindow.WordLoverApp.spelling.state()?.awaitingRetry) throw new Error("Spelling retry design test did not enter retry state after a wrong answer.");
+    frameWindow.WordLoverApp.spelling.retry();
+    frameWindow.WordLoverApp.spelling.answer(spellingRetryBefore.currentTerm);
+    const spellingAfterOneRetryCorrect = await waitForSpellingState(
+      (state) => state && !state.pausing && state.currentTerm === spellingRetryBefore.currentTerm && state.completed === 0 && state.consecutive === 1,
+      "Spelling should require 3 correct answers in a row after a miss",
+    );
+    frameWindow.WordLoverApp.spelling.answer(spellingRetryBefore.currentTerm);
+    await waitForSpellingState(
+      (state) => state && !state.pausing && state.currentTerm === spellingRetryBefore.currentTerm && state.completed === 0 && state.consecutive === 2,
+      "Spelling should still stay on the word after 2 retry-correct answers",
+    );
+    frameWindow.WordLoverApp.spelling.answer(spellingRetryBefore.currentTerm);
+    const spellingRetryAfter = await waitForSpellingState(
+      (state) => state && state.completed >= 1 && state.currentTerm !== spellingRetryBefore.currentTerm,
+      "Spelling did not advance after 3 retry-correct answers",
+    );
+    const spellingRetryEvent = frameWindow.WordLoverApp
+      .getSpellingEvents()
+      .find((event) => event.normalizedTerm === spellingRetryBefore.currentTerm && event.type === "review");
+    if (!spellingRetryEvent || spellingRetryEvent.rating !== "good") {
+      throw new Error(`Spelling retry completion should record retry-based rating. Event: ${JSON.stringify(spellingRetryEvent)}`);
+    }
+
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const refreshedReviewText = frameDocument.querySelector("#startReview")?.textContent ?? "";
     if (!refreshedReviewText) throw new Error("Review schedule refresh did not leave a valid review button state.");
@@ -1106,6 +1171,8 @@ async function runMainAppStudySmoke() {
       archivedExcluded,
       masteredDueIncluded,
       spellingDueIncluded,
+      spellingAutoAdvanceAfterFirstTry: Boolean(spellingFirstTryAfter),
+      spellingRequiresThreeCorrectAfterMiss: Boolean(spellingAfterOneRetryCorrect && spellingRetryAfter),
       detailRevealedAfterClick: true,
       refreshedReviewText,
       updateStatusText,

@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260602-v86";
+const APP_VERSION = "0.6.2-product.20260603-v87";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v86";
+const SHELL_CACHE_VERSION = "wordlover-shell-v87";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3239,10 +3239,12 @@ function hideQuiz() {
 }
 
 // --- Spelling review engine ---
-// A clean first-try spelling completes the word immediately (rating: easy). Once the user has
-// missed it at least once, they must spell it correctly 3 times in a row to complete it. The
-// session rating is derived from how many wrong attempts (retries) it took. Strict check:
-// exact, case-sensitive, no trimming.
+// Spelling completion policy:
+// - First try correct advances automatically after the feedback pause.
+// - After any wrong answer, the same word must be typed correctly 3 times in a row before advance.
+//   This is intentional extra practice, not a bug. Do not collapse it to one retry-correct.
+// The session rating is derived from how many wrong attempts (retries) it took. Strict check:
+// exact, case-sensitive, with accidental edge spaces ignored.
 const SPELLING_FEEDBACK_PAUSE_MS = 1000;
 
 function spellingThreshold() {
@@ -3364,7 +3366,7 @@ function checkSpelling() {
       input.classList.remove("spelling-correct-flash");
       if (!activeSpellingSession) return;
       activeSpellingSession.pausing = false;
-      // First-try correct completes immediately; after a miss, require 3 in a row.
+      // First-try correct completes immediately; after a miss, require 3 in a row by design.
       if (reachedThreshold) {
         void completeCurrentSpellingWord();
       } else {
@@ -3397,21 +3399,26 @@ function retrySpelling() {
   renderSpellingPrompt();
 }
 
-async function completeCurrentSpellingWord() {
+function completeCurrentSpellingWord() {
+  const session = activeSpellingSession;
   const item = currentSpellingItem();
-  if (!item) return;
-  const rating = ratingFromRetries(activeSpellingSession.retries);
-  await recordSpellingReview(item, rating, activeSpellingSession.retries);
-  activeSpellingSession.completed += 1;
-  activeSpellingSession.index += 1;
-  activeSpellingSession.retries = 0;
-  activeSpellingSession.consecutive = 0;
-  if (activeSpellingSession.index >= activeSpellingSession.queue.length) {
+  if (!item || !session) return;
+  const rating = ratingFromRetries(session.retries);
+  const retries = session.retries;
+  session.completed += 1;
+  session.index += 1;
+  session.retries = 0;
+  session.consecutive = 0;
+  if (session.index >= session.queue.length) {
     finishSpellingSession();
   } else {
-    // The 1s feedback pause already elapsed in checkSpelling; advance to the next word now.
+    // Advance the UI immediately after the feedback pause; persistence happens below so slow
+    // IndexedDB/FSRS work cannot make a first-try-correct answer appear stuck.
     renderSpellingPrompt();
   }
+  void recordSpellingReview(item, rating, retries).catch((error) => {
+    console.error("Failed to persist spelling review:", error);
+  });
 }
 
 async function recordSpellingReview(item, rating, retries) {
