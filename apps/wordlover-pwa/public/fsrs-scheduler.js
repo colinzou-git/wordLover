@@ -48,7 +48,10 @@ function iso(date) {
 }
 
 export function ratingToFsrs(rating) {
-  return RATING_BY_LABEL[String(rating ?? "").toLowerCase()] ?? Rating.Again;
+  const normalized = String(rating ?? "").toLowerCase();
+  const value = RATING_BY_LABEL[normalized];
+  if (!value) throw new Error(`Invalid FSRS rating: ${rating}`);
+  return value;
 }
 
 export function reviveFsrsCard(rawCard, fallbackDueIso) {

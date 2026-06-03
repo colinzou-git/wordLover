@@ -1,5 +1,6 @@
 import {
   State,
+  ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
 } from "./fsrs-scheduler.js";
@@ -16,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v89";
+const SHELL_CACHE_NAME = "wordlover-shell-v90";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -27,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-15",
+  "/app.js?v=20260603-16",
   "/fsrs-scheduler.js",
-  "/styles.css?v=20260603-15",
-  "/wordlover-config.js?v=20260603-15",
+  "/styles.css?v=20260603-16",
+  "/wordlover-config.js?v=20260603-16",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -46,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-15",
+  "/automated-tests.js?v=20260603-16",
 ];
 
 let lastResults = null;
@@ -305,12 +306,19 @@ function runReviewQuizRatingTests() {
     lastReview: "2026-06-01T12:00:00.000Z",
     state: "review",
   }, baseNow);
+  let invalidRatingRejected = false;
+  try {
+    ratingToFsrs("easyy");
+  } catch {
+    invalidRatingRejected = true;
+  }
   const scheduleChecks = [
     { name: "Again schedules soon but not immediately", pass: minutesUntilDue(again) > 0 && minutesUntilDue(again) <= 2 },
     { name: "Hard <= Good <= Easy interval ordering", pass: daysUntilDue(hard) <= daysUntilDue(good) && daysUntilDue(good) <= daysUntilDue(easy) },
     { name: "Mastered cards still have future dueAt", pass: Boolean(migratedMastered.masteredAt) && Date.parse(migratedMastered.dueAt) > nowMs },
     { name: "repeated Again creates valid dates", pass: Number.isFinite(Date.parse(repeatedAgain.dueAt)) && Date.parse(repeatedAgain.dueAt) > nowMs },
     { name: "old camelCase FSRS card migrates to Date fields", pass: revivedOldCard.due instanceof Date && revivedOldCard.last_review instanceof Date && revivedOldCard.state === State.Review },
+    { name: "invalid FSRS rating is rejected", pass: invalidRatingRejected },
   ];
   const ratingPass = ratings.every((item) => item.actual === item.expected);
   const schedulePass = scheduleChecks.every((item) => item.pass);
@@ -908,6 +916,13 @@ async function runMainAppStudySmoke() {
       throw new Error(`Early practice scheduling tests failed: ${JSON.stringify({ reviewSchedulingTests, dueGood, earlyAgain, earlyHard, earlyGood, earlyEasy, spellingEarlyGood, spellingEarlyMiss })}`);
     }
 
+    const localTodayKey = frameWindow.WordLoverApp.dateKeys.localDateKey(Date.parse("2026-06-03T00:30:00.000Z"));
+    const utcDateKeyAtCaliforniaEvening = frameWindow.WordLoverApp.dateKeys.localDateKey(Date.parse("2026-06-03T00:30:00.000Z"));
+    const localDateKeyUsesLocalTime = localTodayKey === utcDateKeyAtCaliforniaEvening && localTodayKey !== "2026-06-03";
+    if (!localDateKeyUsesLocalTime) {
+      throw new Error(`localDateKey should use the browser's local date, not UTC. Got ${localTodayKey}.`);
+    }
+
     const replayBase = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("event sourced fsrs test", "event sourced meaning", "event sourced");
     const replayLookup = frameWindow.WordLoverApp.lookupTerm(replayBase.word);
     const replayItem = await frameWindow.WordLoverApp.saveVocabularyItem(replayLookup, "event-source-test");
@@ -937,6 +952,14 @@ async function runMainAppStudySmoke() {
         rating: "easy",
         occurredAt: "2026-06-02T09:00:00.000Z",
       },
+      {
+        id: "replay-invalid-rating",
+        type: "review",
+        term: replayItem.term,
+        normalizedTerm: replayItem.normalizedTerm,
+        rating: "easyy",
+        occurredAt: "2026-06-03T08:00:00.000Z",
+      },
     ];
     const staleLocalItem = {
       ...replayItem,
@@ -952,13 +975,13 @@ async function runMainAppStudySmoke() {
     };
     const replayMerged = frameWindow.WordLoverApp.mergeSnapshots(
       { ...replaySnapshotBase, vocabularyItems: [staleLocalItem], studyEvents: [replayEvents[0], replayEvents[2]] },
-      { ...replaySnapshotBase, vocabularyItems: [staleRemoteItem], studyEvents: [replayEvents[1]] },
+      { ...replaySnapshotBase, vocabularyItems: [staleRemoteItem], studyEvents: [replayEvents[1], replayEvents[3]] },
     );
     const replayMergedItem = replayMerged.vocabularyItems.find((item) => item.normalizedTerm === replayItem.normalizedTerm);
     const eventSourcedMergeRebuiltFsrs =
       replayMergedItem?.review?.reviewCount === 2
       && replayMergedItem.review.lastRating === "again"
-      && replayMerged.studyEvents.length === 3;
+      && replayMerged.studyEvents.length === 4;
     if (!eventSourcedMergeRebuiltFsrs) {
       throw new Error(`Merged FSRS state should replay review events and ignore practice events: ${JSON.stringify(replayMergedItem?.review)}`);
     }
@@ -1146,6 +1169,52 @@ async function runMainAppStudySmoke() {
       }, 100);
     });
 
+    click("[data-study-next]");
+    const thirdTerm = await waitForStudyOneMoreCard(secondTerm);
+    const thirdCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    click("[data-quiz-reveal]");
+    answerStudyOneMore(false);
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (frameDocument.querySelector("[data-study-one-more-add=\"memorize\"]")) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Study One More did not keep Memorize add button after a missed quiz."));
+        }
+      }, 100);
+    });
+    click('[data-study-one-more-add="memorize"]');
+    const studyOneMoreMissCreatesAgainReview = await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const saved = frameWindow.WordLoverApp
+          .getVocabulary()
+          .some((item) => item.normalizedTerm === thirdCandidate.normalizedTerm);
+        const reviewEvent = frameWindow.WordLoverApp
+          .getStudyEvents()
+          .find((event) =>
+            event.normalizedTerm === thirdCandidate.normalizedTerm
+            && event.type === "review"
+            && event.rating === "again"
+            && event.source === "study-one-more-miss"
+          );
+        if (saved && reviewEvent && frameDocument.querySelector("[data-study-next]")) {
+          window.clearInterval(timer);
+          resolve(true);
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error(`Missed Study One More word "${thirdTerm}" did not create an immediate Again review.`));
+        }
+      }, 100);
+    });
+
     const statsButtons = [...frameDocument.querySelectorAll(".vocab-stat")];
     const againButton = frameDocument.querySelector('[data-action="vocab-filter"][data-filter="again"]');
     if (!statsButtons.length || !againButton) throw new Error("Main app study smoke did not render vocabulary status stats.");
@@ -1270,6 +1339,15 @@ async function runMainAppStudySmoke() {
     if (!spellingRetryEvent || spellingRetryEvent.rating !== "good") {
       throw new Error(`Spelling retry completion should record retry-based rating. Event: ${JSON.stringify(spellingRetryEvent)}`);
     }
+    const snapshotIntegrity = frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot());
+    const snapshotIntegrityIncludesSpelling =
+      snapshotIntegrity.spellingCount === frameWindow.WordLoverApp.getSpelling().length
+      && snapshotIntegrity.spellingEventCount === frameWindow.WordLoverApp.getSpellingEvents().length
+      && typeof snapshotIntegrity.checksum === "string"
+      && snapshotIntegrity.checksum.length > 0;
+    if (!snapshotIntegrityIncludesSpelling) {
+      throw new Error(`Snapshot integrity should include spelling data: ${JSON.stringify(snapshotIntegrity)}`);
+    }
 
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const refreshedReviewText = frameDocument.querySelector("#startReview")?.textContent ?? "";
@@ -1291,6 +1369,8 @@ async function runMainAppStudySmoke() {
       eventSourcedMergeRebuiltFsrs,
       uiPreferencesSurviveReload,
       googleExpiredSessionAutoReconnectMessage,
+      localDateKeyUsesLocalTime,
+      studyOneMoreMissCreatesAgainReview,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,
@@ -1299,6 +1379,7 @@ async function runMainAppStudySmoke() {
       archivedExcluded,
       masteredDueIncluded,
       spellingDueIncluded,
+      snapshotIntegrityIncludesSpelling,
       spellingAutoAdvanceAfterFirstTry: Boolean(spellingFirstTryAfter),
       spellingRequiresThreeCorrectAfterMiss: Boolean(spellingAfterOneRetryCorrect && spellingRetryAfter),
       detailRevealedAfterClick: true,

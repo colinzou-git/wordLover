@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v89";
+const APP_VERSION = "0.6.2-product.20260603-v90";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v89";
+const SHELL_CACHE_VERSION = "wordlover-shell-v90";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -145,11 +145,6 @@ const FSRS_RATING_LABELS = {
 };
 const FSRS_RATINGS = Object.keys(FSRS_RATING_LABELS);
 const VOCABULARY_PAGE_SIZE = 10;
-const EARLY_PRACTICE_DUE_EXTENSION_CAPS = {
-  hard: 0,
-  good: NORMAL_DAY_MS,
-  easy: 3 * NORMAL_DAY_MS,
-};
 const STUDY_ONE_MORE_LEVELS = [
   { id: "very_easy", label: "Very Easy" },
   { id: "easy", label: "Easy" },
@@ -270,6 +265,10 @@ function normalizeTerm(term) {
   return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
 }
 
+function isValidFsrsRating(rating) {
+  return FSRS_RATINGS.includes(String(rating ?? "").toLowerCase());
+}
+
 function normalizeTrack(value) {
   return value === "spelling" ? "spelling" : "vocabulary";
 }
@@ -333,12 +332,18 @@ function nowIso() {
   return new Date(appNowMs()).toISOString();
 }
 
+function localDateKey(ms = appNowMs()) {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function todayPrefix() {
-  return new Date(appNowMs()).toISOString().slice(0, 10);
+  return localDateKey(appNowMs());
 }
 
 function isToday(value) {
-  return typeof value === "string" && value.startsWith(todayPrefix());
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && localDateKey(ms) === todayPrefix();
 }
 
 function topLines(value, limit = 3) {
@@ -548,18 +553,26 @@ function checksumText(value) {
 function snapshotIntegrity(snapshot) {
   const vocabularyCount = Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems.length : 0;
   const studyEventCount = Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents.length : 0;
+  const spellingCount = Array.isArray(snapshot.spellingItems) ? snapshot.spellingItems.length : 0;
+  const spellingEventCount = Array.isArray(snapshot.spellingEvents) ? snapshot.spellingEvents.length : 0;
   const historyCount = Array.isArray(snapshot.historyItems) ? snapshot.historyItems.length : 0;
   const knownCount = Array.isArray(snapshot.knownWords) ? snapshot.knownWords.length : 0;
   const normalizedTerms = (snapshot.vocabularyItems ?? [])
     .map((item) => item?.normalizedTerm ?? normalizeTerm(item?.term ?? ""))
     .filter(Boolean)
     .sort();
+  const spellingTerms = (snapshot.spellingItems ?? [])
+    .map((item) => item?.normalizedTerm ?? normalizeTerm(item?.term ?? ""))
+    .filter(Boolean)
+    .sort();
   return {
     vocabularyCount,
     studyEventCount,
+    spellingCount,
+    spellingEventCount,
     historyCount,
     knownCount,
-    checksum: checksumText(JSON.stringify({ normalizedTerms, studyEventCount, historyCount, knownCount })),
+    checksum: checksumText(JSON.stringify({ normalizedTerms, spellingTerms, studyEventCount, spellingEventCount, historyCount, knownCount })),
   };
 }
 
@@ -1871,6 +1884,10 @@ function rebuildReviewStateFromEvents(item, events = []) {
     fsrsCard: createFsrsCard(createdAt),
   });
   for (const event of reviewEvents) {
+    if (!isValidFsrsRating(event.rating)) {
+      console.warn(`Skipping invalid FSRS review rating for "${normalizedTerm}": ${event.rating}`);
+      continue;
+    }
     const schedule = scheduleWithFsrs(review, event.rating, event.occurredAt);
     review = {
       ...review,
@@ -3272,7 +3289,7 @@ async function persistStudyEvents() {
   renderStudyStats();
 }
 
-async function recordReviewRating(item, rating, quizResult, responseMs, mode = "review") {
+async function recordReviewRating(item, rating, quizResult, responseMs, mode = "review", source = mode) {
   const reviewedAt = nowIso();
   const schedule = applyReviewSchedulingPolicy({
     reviewState: item.review ?? {},
@@ -3290,6 +3307,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
     rating,
     responseMs,
     quizResult,
+    source,
     mastered: Boolean(schedule.masteredAt),
     occurredAt: reviewedAt,
     fsrsLog: schedule.fsrsLog,
@@ -3869,13 +3887,11 @@ function buildQuizOptions(entry) {
 
 function hasReviewedToday(normalizedTerm) {
   if (!normalizedTerm) return false;
-  const todayPrefix = nowIso().slice(0, 10);
   return studyEvents.some(
     (event) =>
       event?.type === "review"
       && event.normalizedTerm === normalizedTerm
-      && typeof event.occurredAt === "string"
-      && event.occurredAt.startsWith(todayPrefix),
+      && isToday(event.occurredAt),
   );
 }
 
@@ -4020,12 +4036,16 @@ async function startNewWordStudy() {
 async function addStudyOneMoreCandidate(target) {
   if (!activeStudyOneMoreEntry) return;
   const entry = activeStudyOneMoreEntry;
+  const pendingResult = activeQuiz?.pendingResult ?? null;
   const data = lookupTerm(entry.term);
   if (data.status !== "found") return;
   if (target === "spelling") {
     await saveSpellingItem(data, "study-one-more");
   } else {
-    await saveVocabularyItem(data, "study-one-more");
+    const item = await saveVocabularyItem(data, "study-one-more");
+    if (pendingResult?.quizResult === "miss") {
+      await recordReviewRating(item, "again", "miss", pendingResult.responseMs ?? 0, "review", "study-one-more-miss");
+    }
   }
   activeStudyOneMoreEntry = null;
   activeQuiz = null;
@@ -4774,7 +4794,7 @@ async function createCheckpoint(reason = "manual") {
 
 async function ensureDailyCheckpoint() {
   const checkpoints = await listCheckpoints();
-  if (checkpoints.some((checkpoint) => checkpoint.reason === "daily" && checkpoint.createdAt?.startsWith(todayPrefix()))) return null;
+  if (checkpoints.some((checkpoint) => checkpoint.reason === "daily" && isToday(checkpoint.createdAt))) return null;
   return createCheckpoint("daily");
 }
 
@@ -7424,8 +7444,12 @@ window.WordLoverApp = {
   },
   reviewScheduling: {
     applyPolicy: applyVocabularyReviewSchedulingPolicy,
-    earlyPracticeCaps: () => ({ ...EARLY_PRACTICE_DUE_EXTENSION_CAPS }),
   },
+  dateKeys: {
+    localDateKey,
+    isToday,
+  },
+  validateSnapshot: validateUserDataSnapshot,
   getActiveQuiz: () => activeQuiz,
   checkForAppUpdate,
   refreshReviewScheduleViews,
