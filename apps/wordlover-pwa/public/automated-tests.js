@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260603-24";
+} from "./fsrs-scheduler.js?v=20260603-25";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v98";
+const SHELL_CACHE_NAME = "wordlover-shell-v99";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-24",
-  "/fsrs-scheduler.js?v=20260603-24",
-  "/styles.css?v=20260603-24",
-  "/wordlover-config.js?v=20260603-24",
+  "/app.js?v=20260603-25",
+  "/fsrs-scheduler.js?v=20260603-25",
+  "/styles.css?v=20260603-25",
+  "/wordlover-config.js?v=20260603-25",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-24",
+  "/automated-tests.js?v=20260603-25",
 ];
 
 let lastResults = null;
@@ -1409,6 +1409,45 @@ async function runMainAppStudySmoke() {
       throw new Error(`Review due should advance even when rating persistence stalls. Debug: ${JSON.stringify(reviewDuePersistenceTimeoutDebug)}`);
     }
 
+    const repairedReviewOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due repaired fsrs one", "review due repaired fsrs one meaning", "review due repaired fsrs one");
+    const repairedReviewTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due repaired fsrs two", "review due repaired fsrs two meaning", "review due repaired fsrs two");
+    const repairedReviewItems = [];
+    for (const entry of [repairedReviewOne, repairedReviewTwo]) {
+      const item = await frameWindow.WordLoverApp.saveVocabularyItem(frameWindow.WordLoverApp.lookupTerm(entry.word), "debug-review-due-fsrs-repair");
+      const dueAt = new Date(Date.now() - 3_000_000).toISOString();
+      item.review.dueAt = dueAt;
+      item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: dueAt };
+      item.review.masteredAt = null;
+      item.archivedAt = null;
+      repairedReviewItems.push(item);
+    }
+    let reviewDueFsrsRepairStillAdvances = false;
+    let reviewDueFsrsRepairDebug = null;
+    let forcedScheduleFailures = 0;
+    try {
+      frameWindow.WordLoverApp.reviewDebug.clear();
+      frameWindow.WordLoverApp.reviewDebug.setScheduleHookForTest(() => {
+        forcedScheduleFailures += 1;
+        if (forcedScheduleFailures === 1) throw new Error("forced FSRS scheduler failure");
+      });
+      await frameWindow.WordLoverApp.startDueReview();
+      const repairedFirstTerm = await waitForVocabularyQuizTerm();
+      await answerActiveVocabularyQuiz();
+      click('[data-fsrs-rating="good"]');
+      const repairedSecondTerm = await waitForVocabularyQuizTerm(repairedFirstTerm);
+      reviewDueFsrsRepairDebug = frameWindow.WordLoverApp.reviewDebug.events().slice(-24);
+      reviewDueFsrsRepairStillAdvances =
+        Boolean(repairedSecondTerm && repairedSecondTerm !== repairedFirstTerm)
+        && reviewDueFsrsRepairDebug.some((event) => event.stage === "fsrs-schedule-repair" && /forced FSRS scheduler failure/.test(event.error ?? ""))
+        && reviewDueFsrsRepairDebug.some((event) => event.stage === "rating-recorded" && event.rating === "good");
+    } finally {
+      frameWindow.WordLoverApp.reviewDebug.setScheduleHookForTest(null);
+    }
+    for (const item of repairedReviewItems) item.archivedAt = new Date().toISOString();
+    if (!reviewDueFsrsRepairStillAdvances) {
+      throw new Error(`Review due should repair FSRS scheduling failures and advance. Debug: ${JSON.stringify(reviewDueFsrsRepairDebug)}`);
+    }
+
     const dueSpelling = await frameWindow.WordLoverApp.saveSpellingItem(dueLookup, "debug-fsrs-due-test");
     dueSpelling.review.dueAt = duePast;
     dueSpelling.review.fsrsCard = { ...(dueSpelling.review.fsrsCard ?? {}), due: duePast };
@@ -1523,6 +1562,7 @@ async function runMainAppStudySmoke() {
       reviewDueRatingButtonsVisible,
       reviewDueAutoAdvancesPastSecondWord,
       reviewDuePersistenceTimeoutStillAdvances,
+      reviewDueFsrsRepairStillAdvances,
       spellingDueIncluded,
       snapshotIntegrityIncludesSpelling,
       spellingAutoAdvanceAfterFirstTry: Boolean(spellingFirstTryAfter),

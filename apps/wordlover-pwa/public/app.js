@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-24";
+} from "./fsrs-scheduler.js?v=20260603-25";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v98";
+const APP_VERSION = "0.6.2-product.20260603-v99";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v98";
+const SHELL_CACHE_VERSION = "wordlover-shell-v99";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -209,6 +209,7 @@ let activeSpellingSession = null;
 let reviewDebugEvents = [];
 let reviewPersistenceBeforeSaveForTest = null;
 let reviewPersistenceTimeoutMs = 4000;
+let reviewScheduleBeforeFsrsForTest = null;
 let theme = DEFAULT_THEME;
 let fontScale = DEFAULT_FONT_SCALE;
 let vocabularyView = {
@@ -3241,8 +3242,53 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function scheduleReviewSafely({ reviewState = {}, rating = "again", reviewedAt = nowIso(), context = "review" } = {}) {
+  const normalized = normalizeReviewState(reviewState);
+  try {
+    if (reviewScheduleBeforeFsrsForTest) {
+      reviewScheduleBeforeFsrsForTest({ normalized, rating, reviewedAt, context });
+    }
+    return {
+      normalized,
+      schedule: scheduleWithFsrs(normalized, rating, reviewedAt),
+      repaired: false,
+      repairError: null,
+    };
+  } catch (error) {
+    const repairError = error instanceof Error ? error.message : String(error);
+    const repairedReviewState = normalizeReviewState({
+      ...reviewState,
+      dueAt: normalized.dueAt ?? reviewedAt,
+      fsrsCard: null,
+    });
+    recordReviewDebug("fsrs-schedule-repair", {
+      context,
+      rating,
+      error: repairError,
+      originalDueAt: normalized.dueAt ?? null,
+      repairedDueAt: repairedReviewState.dueAt,
+    });
+    try {
+      return {
+        normalized: repairedReviewState,
+        schedule: scheduleWithFsrs(repairedReviewState, rating, reviewedAt),
+        repaired: true,
+        repairError,
+      };
+    } catch (repairFailure) {
+      const message = repairFailure instanceof Error ? repairFailure.message : String(repairFailure);
+      throw new Error(`FSRS scheduling failed after repair: ${message}; original error: ${repairError}`);
+    }
+  }
+}
+
 function scheduleFromFsrsRating(reviewState, rating) {
-  return scheduleWithFsrs(normalizeReviewState(reviewState), rating, nowIso());
+  return scheduleReviewSafely({
+    reviewState,
+    rating,
+    reviewedAt: nowIso(),
+    context: "direct-schedule",
+  }).schedule;
 }
 
 function daysBetweenMs(fromMs, toMs) {
@@ -3258,8 +3304,17 @@ function applyReviewSchedulingPolicy({
   track = "vocabulary",
   hadMiss = false,
 } = {}) {
-  const normalized = normalizeReviewState(reviewState);
-  const fullSchedule = scheduleWithFsrs(normalized, rating, reviewedAt);
+  const {
+    normalized,
+    schedule: fullSchedule,
+    repaired,
+    repairError,
+  } = scheduleReviewSafely({
+    reviewState,
+    rating,
+    reviewedAt,
+    context: `${track}-${mode}`,
+  });
   const reviewedAtMs = Date.parse(reviewedAt);
   const originalDueMs = Date.parse(normalized.dueAt);
   const earlyPractice = mode === "practice" && Number.isFinite(originalDueMs) && Number.isFinite(reviewedAtMs) && originalDueMs > reviewedAtMs;
@@ -3272,6 +3327,7 @@ function applyReviewSchedulingPolicy({
       fsrsDueAt: fullSchedule.dueAt,
       track,
       recordOnlyPractice: false,
+      schedulingRepair: repaired ? repairError : null,
     };
   }
   return {
@@ -3285,6 +3341,7 @@ function applyReviewSchedulingPolicy({
     fsrsDueAt: fullSchedule.dueAt,
     track,
     recordOnlyPractice: true,
+    schedulingRepair: repaired ? repairError : null,
   };
 }
 
@@ -3336,6 +3393,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
     originalDueAt: schedule.originalDueAt,
     fsrsDueAt: schedule.fsrsDueAt,
     appliedDueAt: schedule.dueAt,
+    schedulingRepair: schedule.schedulingRepair,
     practiceMode: mode,
     deviceId,
   });
@@ -4383,12 +4441,17 @@ async function handleFsrsRating(rating) {
     reviewResult = await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
   } catch (error) {
     activeQuiz.ratingSubmitted = false;
+    console.error("Could not record review rating", error);
+    const message = error instanceof Error ? error.message : String(error);
     recordReviewDebug("rating-error", {
       rating,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
     });
     const panel = quizPanel.querySelector(".fsrs-rating-panel");
-    panel?.insertAdjacentHTML("beforeend", `<p class="error">Could not record this rating. Try again.</p>`);
+    panel?.insertAdjacentHTML(
+      "beforeend",
+      `<p class="error">Could not record this rating. Try again.</p><p class="muted">Debug: ${escapeHtml(message)}</p>`,
+    );
     return;
   }
   const shouldAdvanceSession = currentSessionItem?.normalizedTerm === sourceItem.normalizedTerm;
@@ -7752,6 +7815,9 @@ window.WordLoverApp = {
     setPersistenceHookForTest: (hook, timeoutMs = 4000) => {
       reviewPersistenceBeforeSaveForTest = typeof hook === "function" ? hook : null;
       reviewPersistenceTimeoutMs = Number.isFinite(Number(timeoutMs)) ? Math.max(50, Number(timeoutMs)) : 4000;
+    },
+    setScheduleHookForTest: (hook) => {
+      reviewScheduleBeforeFsrsForTest = typeof hook === "function" ? hook : null;
     },
     state: () => ({
       activeQuiz: activeQuiz ? {
