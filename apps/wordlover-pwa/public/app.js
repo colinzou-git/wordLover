@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-20";
+} from "./fsrs-scheduler.js?v=20260603-21";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v94";
+const APP_VERSION = "0.6.2-product.20260603-v95";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v94";
+const SHELL_CACHE_VERSION = "wordlover-shell-v95";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -206,6 +206,7 @@ let deviceId = null;
 let activeQuiz = null;
 let activeVocabularyReviewSession = null;
 let activeSpellingSession = null;
+let reviewDebugEvents = [];
 let theme = DEFAULT_THEME;
 let fontScale = DEFAULT_FONT_SCALE;
 let vocabularyView = {
@@ -3369,9 +3370,34 @@ function hideQuiz(options = {}) {
 const SPELLING_FEEDBACK_PAUSE_MS = 1000;
 const VOCABULARY_AUTO_RATING_PAUSE_MS = 1400;
 
+function recordReviewDebug(stage, details = {}) {
+  const event = {
+    at: new Date().toISOString(),
+    stage,
+    activeTerm: activeQuiz?.entry?.term ?? null,
+    activeMode: activeQuiz?.mode ?? null,
+    activeQuizId: activeQuiz?.id ?? null,
+    pending: Boolean(activeQuiz?.pendingResult),
+    ratingSubmitted: Boolean(activeQuiz?.ratingSubmitted),
+    autoTimer: Boolean(activeQuiz?.autoRatingTimer),
+    sessionIndex: activeVocabularyReviewSession?.index ?? null,
+    sessionLength: activeVocabularyReviewSession?.queue?.length ?? null,
+    sessionMode: activeVocabularyReviewSession?.mode ?? null,
+    overlayOpen: Boolean(document.querySelector(".modal-overlay")),
+    topElementAtLastPointer: null,
+    ...details,
+  };
+  reviewDebugEvents = [...reviewDebugEvents.slice(-79), event];
+  if (new URLSearchParams(window.location.search).has("reviewDebug")) {
+    console.info("[WordFan review]", event);
+  }
+  return event;
+}
+
 function clearVocabularyAutoRatingTimer() {
   if (!activeQuiz?.autoRatingTimer) return;
   window.clearTimeout(activeQuiz.autoRatingTimer);
+  recordReviewDebug("auto-rating-clear", { timerId: activeQuiz.autoRatingTimer });
   activeQuiz.autoRatingTimer = 0;
 }
 
@@ -3961,6 +3987,7 @@ function renderQuiz(entry, mode) {
     stepwise,
     optionsRevealed: !stepwise,
   };
+  recordReviewDebug("render-quiz", { term: entry.term, mode, stepwise });
   quizPanel.hidden = false;
   if (stepwise) {
     quizPanel.innerHTML = `
@@ -4005,6 +4032,12 @@ async function startDueReview(options = {}) {
   if (!continueSession) activeVocabularyReviewSession = buildVocabularyReviewSession();
   const session = activeVocabularyReviewSession;
   const reviewItem = session?.queue?.[session.index] ?? null;
+  recordReviewDebug("start-due-review", {
+    continueSession,
+    nextTerm: reviewItem?.term ?? null,
+    dueCount: getDueVocabularyItems().length,
+    practiceCount: getPracticeVocabularyItems().length,
+  });
   if (!reviewItem) {
     activeVocabularyReviewSession = null;
     renderStudyStats();
@@ -4127,13 +4160,25 @@ function renderFsrsRatingChoices(passed, inferredRating) {
       </div>
     `,
   );
+  recordReviewDebug("render-rating-buttons", {
+    passed,
+    inferredRating,
+    buttonCount: quizPanel.querySelectorAll("[data-fsrs-rating]").length,
+  });
 }
 
 function scheduleVocabularyAutoRating(rating) {
   if (!activeQuiz?.pendingResult) return;
   const quizId = activeQuiz.id;
   clearVocabularyAutoRatingTimer();
+  recordReviewDebug("auto-rating-schedule", { rating, pauseMs: VOCABULARY_AUTO_RATING_PAUSE_MS });
   activeQuiz.autoRatingTimer = window.setTimeout(() => {
+    recordReviewDebug("auto-rating-fire", {
+      rating,
+      quizId,
+      currentQuizId: activeQuiz?.id ?? null,
+      canSubmit: Boolean(activeQuiz?.id === quizId && activeQuiz.pendingResult && !activeQuiz.ratingSubmitted),
+    });
     if (activeQuiz?.id === quizId && activeQuiz.pendingResult && !activeQuiz.ratingSubmitted) {
       void handleFsrsRating(rating);
     }
@@ -4155,6 +4200,7 @@ async function handleQuizAnswer(index) {
   const passed = Boolean(selected.correct);
   const responseMs = performance.now() - activeQuiz.startedAt;
   const rating = inferFsrsRating(passed, responseMs);
+  recordReviewDebug("answer", { selectedIndex: index, passed, responseMs, inferredRating: rating });
   if (activeQuiz.mode === "new") {
     await handleNewWordQuizResult(passed, rating, responseMs);
     return;
@@ -4171,25 +4217,45 @@ async function handleQuizAnswer(index) {
 }
 
 async function handleFsrsRating(rating) {
-  if (!activeQuiz?.pendingResult || activeQuiz.ratingSubmitted || !FSRS_RATING_LABELS[rating]) return;
+  recordReviewDebug("rating-request", { rating, hasPending: Boolean(activeQuiz?.pendingResult) });
+  if (!activeQuiz?.pendingResult || activeQuiz.ratingSubmitted || !FSRS_RATING_LABELS[rating]) {
+    recordReviewDebug("rating-ignored", {
+      rating,
+      reason: !activeQuiz?.pendingResult ? "no-pending-result" : activeQuiz.ratingSubmitted ? "already-submitted" : "invalid-rating",
+    });
+    return;
+  }
   activeQuiz.ratingSubmitted = true;
   clearVocabularyAutoRatingTimer();
   const { sourceItem } = activeQuiz.entry;
   const { quizResult, responseMs } = activeQuiz.pendingResult;
   const session = activeVocabularyReviewSession;
   const currentSessionItem = session?.queue?.[session.index] ?? null;
+  recordReviewDebug("rating-record-start", {
+    rating,
+    sourceTerm: sourceItem?.term ?? null,
+    currentSessionTerm: currentSessionItem?.term ?? null,
+  });
   await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
   const shouldAdvanceSession = currentSessionItem?.normalizedTerm === sourceItem.normalizedTerm;
   if (shouldAdvanceSession) session.index += 1;
+  recordReviewDebug("rating-recorded", {
+    rating,
+    shouldAdvanceSession,
+    nextSessionIndex: session?.index ?? null,
+    nextTerm: session?.queue?.[session.index]?.term ?? null,
+  });
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}. Loading next word...</p>`;
   activeQuiz = null;
   window.setTimeout(() => {
     if (shouldAdvanceSession && session.index < session.queue.length) {
+      recordReviewDebug("advance-next", { nextTerm: session.queue[session.index]?.term ?? null });
       void startDueReview({ continueSession: true });
       return;
     }
     activeVocabularyReviewSession = null;
+    recordReviewDebug("review-session-complete", { rating });
     quizPanel.innerHTML = `<p class="muted">All due reviews are done. ${escapeHtml(FSRS_RATING_LABELS[rating])} rating recorded.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button></div>`;
   }, 350);
 }
@@ -6881,6 +6947,18 @@ spellingReviewPanel.addEventListener("click", (event) => {
 quizPanel.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+  recordReviewDebug("quiz-panel-click", {
+    targetTag: target.tagName,
+    targetText: target.textContent?.trim().slice(0, 80) ?? "",
+    hasRatingTarget: Boolean(target.closest("[data-fsrs-rating]")),
+    hasQuizOptionTarget: Boolean(target.closest("[data-quiz-option]")),
+  });
+  const ratingButton = target.closest("[data-fsrs-rating]");
+  if (ratingButton instanceof HTMLButtonElement) {
+    recordReviewDebug("rating-click", { rating: ratingButton.dataset.fsrsRating });
+    void handleFsrsRating(ratingButton.dataset.fsrsRating);
+    return;
+  }
   if (target.closest("[data-quiz-reveal]")) {
     revealQuizOptions();
     return;
@@ -6888,11 +6966,6 @@ quizPanel.addEventListener("click", (event) => {
   const optionButton = target.closest("[data-quiz-option]");
   if (optionButton instanceof HTMLButtonElement) {
     void handleQuizAnswer(Number(optionButton.dataset.quizOption));
-    return;
-  }
-  const ratingButton = target.closest("[data-fsrs-rating]");
-  if (ratingButton instanceof HTMLButtonElement) {
-    void handleFsrsRating(ratingButton.dataset.fsrsRating);
     return;
   }
   const studyOneMoreAdd = target.closest("[data-study-one-more-add]");
@@ -7507,6 +7580,40 @@ window.WordLoverApp = {
   },
   reviewScheduling: {
     applyPolicy: applyVocabularyReviewSchedulingPolicy,
+  },
+  reviewDebug: {
+    events: () => reviewDebugEvents.map((event) => ({ ...event })),
+    clear: () => {
+      reviewDebugEvents = [];
+    },
+    state: () => ({
+      activeQuiz: activeQuiz ? {
+        id: activeQuiz.id,
+        mode: activeQuiz.mode,
+        term: activeQuiz.entry?.term ?? null,
+        answered: activeQuiz.answered,
+        pending: Boolean(activeQuiz.pendingResult),
+        ratingSubmitted: Boolean(activeQuiz.ratingSubmitted),
+        autoTimer: Boolean(activeQuiz.autoRatingTimer),
+      } : null,
+      session: activeVocabularyReviewSession ? {
+        mode: activeVocabularyReviewSession.mode,
+        index: activeVocabularyReviewSession.index,
+        length: activeVocabularyReviewSession.queue?.length ?? 0,
+        currentTerm: activeVocabularyReviewSession.queue?.[activeVocabularyReviewSession.index]?.term ?? null,
+      } : null,
+      ratingButtons: [...quizPanel.querySelectorAll("[data-fsrs-rating]")].map((button) => ({
+        rating: button.dataset.fsrsRating,
+        text: button.textContent?.trim() ?? "",
+        disabled: button.disabled,
+        topmost: (() => {
+          const rect = button.getBoundingClientRect();
+          const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return top === button || Boolean(top?.closest?.("[data-fsrs-rating]"));
+        })(),
+      })),
+      overlayOpen: Boolean(document.querySelector(".modal-overlay")),
+    }),
   },
   dateKeys: {
     localDateKey,
