@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-22";
+} from "./fsrs-scheduler.js?v=20260603-23";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v96";
+const APP_VERSION = "0.6.2-product.20260603-v97";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v96";
+const SHELL_CACHE_VERSION = "wordlover-shell-v97";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3388,10 +3388,51 @@ function recordReviewDebug(stage, details = {}) {
     ...details,
   };
   reviewDebugEvents = [...reviewDebugEvents.slice(-79), event];
+  renderReviewDebugPanel();
   if (new URLSearchParams(window.location.search).has("reviewDebug")) {
     console.info("[WordFan review]", event);
   }
   return event;
+}
+
+function reviewDebugEnabled() {
+  return new URLSearchParams(window.location.search).has("reviewDebug");
+}
+
+function renderReviewDebugPanel() {
+  if (!reviewDebugEnabled()) return;
+  let panel = document.querySelector("#reviewDebugPanel");
+  if (!panel) {
+    panel = document.createElement("details");
+    panel.id = "reviewDebugPanel";
+    panel.className = "review-debug-panel";
+    panel.open = true;
+    panel.innerHTML = `<summary>Review debug</summary><pre></pre>`;
+    document.body.append(panel);
+  }
+  const latest = reviewDebugEvents.slice(-10);
+  const state = {
+    activeTerm: activeQuiz?.entry?.term ?? null,
+    pending: Boolean(activeQuiz?.pendingResult),
+    submitted: Boolean(activeQuiz?.ratingSubmitted),
+    timer: Boolean(activeQuiz?.autoRatingTimer),
+    overlay: Boolean(document.querySelector(".modal-overlay")),
+    buttons: [...quizPanel.querySelectorAll("[data-fsrs-rating]")].map((button) => ({
+      rating: button.dataset.fsrsRating,
+      disabled: button.disabled,
+      topmost: isElementTopmost(button),
+    })),
+    latest,
+  };
+  panel.querySelector("pre").textContent = JSON.stringify(state, null, 2);
+}
+
+function isElementTopmost(element) {
+  if (!(element instanceof Element)) return false;
+  const rect = element.getBoundingClientRect();
+  if (!rect.width || !rect.height) return false;
+  const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  return top === element || Boolean(top?.closest?.("[data-fsrs-rating]"));
 }
 
 function clearVocabularyAutoRatingTimer() {
@@ -4160,10 +4201,38 @@ function renderFsrsRatingChoices(passed, inferredRating) {
       </div>
     `,
   );
+  bindFsrsRatingButtons();
   recordReviewDebug("render-rating-buttons", {
     passed,
     inferredRating,
     buttonCount: quizPanel.querySelectorAll("[data-fsrs-rating]").length,
+  });
+}
+
+function bindFsrsRatingButtons() {
+  quizPanel.querySelectorAll("[data-fsrs-rating]").forEach((button) => {
+    if (!(button instanceof HTMLButtonElement) || button.dataset.ratingBound === "1") return;
+    button.dataset.ratingBound = "1";
+    const activate = (event, source) => {
+      event.preventDefault();
+      event.stopPropagation();
+      recordReviewDebug("rating-direct", {
+        source,
+        rating: button.dataset.fsrsRating,
+        disabled: button.disabled,
+        topmost: isElementTopmost(button),
+      });
+      if (!button.disabled) void handleFsrsRating(button.dataset.fsrsRating);
+    };
+    button.addEventListener("pointerdown", () => {
+      recordReviewDebug("rating-pointerdown", {
+        rating: button.dataset.fsrsRating,
+        topmost: isElementTopmost(button),
+      });
+    }, { capture: true });
+    button.addEventListener("pointerup", (event) => activate(event, "button-pointerup"), { capture: true });
+    button.addEventListener("touchend", (event) => activate(event, "button-touchend"), { capture: true, passive: false });
+    button.addEventListener("click", (event) => activate(event, "button-click"), { capture: true });
   });
 }
 
@@ -7634,11 +7703,7 @@ window.WordLoverApp = {
         rating: button.dataset.fsrsRating,
         text: button.textContent?.trim() ?? "",
         disabled: button.disabled,
-        topmost: (() => {
-          const rect = button.getBoundingClientRect();
-          const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-          return top === button || Boolean(top?.closest?.("[data-fsrs-rating]"));
-        })(),
+        topmost: isElementTopmost(button),
       })),
       overlayOpen: Boolean(document.querySelector(".modal-overlay")),
     }),
