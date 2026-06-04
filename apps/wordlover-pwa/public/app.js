@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-25";
+} from "./fsrs-scheduler.js?v=20260604-1";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v99";
+const APP_VERSION = "0.6.2-product.20260604-v100";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v99";
+const SHELL_CACHE_VERSION = "wordlover-shell-v100";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3463,7 +3463,6 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
 }
 
 function hideQuiz(options = {}) {
-  clearVocabularyAutoRatingTimer();
   activeQuiz = null;
   activeStudyOneMoreEntry = null;
   if (!options.preserveVocabularyReviewSession) activeVocabularyReviewSession = null;
@@ -3479,7 +3478,6 @@ function hideQuiz(options = {}) {
 // The session rating is derived from how many wrong attempts (retries) it took. Strict check:
 // exact, case-sensitive, with accidental edge spaces ignored.
 const SPELLING_FEEDBACK_PAUSE_MS = 1000;
-const VOCABULARY_AUTO_RATING_PAUSE_MS = 5000;
 
 function recordReviewDebug(stage, details = {}) {
   const event = {
@@ -3544,13 +3542,6 @@ function isElementTopmost(element) {
   if (!rect.width || !rect.height) return false;
   const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
   return top === element || Boolean(top?.closest?.("[data-fsrs-rating]"));
-}
-
-function clearVocabularyAutoRatingTimer() {
-  if (!activeQuiz?.autoRatingTimer) return;
-  window.clearTimeout(activeQuiz.autoRatingTimer);
-  recordReviewDebug("auto-rating-clear", { timerId: activeQuiz.autoRatingTimer });
-  activeQuiz.autoRatingTimer = 0;
 }
 
 function spellingThreshold() {
@@ -4303,7 +4294,7 @@ function renderFsrsRatingChoices(passed, inferredRating) {
     `
       <div class="fsrs-rating-panel">
         <p class="muted">${escapeHtml(hint)}</p>
-        <p class="muted">Auto-recording ${escapeHtml(FSRS_RATING_LABELS[inferredRating] ?? "Good")} shortly.</p>
+        <p class="muted">Recommended: ${escapeHtml(FSRS_RATING_LABELS[inferredRating] ?? "Good")}. Choose a rating to continue.</p>
         <div class="quiz-actions fsrs-ratings" aria-label="Review rating">
           ${buttons.map(([value, label]) =>
             `<button class="${value === inferredRating ? "" : "secondary-button"}" type="button" data-fsrs-rating="${value}">${label}</button>`,
@@ -4345,24 +4336,6 @@ function bindFsrsRatingButtons() {
     button.addEventListener("touchend", (event) => activate(event, "button-touchend"), { capture: true, passive: false });
     button.addEventListener("click", (event) => activate(event, "button-click"), { capture: true });
   });
-}
-
-function scheduleVocabularyAutoRating(rating) {
-  if (!activeQuiz?.pendingResult) return;
-  const quizId = activeQuiz.id;
-  clearVocabularyAutoRatingTimer();
-  recordReviewDebug("auto-rating-schedule", { rating, pauseMs: VOCABULARY_AUTO_RATING_PAUSE_MS });
-  activeQuiz.autoRatingTimer = window.setTimeout(() => {
-    recordReviewDebug("auto-rating-fire", {
-      rating,
-      quizId,
-      currentQuizId: activeQuiz?.id ?? null,
-      canSubmit: Boolean(activeQuiz?.id === quizId && activeQuiz.pendingResult && !activeQuiz.ratingSubmitted),
-    });
-    if (activeQuiz?.id === quizId && activeQuiz.pendingResult && !activeQuiz.ratingSubmitted) {
-      void handleFsrsRating(rating);
-    }
-  }, VOCABULARY_AUTO_RATING_PAUSE_MS);
 }
 
 function ratingButtonFromEvent(event) {
@@ -4413,7 +4386,6 @@ async function handleQuizAnswer(index) {
   }
   activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
   renderFsrsRatingChoices(passed, rating);
-  scheduleVocabularyAutoRating(rating);
 }
 
 async function handleFsrsRating(rating) {
@@ -4426,7 +4398,6 @@ async function handleFsrsRating(rating) {
     return;
   }
   activeQuiz.ratingSubmitted = true;
-  clearVocabularyAutoRatingTimer();
   const { sourceItem } = activeQuiz.entry;
   const { quizResult, responseMs } = activeQuiz.pendingResult;
   const session = activeVocabularyReviewSession;
@@ -6573,7 +6544,7 @@ async function runReviewAutomation() {
   const waitForStudyEventAfter = (count) => new Promise((resolve) => {
     const startedAt = performance.now();
     const timer = window.setInterval(() => {
-      if (studyEvents.length > count || performance.now() - startedAt > VOCABULARY_AUTO_RATING_PAUSE_MS + 2000) {
+      if (studyEvents.length > count || performance.now() - startedAt > 2000) {
         window.clearInterval(timer);
         resolve(studyEvents.at(-1));
       }
@@ -6586,6 +6557,7 @@ async function runReviewAutomation() {
   }
   const beforeFirstEventCount = studyEvents.length;
   await handleQuizAnswer(correctIndex);
+  quizPanel.querySelector('[data-fsrs-rating="easy"]')?.click();
   const latestEvent = await waitForStudyEventAfter(beforeFirstEventCount);
   const firstRating = latestEvent?.rating;
   item.review.dueAt = nowIso();
@@ -6595,6 +6567,7 @@ async function runReviewAutomation() {
   if (wrongIndex >= 0) {
     const beforeSecondEventCount = studyEvents.length;
     await handleQuizAnswer(wrongIndex);
+    quizPanel.querySelector('[data-fsrs-rating="again"]')?.click();
     await waitForStudyEventAfter(beforeSecondEventCount);
   }
   const secondRating = studyEvents.at(-1)?.rating;

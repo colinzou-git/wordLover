@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260603-25";
+} from "./fsrs-scheduler.js?v=20260604-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v99";
+const SHELL_CACHE_NAME = "wordlover-shell-v100";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-25",
-  "/fsrs-scheduler.js?v=20260603-25",
-  "/styles.css?v=20260603-25",
-  "/wordlover-config.js?v=20260603-25",
+  "/app.js?v=20260604-1",
+  "/fsrs-scheduler.js?v=20260604-1",
+  "/styles.css?v=20260604-1",
+  "/wordlover-config.js?v=20260604-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-25",
+  "/automated-tests.js?v=20260604-1",
 ];
 
 let lastResults = null;
@@ -1295,19 +1295,20 @@ async function runMainAppStudySmoke() {
     frame.hidden = false;
     frame.style.cssText = "position:fixed;left:0;top:0;width:520px;height:760px;z-index:9999;background:white;border:0;";
     let reviewDueRatingButtonsVisible = false;
-    const vocabularyReviewAutoOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto one", "review due auto one meaning", "review due auto one");
-    const vocabularyReviewAutoTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto two", "review due auto two meaning", "review due auto two");
-    const vocabularyReviewAutoThree = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto three", "review due auto three meaning", "review due auto three");
-    const vocabularyReviewAutoItems = [];
-    for (const [index, entry] of [vocabularyReviewAutoOne, vocabularyReviewAutoTwo, vocabularyReviewAutoThree].entries()) {
+    let reviewDueWaitsForManualRating = false;
+    const vocabularyReviewManualOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual one", "review due manual one meaning", "review due manual one");
+    const vocabularyReviewManualTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual two", "review due manual two meaning", "review due manual two");
+    const vocabularyReviewManualThree = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual three", "review due manual three meaning", "review due manual three");
+    const vocabularyReviewManualItems = [];
+    for (const [index, entry] of [vocabularyReviewManualOne, vocabularyReviewManualTwo, vocabularyReviewManualThree].entries()) {
       const lookup = frameWindow.WordLoverApp.lookupTerm(entry.word);
-      const item = await frameWindow.WordLoverApp.saveVocabularyItem(lookup, "debug-review-due-auto-advance");
+      const item = await frameWindow.WordLoverApp.saveVocabularyItem(lookup, "debug-review-due-manual-rating");
       const dueAt = new Date(Date.now() - 1_800_000 + index * 60_000).toISOString();
       item.review.dueAt = dueAt;
       item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: dueAt };
       item.review.masteredAt = null;
       item.archivedAt = null;
-      vocabularyReviewAutoItems.push(item);
+      vocabularyReviewManualItems.push(item);
     }
     const waitForVocabularyQuizTerm = (previousTerm = null) => new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -1357,22 +1358,37 @@ async function runMainAppStudySmoke() {
           }
         }, 50);
       });
+      const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
+      const debugState = frameWindow.WordLoverApp.reviewDebug?.state?.();
+      reviewDueWaitsForManualRating =
+        !/Auto-recording/i.test(panelText)
+        && debugState?.activeQuiz?.pending === true
+        && debugState.activeQuiz.ratingSubmitted === false
+        && debugState.activeQuiz.autoTimer === false;
+      if (!reviewDueWaitsForManualRating) {
+        throw new Error(`Vocabulary Review due must wait for a manual Again/Hard/Good/Easy click. Debug: ${JSON.stringify({ panelText, debugState })}`);
+      }
       return quizBefore.entry.term;
+    };
+    const clickFsrsRating = (rating = "good") => {
+      click(`[data-fsrs-rating="${rating}"]`);
     };
     await frameWindow.WordLoverApp.startDueReview();
     const reviewDueFirstTerm = await waitForVocabularyQuizTerm();
     await answerActiveVocabularyQuiz();
+    clickFsrsRating("good");
     const reviewDueSecondTerm = await waitForVocabularyQuizTerm(reviewDueFirstTerm);
     await answerActiveVocabularyQuiz();
+    clickFsrsRating("good");
     const reviewDueThirdTerm = await waitForVocabularyQuizTerm(reviewDueSecondTerm);
-    const reviewDueAutoAdvancesPastSecondWord =
+    const reviewDueManualRatingAdvancesPastSecondWord =
       reviewDueThirdTerm
       && reviewDueThirdTerm !== reviewDueFirstTerm
       && reviewDueThirdTerm !== reviewDueSecondTerm;
-    if (!reviewDueAutoAdvancesPastSecondWord) {
+    if (!reviewDueManualRatingAdvancesPastSecondWord) {
       throw new Error(`Review due should advance past the second answered word. Terms: ${JSON.stringify({ reviewDueFirstTerm, reviewDueSecondTerm, reviewDueThirdTerm })}`);
     }
-    for (const item of vocabularyReviewAutoItems) item.archivedAt = new Date().toISOString();
+    for (const item of vocabularyReviewManualItems) item.archivedAt = new Date().toISOString();
 
     const stalledReviewOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due stalled save one", "review due stalled save one meaning", "review due stalled save one");
     const stalledReviewTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due stalled save two", "review due stalled save two meaning", "review due stalled save two");
@@ -1394,7 +1410,7 @@ async function runMainAppStudySmoke() {
       await frameWindow.WordLoverApp.startDueReview();
       const stalledFirstTerm = await waitForVocabularyQuizTerm();
       await answerActiveVocabularyQuiz();
-      click('[data-fsrs-rating="good"]');
+      clickFsrsRating("good");
       const stalledSecondTerm = await waitForVocabularyQuizTerm(stalledFirstTerm);
       reviewDuePersistenceTimeoutDebug = frameWindow.WordLoverApp.reviewDebug.events().slice(-20);
       reviewDuePersistenceTimeoutStillAdvances =
@@ -1433,7 +1449,7 @@ async function runMainAppStudySmoke() {
       await frameWindow.WordLoverApp.startDueReview();
       const repairedFirstTerm = await waitForVocabularyQuizTerm();
       await answerActiveVocabularyQuiz();
-      click('[data-fsrs-rating="good"]');
+      clickFsrsRating("good");
       const repairedSecondTerm = await waitForVocabularyQuizTerm(repairedFirstTerm);
       reviewDueFsrsRepairDebug = frameWindow.WordLoverApp.reviewDebug.events().slice(-24);
       reviewDueFsrsRepairStillAdvances =
@@ -1560,7 +1576,8 @@ async function runMainAppStudySmoke() {
       archivedExcluded,
       masteredDueIncluded,
       reviewDueRatingButtonsVisible,
-      reviewDueAutoAdvancesPastSecondWord,
+      reviewDueWaitsForManualRating,
+      reviewDueManualRatingAdvancesPastSecondWord,
       reviewDuePersistenceTimeoutStillAdvances,
       reviewDueFsrsRepairStillAdvances,
       spellingDueIncluded,
