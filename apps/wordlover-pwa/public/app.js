@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-18";
+} from "./fsrs-scheduler.js?v=20260603-19";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v92";
+const APP_VERSION = "0.6.2-product.20260603-v93";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v92";
+const SHELL_CACHE_VERSION = "wordlover-shell-v93";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -4141,7 +4141,7 @@ async function handleQuizAnswer(index) {
     return;
   }
   activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
-  renderFsrsRatingChoices(passed);
+  await handleFsrsRating(rating);
 }
 
 async function handleFsrsRating(rating) {
@@ -6264,7 +6264,6 @@ async function runReviewAutomation() {
     return null;
   }
   await handleQuizAnswer(correctIndex);
-  await handleFsrsRating("easy");
   const latestEvent = studyEvents.at(-1);
   const firstRating = latestEvent?.rating;
   item.review.dueAt = nowIso();
@@ -6273,7 +6272,6 @@ async function runReviewAutomation() {
   const wrongIndex = activeQuiz?.options.findIndex((option) => !option.correct) ?? -1;
   if (wrongIndex >= 0) {
     await handleQuizAnswer(wrongIndex);
-    await handleFsrsRating("again");
   }
   const secondRating = studyEvents.at(-1)?.rating;
   const passed = firstRating === "easy" && secondRating === "again";

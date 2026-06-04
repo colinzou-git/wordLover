@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260603-18";
+} from "./fsrs-scheduler.js?v=20260603-19";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v92";
+const SHELL_CACHE_NAME = "wordlover-shell-v93";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-18",
-  "/fsrs-scheduler.js?v=20260603-18",
-  "/styles.css?v=20260603-18",
-  "/wordlover-config.js?v=20260603-18",
+  "/app.js?v=20260603-19",
+  "/fsrs-scheduler.js?v=20260603-19",
+  "/styles.css?v=20260603-19",
+  "/wordlover-config.js?v=20260603-19",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-18",
+  "/automated-tests.js?v=20260603-19",
 ];
 
 let lastResults = null;
@@ -1323,7 +1323,7 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
-    const answerActiveVocabularyQuiz = async (rating = "good") => {
+    const answerActiveVocabularyQuiz = async () => {
       const quizBefore = frameWindow.WordLoverApp.getActiveQuiz();
       if (!quizBefore?.entry?.term) throw new Error("Vocabulary Review due auto-advance test has no active quiz.");
       click("[data-quiz-reveal]");
@@ -1331,28 +1331,13 @@ async function runMainAppStudySmoke() {
       const correctIndex = revealedQuiz.options.findIndex((option) => option.correct);
       if (correctIndex < 0) throw new Error(`Vocabulary quiz for ${revealedQuiz.entry.term} has no correct option.`);
       click(`[data-quiz-option="${correctIndex}"]`);
-      await new Promise((resolve, reject) => {
-        const startedAt = performance.now();
-        const timer = window.setInterval(() => {
-          if (frameDocument.querySelector(`[data-fsrs-rating="${rating}"]`)) {
-            window.clearInterval(timer);
-            resolve();
-            return;
-          }
-          if (performance.now() - startedAt > 5000) {
-            window.clearInterval(timer);
-            reject(new Error(`Vocabulary quiz for ${revealedQuiz.entry.term} did not show FSRS rating buttons.`));
-          }
-        }, 100);
-      });
-      click(`[data-fsrs-rating="${rating}"]`);
       return quizBefore.entry.term;
     };
     await frameWindow.WordLoverApp.startDueReview();
     const reviewDueFirstTerm = await waitForVocabularyQuizTerm();
-    await answerActiveVocabularyQuiz("good");
+    await answerActiveVocabularyQuiz();
     const reviewDueSecondTerm = await waitForVocabularyQuizTerm(reviewDueFirstTerm);
-    await answerActiveVocabularyQuiz("good");
+    await answerActiveVocabularyQuiz();
     const reviewDueThirdTerm = await waitForVocabularyQuizTerm(reviewDueSecondTerm);
     const reviewDueAutoAdvancesPastSecondWord =
       reviewDueThirdTerm
