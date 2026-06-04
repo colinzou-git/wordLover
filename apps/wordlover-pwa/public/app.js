@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-17";
+} from "./fsrs-scheduler.js?v=20260603-18";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v91";
+const APP_VERSION = "0.6.2-product.20260603-v92";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v91";
+const SHELL_CACHE_VERSION = "wordlover-shell-v92";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -204,6 +204,7 @@ let onReturnAction = "vocabulary";
 let speakOnReturn = false;
 let deviceId = null;
 let activeQuiz = null;
+let activeVocabularyReviewSession = null;
 let activeSpellingSession = null;
 let theme = DEFAULT_THEME;
 let fontScale = DEFAULT_FONT_SCALE;
@@ -3345,13 +3346,14 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
     });
     renderStudyStats();
   }
-  hideQuiz();
+  hideQuiz({ preserveVocabularyReviewSession: true });
   renderHistoryChart();
 }
 
-function hideQuiz() {
+function hideQuiz(options = {}) {
   activeQuiz = null;
   activeStudyOneMoreEntry = null;
+  if (!options.preserveVocabularyReviewSession) activeVocabularyReviewSession = null;
   quizPanel.hidden = true;
   quizPanel.innerHTML = "";
 }
@@ -3981,18 +3983,28 @@ function revealQuizOptions() {
     : content;
 }
 
-async function startDueReview() {
+function buildVocabularyReviewSession() {
+  const dueQueue = getDueVocabularyItems();
+  if (dueQueue.length) return { queue: dueQueue, index: 0, mode: "review" };
+  const practiceQueue = getPracticeVocabularyItems();
+  if (practiceQueue.length) return { queue: practiceQueue, index: 0, mode: "practice" };
+  return null;
+}
+
+async function startDueReview(options = {}) {
   if (!(await ensureDictionaryLoaded())) return;
-  const [item] = getDueVocabularyItems();
-  const [practiceItem] = item ? [] : getPracticeVocabularyItems();
-  const reviewItem = item ?? practiceItem;
+  const continueSession = Boolean(options.continueSession);
+  if (!continueSession) activeVocabularyReviewSession = buildVocabularyReviewSession();
+  const session = activeVocabularyReviewSession;
+  const reviewItem = session?.queue?.[session.index] ?? null;
   if (!reviewItem) {
+    activeVocabularyReviewSession = null;
     renderStudyStats();
     quizPanel.hidden = false;
     quizPanel.innerHTML = `<p class="muted">No saved words are available for review yet.</p>`;
     return;
   }
-  renderQuiz(quizEntryFromVocabulary(reviewItem), item ? "review" : "practice");
+  renderQuiz(quizEntryFromVocabulary(reviewItem), session.mode);
 }
 
 function pickNewStudyEntry(level = studyOneMoreLevel) {
@@ -4021,6 +4033,7 @@ function pickNewStudyEntry(level = studyOneMoreLevel) {
 
 async function startNewWordStudy() {
   if (!(await ensureDictionaryLoaded())) return;
+  activeVocabularyReviewSession = null;
   const level = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect?.value ?? studyOneMoreLevel);
   studyOneMoreLevel = level;
   const entry = pickNewStudyEntry(level);
@@ -4135,17 +4148,20 @@ async function handleFsrsRating(rating) {
   if (!activeQuiz?.pendingResult || !FSRS_RATING_LABELS[rating]) return;
   const { sourceItem } = activeQuiz.entry;
   const { quizResult, responseMs } = activeQuiz.pendingResult;
-  const wasPracticeMode = activeQuiz.mode === "practice";
+  const session = activeVocabularyReviewSession;
+  const currentSessionItem = session?.queue?.[session.index] ?? null;
   await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
+  const shouldAdvanceSession = currentSessionItem?.normalizedTerm === sourceItem.normalizedTerm;
+  if (shouldAdvanceSession) session.index += 1;
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}. Loading next word...</p>`;
   activeQuiz = null;
   window.setTimeout(() => {
-    const [nextDue] = getDueVocabularyItems();
-    if (nextDue || wasPracticeMode) {
-      void startDueReview();
+    if (shouldAdvanceSession && session.index < session.queue.length) {
+      void startDueReview({ continueSession: true });
       return;
     }
+    activeVocabularyReviewSession = null;
     quizPanel.innerHTML = `<p class="muted">All due reviews are done. ${escapeHtml(FSRS_RATING_LABELS[rating])} rating recorded.</p><div class="quiz-actions"><button class="secondary-button" type="button" data-quiz-close="1">Close</button></div>`;
   }, 350);
 }
