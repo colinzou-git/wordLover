@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260603-23";
+} from "./fsrs-scheduler.js?v=20260603-24";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v97";
+const SHELL_CACHE_NAME = "wordlover-shell-v98";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-23",
-  "/fsrs-scheduler.js?v=20260603-23",
-  "/styles.css?v=20260603-23",
-  "/wordlover-config.js?v=20260603-23",
+  "/app.js?v=20260603-24",
+  "/fsrs-scheduler.js?v=20260603-24",
+  "/styles.css?v=20260603-24",
+  "/wordlover-config.js?v=20260603-24",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-23",
+  "/automated-tests.js?v=20260603-24",
 ];
 
 let lastResults = null;
@@ -1374,6 +1374,41 @@ async function runMainAppStudySmoke() {
     }
     for (const item of vocabularyReviewAutoItems) item.archivedAt = new Date().toISOString();
 
+    const stalledReviewOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due stalled save one", "review due stalled save one meaning", "review due stalled save one");
+    const stalledReviewTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due stalled save two", "review due stalled save two meaning", "review due stalled save two");
+    const stalledReviewItems = [];
+    for (const entry of [stalledReviewOne, stalledReviewTwo]) {
+      const item = await frameWindow.WordLoverApp.saveVocabularyItem(frameWindow.WordLoverApp.lookupTerm(entry.word), "debug-review-due-stalled-save");
+      const dueAt = new Date(Date.now() - 2_400_000).toISOString();
+      item.review.dueAt = dueAt;
+      item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: dueAt };
+      item.review.masteredAt = null;
+      item.archivedAt = null;
+      stalledReviewItems.push(item);
+    }
+    let reviewDuePersistenceTimeoutStillAdvances = false;
+    let reviewDuePersistenceTimeoutDebug = null;
+    try {
+      frameWindow.WordLoverApp.reviewDebug.clear();
+      frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest(() => new Promise(() => {}), 150);
+      await frameWindow.WordLoverApp.startDueReview();
+      const stalledFirstTerm = await waitForVocabularyQuizTerm();
+      await answerActiveVocabularyQuiz();
+      click('[data-fsrs-rating="good"]');
+      const stalledSecondTerm = await waitForVocabularyQuizTerm(stalledFirstTerm);
+      reviewDuePersistenceTimeoutDebug = frameWindow.WordLoverApp.reviewDebug.events().slice(-20);
+      reviewDuePersistenceTimeoutStillAdvances =
+        Boolean(stalledSecondTerm && stalledSecondTerm !== stalledFirstTerm)
+        && reviewDuePersistenceTimeoutDebug.some((event) => event.stage === "rating-persist-failed" && event.status === "timeout")
+        && reviewDuePersistenceTimeoutDebug.some((event) => event.stage === "rating-recorded" && event.persistenceStatus === "timeout");
+    } finally {
+      frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest(null);
+    }
+    for (const item of stalledReviewItems) item.archivedAt = new Date().toISOString();
+    if (!reviewDuePersistenceTimeoutStillAdvances) {
+      throw new Error(`Review due should advance even when rating persistence stalls. Debug: ${JSON.stringify(reviewDuePersistenceTimeoutDebug)}`);
+    }
+
     const dueSpelling = await frameWindow.WordLoverApp.saveSpellingItem(dueLookup, "debug-fsrs-due-test");
     dueSpelling.review.dueAt = duePast;
     dueSpelling.review.fsrsCard = { ...(dueSpelling.review.fsrsCard ?? {}), due: duePast };
@@ -1487,6 +1522,7 @@ async function runMainAppStudySmoke() {
       masteredDueIncluded,
       reviewDueRatingButtonsVisible,
       reviewDueAutoAdvancesPastSecondWord,
+      reviewDuePersistenceTimeoutStillAdvances,
       spellingDueIncluded,
       snapshotIntegrityIncludesSpelling,
       spellingAutoAdvanceAfterFirstTry: Boolean(spellingFirstTryAfter),

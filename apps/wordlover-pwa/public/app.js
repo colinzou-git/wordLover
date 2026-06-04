@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-23";
+} from "./fsrs-scheduler.js?v=20260603-24";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v97";
+const APP_VERSION = "0.6.2-product.20260603-v98";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v97";
+const SHELL_CACHE_VERSION = "wordlover-shell-v98";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -207,6 +207,8 @@ let activeQuiz = null;
 let activeVocabularyReviewSession = null;
 let activeSpellingSession = null;
 let reviewDebugEvents = [];
+let reviewPersistenceBeforeSaveForTest = null;
+let reviewPersistenceTimeoutMs = 4000;
 let theme = DEFAULT_THEME;
 let fontScale = DEFAULT_FONT_SCALE;
 let vocabularyView = {
@@ -751,6 +753,14 @@ async function loadValue(key, fallback) {
 async function saveRecordValue(storeName, key, value) {
   assertUserDataWritable(`Saving "${key}"`);
   await saveRawValue(storeName, key, await encryptValue(value));
+}
+
+function withTimeout(promise, ms, label) {
+  let timeoutId = 0;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
 async function deleteRecordValue(storeName, key) {
@@ -3292,8 +3302,16 @@ async function persistStudyEvents() {
   renderStudyStats();
 }
 
+async function runReviewPersistence(operation, details) {
+  if (reviewPersistenceBeforeSaveForTest) {
+    await reviewPersistenceBeforeSaveForTest(details);
+  }
+  return operation();
+}
+
 async function recordReviewRating(item, rating, quizResult, responseMs, mode = "review", source = mode) {
   const reviewedAt = nowIso();
+  let persistenceStatus = "saved";
   const schedule = applyReviewSchedulingPolicy({
     reviewState: item.review ?? {},
     rating,
@@ -3323,7 +3341,24 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
   });
   studyEvents.push(event);
   if (schedule.recordOnlyPractice) {
-    await persistStudyEvent(event);
+    try {
+      await withTimeout(
+        runReviewPersistence(
+          () => persistStudyEvent(event),
+          { item, event, rating, mode, source, store: STUDY_EVENT_STORE },
+        ),
+        reviewPersistenceTimeoutMs,
+        `Saving practice review for "${item.normalizedTerm}"`,
+      );
+    } catch (error) {
+      persistenceStatus = error instanceof Error && /timed out/i.test(error.message) ? "timeout" : "error";
+      recordReviewDebug("rating-persist-failed", {
+        term: item.term,
+        rating,
+        status: persistenceStatus,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   } else {
     item.review = {
       ...(item.review ?? {}),
@@ -3338,17 +3373,35 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
     item.updatedAt = reviewedAt;
     item.syncVersion = (item.syncVersion ?? 0) + 1;
     item.isSynced = false;
-    await saveReviewItemAndEvent({
-      itemStore: VOCABULARY_STORE,
-      eventStore: STUDY_EVENT_STORE,
-      itemKey: item.normalizedTerm,
-      item,
-      event,
-    });
+    try {
+      await withTimeout(
+        runReviewPersistence(
+          () => saveReviewItemAndEvent({
+            itemStore: VOCABULARY_STORE,
+            eventStore: STUDY_EVENT_STORE,
+            itemKey: item.normalizedTerm,
+            item,
+            event,
+          }),
+          { item, event, rating, mode, source, store: VOCABULARY_STORE },
+        ),
+        reviewPersistenceTimeoutMs,
+        `Saving review for "${item.normalizedTerm}"`,
+      );
+    } catch (error) {
+      persistenceStatus = error instanceof Error && /timed out/i.test(error.message) ? "timeout" : "error";
+      recordReviewDebug("rating-persist-failed", {
+        term: item.term,
+        rating,
+        status: persistenceStatus,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     renderStudyStats();
   }
   hideQuiz({ preserveVocabularyReviewSession: true });
   renderHistoryChart();
+  return { event, schedule, persistenceStatus };
 }
 
 function hideQuiz(options = {}) {
@@ -4325,14 +4378,27 @@ async function handleFsrsRating(rating) {
     sourceTerm: sourceItem?.term ?? null,
     currentSessionTerm: currentSessionItem?.term ?? null,
   });
-  await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
+  let reviewResult;
+  try {
+    reviewResult = await recordReviewRating(sourceItem, rating, quizResult, responseMs, activeQuiz.mode);
+  } catch (error) {
+    activeQuiz.ratingSubmitted = false;
+    recordReviewDebug("rating-error", {
+      rating,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const panel = quizPanel.querySelector(".fsrs-rating-panel");
+    panel?.insertAdjacentHTML("beforeend", `<p class="error">Could not record this rating. Try again.</p>`);
+    return;
+  }
   const shouldAdvanceSession = currentSessionItem?.normalizedTerm === sourceItem.normalizedTerm;
-  if (shouldAdvanceSession) session.index += 1;
+  if (shouldAdvanceSession && session) session.index += 1;
   recordReviewDebug("rating-recorded", {
     rating,
     shouldAdvanceSession,
     nextSessionIndex: session?.index ?? null,
     nextTerm: session?.queue?.[session.index]?.term ?? null,
+    persistenceStatus: reviewResult?.persistenceStatus ?? "unknown",
   });
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}. Loading next word...</p>`;
@@ -7682,6 +7748,10 @@ window.WordLoverApp = {
     events: () => reviewDebugEvents.map((event) => ({ ...event })),
     clear: () => {
       reviewDebugEvents = [];
+    },
+    setPersistenceHookForTest: (hook, timeoutMs = 4000) => {
+      reviewPersistenceBeforeSaveForTest = typeof hook === "function" ? hook : null;
+      reviewPersistenceTimeoutMs = Number.isFinite(Number(timeoutMs)) ? Math.max(50, Number(timeoutMs)) : 4000;
     },
     state: () => ({
       activeQuiz: activeQuiz ? {
