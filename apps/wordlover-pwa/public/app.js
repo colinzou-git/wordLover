@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-21";
+} from "./fsrs-scheduler.js?v=20260603-22";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v95";
+const APP_VERSION = "0.6.2-product.20260603-v96";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v95";
+const SHELL_CACHE_VERSION = "wordlover-shell-v96";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3368,7 +3368,7 @@ function hideQuiz(options = {}) {
 // The session rating is derived from how many wrong attempts (retries) it took. Strict check:
 // exact, case-sensitive, with accidental edge spaces ignored.
 const SPELLING_FEEDBACK_PAUSE_MS = 1000;
-const VOCABULARY_AUTO_RATING_PAUSE_MS = 1400;
+const VOCABULARY_AUTO_RATING_PAUSE_MS = 5000;
 
 function recordReviewDebug(stage, details = {}) {
   const event = {
@@ -4183,6 +4183,26 @@ function scheduleVocabularyAutoRating(rating) {
       void handleFsrsRating(rating);
     }
   }, VOCABULARY_AUTO_RATING_PAUSE_MS);
+}
+
+function ratingButtonFromEvent(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  const button = target?.closest("[data-fsrs-rating]");
+  return button instanceof HTMLButtonElement ? button : null;
+}
+
+function activateRatingButtonFromEvent(event, source) {
+  const button = ratingButtonFromEvent(event);
+  if (!button) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  recordReviewDebug("rating-activate", {
+    source,
+    rating: button.dataset.fsrsRating,
+    disabled: button.disabled,
+  });
+  if (!button.disabled) void handleFsrsRating(button.dataset.fsrsRating);
+  return true;
 }
 
 async function handleQuizAnswer(index) {
@@ -6943,6 +6963,14 @@ spellingReviewPanel.addEventListener("click", (event) => {
     hideSpellingReview();
   }
 });
+
+quizPanel.addEventListener("pointerup", (event) => {
+  activateRatingButtonFromEvent(event, "pointerup");
+}, { capture: true });
+
+quizPanel.addEventListener("touchend", (event) => {
+  activateRatingButtonFromEvent(event, "touchend");
+}, { capture: true, passive: false });
 
 quizPanel.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;

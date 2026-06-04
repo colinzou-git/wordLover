@@ -47,7 +47,7 @@ def ensure_dictionary_loaded_with_reload_retry(page: Page) -> None:
 
 
 def run_rating_button_pointer_check(page: Page) -> dict:
-    """Click Again/Hard/Good/Easy through Playwright's real pointer path."""
+    """Tap Again/Hard/Good/Easy through Playwright's touch input path."""
     dismiss_optional_modal(page)
     ensure_dictionary_loaded_with_reload_retry(page)
     dismiss_optional_modal(page)
@@ -77,13 +77,13 @@ def run_rating_button_pointer_check(page: Page) -> dict:
         if not first_term:
             raise AssertionError(f"Review did not start for {rating} pointer check.")
 
-        page.locator("[data-quiz-reveal]").click(timeout=5_000)
+        page.locator("[data-quiz-reveal]").tap(timeout=5_000)
         correct_index = page.evaluate(
             "() => window.WordLoverApp.getActiveQuiz().options.findIndex((option) => option.correct)"
         )
         if correct_index < 0:
             raise AssertionError(f"Review quiz for {rating} pointer check has no correct option.")
-        page.locator(f'[data-quiz-option="{correct_index}"]').click(timeout=5_000)
+        page.locator(f'[data-quiz-option="{correct_index}"]').tap(timeout=5_000)
 
         selector = f'[data-fsrs-rating="{rating}"]'
         page.locator(selector).scroll_into_view_if_needed(timeout=5_000)
@@ -99,13 +99,13 @@ def run_rating_button_pointer_check(page: Page) -> dict:
             timeout=5_000,
         )
         before_click = page.evaluate("() => window.WordLoverApp.reviewDebug.state()")
-        page.locator(selector).click(timeout=5_000)
+        page.locator(selector).tap(timeout=5_000)
         page.wait_for_function(
             """({ rating, firstTerm }) => {
                 const debugEvents = window.WordLoverApp.reviewDebug.events();
                 const latestStudyEvent = window.WordLoverApp.getStudyEvents().at(-1);
                 const activeTerm = window.WordLoverApp.getActiveQuiz()?.entry?.term ?? null;
-                return debugEvents.some((event) => event.stage === "rating-click" && event.rating === rating)
+                return debugEvents.some((event) => ["rating-activate", "rating-click"].includes(event.stage) && event.rating === rating)
                     && debugEvents.some((event) => event.stage === "rating-recorded" && event.rating === rating)
                     && latestStudyEvent?.rating === rating
                     && activeTerm
@@ -142,7 +142,15 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
+        context = browser.new_context(
+            has_touch=True,
+            is_mobile=True,
+            viewport={"width": 820, "height": 1180},
+            user_agent=(
+                "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            ),
+        )
         page = context.new_page()
         page.on("console", lambda msg: console_messages.append({"type": msg.type, "text": msg.text}))
         page.on("pageerror", lambda err: errors.append(f"pageerror: {err}"))
