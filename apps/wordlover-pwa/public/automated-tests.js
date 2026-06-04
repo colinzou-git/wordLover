@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260603-19";
+} from "./fsrs-scheduler.js?v=20260603-20";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v93";
+const SHELL_CACHE_NAME = "wordlover-shell-v94";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260603-19",
-  "/fsrs-scheduler.js?v=20260603-19",
-  "/styles.css?v=20260603-19",
-  "/wordlover-config.js?v=20260603-19",
+  "/app.js?v=20260603-20",
+  "/fsrs-scheduler.js?v=20260603-20",
+  "/styles.css?v=20260603-20",
+  "/wordlover-config.js?v=20260603-20",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260603-19",
+  "/automated-tests.js?v=20260603-20",
 ];
 
 let lastResults = null;
@@ -1292,6 +1292,7 @@ async function runMainAppStudySmoke() {
     if (!archivedExcluded) throw new Error("Archived cards should be excluded from the active due queue.");
     if (!masteredDueIncluded) throw new Error("Mastered cards should still be reviewed when dueAt arrives.");
 
+    let reviewDueRatingButtonsVisible = false;
     const vocabularyReviewAutoOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto one", "review due auto one meaning", "review due auto one");
     const vocabularyReviewAutoTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto two", "review due auto two meaning", "review due auto two");
     const vocabularyReviewAutoThree = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due auto three", "review due auto three meaning", "review due auto three");
@@ -1331,6 +1332,23 @@ async function runMainAppStudySmoke() {
       const correctIndex = revealedQuiz.options.findIndex((option) => option.correct);
       if (correctIndex < 0) throw new Error(`Vocabulary quiz for ${revealedQuiz.entry.term} has no correct option.`);
       click(`[data-quiz-option="${correctIndex}"]`);
+      await new Promise((resolve, reject) => {
+        const startedAt = performance.now();
+        const timer = window.setInterval(() => {
+          const buttons = [...frameDocument.querySelectorAll("[data-fsrs-rating]")];
+          const labels = buttons.map((button) => button.textContent?.trim()).join("|");
+          if (buttons.length === 4 && /Again/.test(labels) && /Hard/.test(labels) && /Good/.test(labels) && /Easy/.test(labels)) {
+            reviewDueRatingButtonsVisible = true;
+            window.clearInterval(timer);
+            resolve();
+            return;
+          }
+          if (performance.now() - startedAt > 1000) {
+            window.clearInterval(timer);
+            reject(new Error(`Vocabulary Review due should show Again/Hard/Good/Easy buttons after answering ${revealedQuiz.entry.term}.`));
+          }
+        }, 50);
+      });
       return quizBefore.entry.term;
     };
     await frameWindow.WordLoverApp.startDueReview();
@@ -1459,6 +1477,7 @@ async function runMainAppStudySmoke() {
       visibleIpaCount,
       archivedExcluded,
       masteredDueIncluded,
+      reviewDueRatingButtonsVisible,
       reviewDueAutoAdvancesPastSecondWord,
       spellingDueIncluded,
       snapshotIntegrityIncludesSpelling,

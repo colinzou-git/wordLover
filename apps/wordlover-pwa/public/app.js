@@ -50,7 +50,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260603-19";
+} from "./fsrs-scheduler.js?v=20260603-20";
 
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
@@ -110,9 +110,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260603-v93";
+const APP_VERSION = "0.6.2-product.20260603-v94";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v93";
+const SHELL_CACHE_VERSION = "wordlover-shell-v94";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3351,6 +3351,7 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
 }
 
 function hideQuiz(options = {}) {
+  clearVocabularyAutoRatingTimer();
   activeQuiz = null;
   activeStudyOneMoreEntry = null;
   if (!options.preserveVocabularyReviewSession) activeVocabularyReviewSession = null;
@@ -3366,6 +3367,13 @@ function hideQuiz(options = {}) {
 // The session rating is derived from how many wrong attempts (retries) it took. Strict check:
 // exact, case-sensitive, with accidental edge spaces ignored.
 const SPELLING_FEEDBACK_PAUSE_MS = 1000;
+const VOCABULARY_AUTO_RATING_PAUSE_MS = 1400;
+
+function clearVocabularyAutoRatingTimer() {
+  if (!activeQuiz?.autoRatingTimer) return;
+  window.clearTimeout(activeQuiz.autoRatingTimer);
+  activeQuiz.autoRatingTimer = 0;
+}
 
 function spellingThreshold() {
   return (activeSpellingSession?.retries ?? 0) === 0 ? 1 : 3;
@@ -4097,22 +4105,39 @@ function showStudyOneMoreMeaning() {
   }
 }
 
-function renderFsrsRatingChoices(passed) {
+function renderFsrsRatingChoices(passed, inferredRating) {
   const hint = passed ? "Choose how well you remembered it." : "Choose Again unless you still remembered part of it.";
+  const buttons = [
+    ["again", "Again"],
+    ["hard", "Hard"],
+    ["good", "Good"],
+    ["easy", "Easy"],
+  ];
   quizPanel.insertAdjacentHTML(
     "beforeend",
     `
       <div class="fsrs-rating-panel">
         <p class="muted">${escapeHtml(hint)}</p>
+        <p class="muted">Auto-recording ${escapeHtml(FSRS_RATING_LABELS[inferredRating] ?? "Good")} shortly.</p>
         <div class="quiz-actions fsrs-ratings" aria-label="Review rating">
-          <button class="secondary-button" type="button" data-fsrs-rating="again">Again</button>
-          <button class="secondary-button" type="button" data-fsrs-rating="hard">Hard</button>
-          <button type="button" data-fsrs-rating="good">Good</button>
-          <button class="secondary-button" type="button" data-fsrs-rating="easy">Easy</button>
+          ${buttons.map(([value, label]) =>
+            `<button class="${value === inferredRating ? "" : "secondary-button"}" type="button" data-fsrs-rating="${value}">${label}</button>`,
+          ).join("")}
         </div>
       </div>
     `,
   );
+}
+
+function scheduleVocabularyAutoRating(rating) {
+  if (!activeQuiz?.pendingResult) return;
+  const quizId = activeQuiz.id;
+  clearVocabularyAutoRatingTimer();
+  activeQuiz.autoRatingTimer = window.setTimeout(() => {
+    if (activeQuiz?.id === quizId && activeQuiz.pendingResult && !activeQuiz.ratingSubmitted) {
+      void handleFsrsRating(rating);
+    }
+  }, VOCABULARY_AUTO_RATING_PAUSE_MS);
 }
 
 async function handleQuizAnswer(index) {
@@ -4141,11 +4166,14 @@ async function handleQuizAnswer(index) {
     return;
   }
   activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
-  await handleFsrsRating(rating);
+  renderFsrsRatingChoices(passed, rating);
+  scheduleVocabularyAutoRating(rating);
 }
 
 async function handleFsrsRating(rating) {
-  if (!activeQuiz?.pendingResult || !FSRS_RATING_LABELS[rating]) return;
+  if (!activeQuiz?.pendingResult || activeQuiz.ratingSubmitted || !FSRS_RATING_LABELS[rating]) return;
+  activeQuiz.ratingSubmitted = true;
+  clearVocabularyAutoRatingTimer();
   const { sourceItem } = activeQuiz.entry;
   const { quizResult, responseMs } = activeQuiz.pendingResult;
   const session = activeVocabularyReviewSession;
@@ -6258,20 +6286,32 @@ async function runReviewAutomation() {
   item.review.masteredAt = null;
   await persistVocabulary();
   await startDueReview();
+  const waitForStudyEventAfter = (count) => new Promise((resolve) => {
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      if (studyEvents.length > count || performance.now() - startedAt > VOCABULARY_AUTO_RATING_PAUSE_MS + 2000) {
+        window.clearInterval(timer);
+        resolve(studyEvents.at(-1));
+      }
+    }, 50);
+  });
   const correctIndex = activeQuiz?.options.findIndex((option) => option.correct) ?? -1;
   if (correctIndex < 0) {
     debugStatus.textContent = "Automation failed: no correct quiz option.";
     return null;
   }
+  const beforeFirstEventCount = studyEvents.length;
   await handleQuizAnswer(correctIndex);
-  const latestEvent = studyEvents.at(-1);
+  const latestEvent = await waitForStudyEventAfter(beforeFirstEventCount);
   const firstRating = latestEvent?.rating;
   item.review.dueAt = nowIso();
   await persistVocabulary();
   await startDueReview();
   const wrongIndex = activeQuiz?.options.findIndex((option) => !option.correct) ?? -1;
   if (wrongIndex >= 0) {
+    const beforeSecondEventCount = studyEvents.length;
     await handleQuizAnswer(wrongIndex);
+    await waitForStudyEventAfter(beforeSecondEventCount);
   }
   const secondRating = studyEvents.at(-1)?.rating;
   const passed = firstRating === "easy" && secondRating === "again";
