@@ -7,8 +7,9 @@ Run from repo root:
 Output:
     docs/ai/AUTO_SYMBOL_MAP.md
 
-The generator intentionally scans only a curated WordLover file list so it stays
-small, deterministic, and token-saving.
+The generator scans the WordLover source roots and skips generated, vendored,
+and validation-output files so it stays deterministic without missing new local
+source files.
 """
 
 from __future__ import annotations
@@ -16,12 +17,15 @@ from __future__ import annotations
 import ast
 import datetime as dt
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-SOURCE_PATHS = [
+CORE_SOURCE_PATHS = [
     "apps/wordlover-pwa/public/app.js",
+    "apps/wordlover-pwa/public/fsrs-scheduler.js",
     "apps/wordlover-pwa/public/sw.js",
+    "apps/wordlover-pwa/public/wa-sqlite-opfs-worker.js",
     "apps/wordlover-pwa/public/automated-tests.js",
     "apps/wordlover-pwa/public/index.html",
     "apps/wordlover-pwa/public/automated-tests.html",
@@ -38,6 +42,32 @@ SOURCE_PATHS = [
     "apps/wordlover-pwa/scripts/smoke-update-flow.py",
     "apps/wordlover-pwa/scripts/serve-https.py",
 ]
+
+DISCOVERY_ROOTS = [
+    "apps/wordlover-pwa/public",
+    "apps/wordlover-pwa/scripts",
+    "scripts",
+]
+
+EXTRA_SOURCE_PATHS = [
+    "apps/wordlover-pwa/package.json",
+    "apps/wordlover-pwa/public/start-iphone-https.ps1",
+    "start-iphone-https.ps1",
+]
+
+SOURCE_SUFFIXES = {".js", ".py", ".html", ".htm", ".json", ".webmanifest", ".ps1"}
+EXCLUDED_PARTS = {
+    ".git",
+    "__pycache__",
+    "certs",
+    "data",
+    "node_modules",
+    "received-results",
+    "vendor",
+}
+EXCLUDED_FILENAMES = {
+    "dictionary-manifest.json",
+}
 
 FEATURE_HINTS = {
     "Dictionary search / install": [
@@ -78,6 +108,8 @@ QUERY_ID_RE = re.compile(r"querySelector(?:All)?\(\s*['\"]#([A-Za-z0-9_-]+)['\"]
 HTML_ID_RE = re.compile(r"\bid=['\"]([^'\"]+)['\"]")
 HTML_SCRIPT_RE = re.compile(r"<script[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 JSON_KEY_RE = re.compile(r'"([A-Za-z0-9_-]+)"\s*:')
+PS_FUNCTION_RE = re.compile(r"^\s*function\s+([A-Za-z_][\w-]*)\b", re.IGNORECASE)
+PS_PARAM_RE = re.compile(r"\[Parameter[^\]]*\]\s*(?:\[[^\]]+\]\s*)?\$([A-Za-z_][\w]*)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -174,6 +206,17 @@ def parse_json_like(text: str) -> dict[str, list[Symbol]]:
     return {"keys": unique(keys)}
 
 
+def parse_powershell(text: str) -> dict[str, list[Symbol]]:
+    functions: list[Symbol] = []
+    parameters: list[Symbol] = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        if m := PS_FUNCTION_RE.search(line):
+            functions.append(Symbol(m.group(1), line_no))
+        for m in PS_PARAM_RE.finditer(line):
+            parameters.append(Symbol(m.group(1), line_no))
+    return {"functions": unique(functions), "parameters": unique(parameters)}
+
+
 def parse_file(path: Path) -> dict[str, list[Symbol]]:
     text = path.read_text(encoding="utf-8-sig", errors="replace")
     if path.suffix == ".js":
@@ -184,7 +227,65 @@ def parse_file(path: Path) -> dict[str, list[Symbol]]:
         return parse_html(text)
     if path.suffix in {".json", ".webmanifest"}:
         return parse_json_like(text)
+    if path.suffix == ".ps1":
+        return parse_powershell(text)
     return {}
+
+
+def is_source_candidate(path: Path) -> bool:
+    if path.suffix.lower() not in SOURCE_SUFFIXES:
+        return False
+    if path.name in EXCLUDED_FILENAMES:
+        return False
+    return not any(part in EXCLUDED_PARTS for part in path.parts)
+
+
+def is_in_discovery_scope(root: Path, path: Path) -> bool:
+    try:
+        rel = path.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    if rel in CORE_SOURCE_PATHS or rel in EXTRA_SOURCE_PATHS:
+        return True
+    return any(rel == scope or rel.startswith(f"{scope}/") for scope in DISCOVERY_ROOTS)
+
+
+def tracked_source_files(root: Path) -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", *DISCOVERY_ROOTS, *EXTRA_SOURCE_PATHS],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    paths: set[Path] = set()
+    for rel in result.stdout.splitlines():
+        path = root / rel
+        if path.exists() and is_source_candidate(path) and is_in_discovery_scope(root, path):
+            paths.add(path)
+    return sorted(paths, key=lambda path: path.relative_to(root).as_posix())
+
+
+def discover_source_files(root: Path) -> list[Path]:
+    tracked = tracked_source_files(root)
+    if tracked:
+        return tracked
+    paths: set[Path] = set()
+    for rel in [*CORE_SOURCE_PATHS, *EXTRA_SOURCE_PATHS]:
+        path = root / rel
+        if path.exists() and is_source_candidate(path):
+            paths.add(path)
+    for rel_root in DISCOVERY_ROOTS:
+        source_root = root / rel_root
+        if not source_root.exists():
+            continue
+        for path in source_root.rglob("*"):
+            if path.is_file() and is_source_candidate(path):
+                paths.add(path)
+    return sorted(paths, key=lambda path: path.relative_to(root).as_posix())
 
 
 def render_map(root: Path, files: list[Path]) -> str:
@@ -234,7 +335,7 @@ def render_map(root: Path, files: list[Path]) -> str:
 
 def main() -> int:
     root = Path.cwd()
-    files = [root / rel for rel in SOURCE_PATHS if (root / rel).exists()]
+    files = discover_source_files(root)
     output = root / "docs/ai/AUTO_SYMBOL_MAP.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_map(root, files), encoding="utf-8")

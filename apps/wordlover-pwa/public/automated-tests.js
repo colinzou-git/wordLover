@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260604-1";
+} from "./fsrs-scheduler.js?v=20260604-4";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v100";
+const SHELL_CACHE_NAME = "wordlover-shell-v103";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260604-1",
-  "/fsrs-scheduler.js?v=20260604-1",
-  "/styles.css?v=20260604-1",
-  "/wordlover-config.js?v=20260604-1",
+  "/app.js?v=20260604-4",
+  "/fsrs-scheduler.js?v=20260604-4",
+  "/styles.css?v=20260604-4",
+  "/wordlover-config.js?v=20260604-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260604-1",
+  "/automated-tests.js?v=20260604-4",
 ];
 
 let lastResults = null;
@@ -825,10 +825,30 @@ async function runMainAppStudySmoke() {
       excludesSpellingWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ spelling: ["echo"] })).normalizedTerm === "delta",
       excludesKnownWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ known: ["echo"] })).normalizedTerm === "delta",
       excludesWordsStudiedToday: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ introducedToday: ["echo"] })).normalizedTerm === "delta",
+      excludesWordsSkippedToday: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ introducedToday: ["echo"] })).normalizedTerm === "delta",
       choosesLowestFrequencyRankCandidate: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets()).normalizedTerm === "echo",
       fallsBackWhenNoCefrExists: frameWindow.WordLoverApp.studyOneMore.levelFor({ word: "fallback", normalized_word: "fallback", frq: 2500 }) === "very_easy"
         && frameWindow.WordLoverApp.studyOneMore.levelFor({ word: "intermediate", normalized_word: "intermediate", frq: 9000 }) === "medium",
     };
+    const orderedStats = { rowsVisited: 0 };
+    const orderedCandidate = frameWindow.WordLoverApp.studyOneMore.pickFromOrderedCandidates(
+      [
+        { word: "swift", normalized_word: "swift", frq: 10, bnc: 10, definition: "swift definition", translation: "swift" },
+        { word: "slower", normalized_word: "slower", frq: 20, bnc: 20, definition: "slower definition", translation: "slower" },
+        { word: "slowest", normalized_word: "slowest", frq: 30, bnc: 30, definition: "slowest definition", translation: "slowest" },
+      ],
+      "very_easy",
+      fakeSets(),
+      orderedStats,
+    );
+    studyOneMoreTests.orderedCandidateStopsAtFirstAllowed =
+      orderedCandidate?.normalizedTerm === "swift" && orderedStats.rowsVisited === 1;
+    studyOneMoreTests.levelSqlPushesFiltersToDictionary =
+      /<= 3000/.test(frameWindow.WordLoverApp.studyOneMore.levelSql("very_easy"))
+      && /NOT/.test(frameWindow.WordLoverApp.studyOneMore.levelSql("easy"))
+      && /is_toefl|tag/i.test(frameWindow.WordLoverApp.studyOneMore.levelSql("toefl"));
+    studyOneMoreTests.dictionaryCandidateQueryIsLimited =
+      frameWindow.WordLoverApp.studyOneMore.queryCandidates("very_easy", 7).length <= 7;
     if (!Object.values(studyOneMoreTests).every(Boolean)) {
       throw new Error(`Study One More selection tests failed: ${JSON.stringify(studyOneMoreTests)}`);
     }
@@ -1061,7 +1081,30 @@ async function runMainAppStudySmoke() {
     }
     await frameWindow.WordLoverApp.auth.setGrantForTest(false);
 
+    let releaseStudyOneMorePick = null;
+    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(() => new Promise((resolve) => {
+      releaseStudyOneMorePick = resolve;
+    }));
     click("#studyNewWord");
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const text = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
+        const disabled = frameDocument.querySelector("#studyNewWord")?.disabled;
+        if (/Finding a word/i.test(text) && disabled) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 3000) {
+          window.clearInterval(timer);
+          reject(new Error(`Study One More did not show immediate loading feedback. Text: ${text}`));
+        }
+      }, 50);
+    });
+    const studyOneMoreShowsImmediateLoading = true;
+    releaseStudyOneMorePick?.();
+    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(null);
     const firstTerm = await waitForStudyOneMoreCard();
     const firstCandidate = frameWindow.WordLoverApp.studyOneMore.current();
     const answerStudyOneMore = (wantCorrect = true) => {
@@ -1560,6 +1603,7 @@ async function runMainAppStudySmoke() {
       studyOneMoreMemorizeSaved: true,
       studyOneMoreSpellingSaved: true,
       studyOneMoreTests,
+      studyOneMoreShowsImmediateLoading,
       reviewSchedulingTests,
       eventSourcedMergeRebuiltFsrs,
       uiPreferencesSurviveReload,
