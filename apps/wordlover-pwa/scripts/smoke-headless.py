@@ -13,7 +13,122 @@ import json
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
+
+
+RATING_BUTTONS = ("again", "hard", "good", "easy")
+
+
+def dismiss_optional_modal(page: Page) -> None:
+    for _ in range(5):
+        if not page.locator(".modal-overlay").count():
+            return
+        if page.locator(".modal-overlay [data-modal-cancel]").count():
+            page.locator(".modal-overlay [data-modal-cancel]").click(timeout=2_000)
+        elif page.locator(".modal-overlay #passphrase").count():
+            page.locator(".modal-overlay #passphrase").fill("wordlover-localhost-development-passphrase")
+            page.locator(".modal-overlay [data-modal-submit]").click(timeout=2_000)
+        else:
+            page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+
+
+def ensure_dictionary_loaded_with_reload_retry(page: Page) -> None:
+    for _ in range(3):
+        try:
+            page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
+            page.wait_for_function("window.WordLoverApp.getState().loaded === true", timeout=60_000)
+            return
+        except Exception:  # noqa: BLE001
+            page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            page.wait_for_function("window.WordLoverApp != null", timeout=15_000)
+    page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
+    page.wait_for_function("window.WordLoverApp.getState().loaded === true", timeout=60_000)
+
+
+def run_rating_button_pointer_check(page: Page) -> dict:
+    """Click Again/Hard/Good/Easy through Playwright's real pointer path."""
+    dismiss_optional_modal(page)
+    ensure_dictionary_loaded_with_reload_retry(page)
+    dismiss_optional_modal(page)
+
+    results: list[dict] = []
+    for rating in RATING_BUTTONS:
+        suffix = rating
+        first_term = page.evaluate(
+            """async ({ suffix }) => {
+                const app = window.WordLoverApp;
+                app.reviewDebug.clear();
+                for (const word of [`pointer ${suffix} one`, `pointer ${suffix} two`]) {
+                    const entry = await app.addUserDictionaryEntryForTest(word, `${word} meaning`, `${word} zh`);
+                    const item = await app.saveVocabularyItem(app.lookupTerm(entry.word), "smoke-pointer-rating");
+                    const dueAt = new Date(Date.now() - 60_000).toISOString();
+                    item.review.dueAt = dueAt;
+                    item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: dueAt };
+                    item.review.masteredAt = null;
+                    item.archivedAt = null;
+                }
+                await app.startDueReview();
+                return app.getActiveQuiz()?.entry?.term ?? null;
+            }""",
+            {"suffix": suffix},
+        )
+        dismiss_optional_modal(page)
+        if not first_term:
+            raise AssertionError(f"Review did not start for {rating} pointer check.")
+
+        page.locator("[data-quiz-reveal]").click(timeout=5_000)
+        correct_index = page.evaluate(
+            "() => window.WordLoverApp.getActiveQuiz().options.findIndex((option) => option.correct)"
+        )
+        if correct_index < 0:
+            raise AssertionError(f"Review quiz for {rating} pointer check has no correct option.")
+        page.locator(f'[data-quiz-option="{correct_index}"]').click(timeout=5_000)
+
+        selector = f'[data-fsrs-rating="{rating}"]'
+        page.locator(selector).scroll_into_view_if_needed(timeout=5_000)
+        page.wait_for_function(
+            """(selector) => {
+                const button = document.querySelector(selector);
+                if (!button || button.disabled) return false;
+                const rect = button.getBoundingClientRect();
+                const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return top === button || Boolean(top?.closest?.("[data-fsrs-rating]"));
+            }""",
+            arg=selector,
+            timeout=5_000,
+        )
+        before_click = page.evaluate("() => window.WordLoverApp.reviewDebug.state()")
+        page.locator(selector).click(timeout=5_000)
+        page.wait_for_function(
+            """({ rating, firstTerm }) => {
+                const debugEvents = window.WordLoverApp.reviewDebug.events();
+                const latestStudyEvent = window.WordLoverApp.getStudyEvents().at(-1);
+                const activeTerm = window.WordLoverApp.getActiveQuiz()?.entry?.term ?? null;
+                return debugEvents.some((event) => event.stage === "rating-click" && event.rating === rating)
+                    && debugEvents.some((event) => event.stage === "rating-recorded" && event.rating === rating)
+                    && latestStudyEvent?.rating === rating
+                    && activeTerm
+                    && activeTerm !== firstTerm;
+            }""",
+            arg={"rating": rating, "firstTerm": first_term},
+            timeout=8_000,
+        )
+        after_click = page.evaluate(
+            """() => ({
+                state: window.WordLoverApp.reviewDebug.state(),
+                events: window.WordLoverApp.reviewDebug.events().slice(-12),
+                latestStudyEvent: window.WordLoverApp.getStudyEvents().at(-1),
+            })"""
+        )
+        results.append({
+            "rating": rating,
+            "firstTerm": first_term,
+            "beforeClick": before_click,
+            "afterClick": after_click,
+        })
+
+    return {"passed": len(results) == len(RATING_BUTTONS), "ratings": results}
 
 
 def main() -> int:
@@ -32,7 +147,7 @@ def main() -> int:
         page.on("console", lambda msg: console_messages.append({"type": msg.type, "text": msg.text}))
         page.on("pageerror", lambda err: errors.append(f"pageerror: {err}"))
 
-        page.goto(f"{args.base}/?fresh=v35", wait_until="domcontentloaded")
+        page.goto(f"{args.base}/?fresh=v35&reviewDebug=1", wait_until="domcontentloaded")
         page.wait_for_function("window.WordLoverApp != null", timeout=15000)
 
         # New API surface from this session.
@@ -106,6 +221,7 @@ def main() -> int:
         # Verify vocabulary search input renders once at least one item exists in the all view.
         # (Skip — depends on having items in memory; covered manually.)
 
+        rating_button_pointer_check = run_rating_button_pointer_check(page)
         state = page.evaluate("() => window.WordLoverApp.getState()")
 
         browser.close()
@@ -117,6 +233,7 @@ def main() -> int:
         "ui_elements": ui_elements,
         "not_found_check": not_found_check,
         "dialog_check": dialog_check,
+        "rating_button_pointer_check": rating_button_pointer_check,
         "state_summary": {
             "appVersion": state.get("appVersion"),
             "shellCacheVersion": state.get("shellCacheVersion"),
@@ -148,6 +265,8 @@ def main() -> int:
         failures.append("unknown-term dialog did not render an overlay")
     if not dialog_check.get("hasTextarea"):
         failures.append("unknown-term dialog did not render a textarea field (modal textarea support missing)")
+    if not rating_button_pointer_check.get("passed"):
+        failures.append("FSRS rating buttons did not pass real pointer-click checks")
 
     if failures:
         print("\nFAILED:")
