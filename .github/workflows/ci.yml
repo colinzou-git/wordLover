@@ -49,8 +49,11 @@ jobs:
       - name: Install Playwright (Chromium)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install playwright
+          python -m pip install playwright zstandard
           python -m playwright install --with-deps chromium
+
+      - name: Prepare lightweight CI dictionary
+        run: python apps/wordlover-pwa/scripts/create-ci-dictionary.py
 
       - name: Serve the PWA over HTTP
         working-directory: apps/wordlover-pwa/public

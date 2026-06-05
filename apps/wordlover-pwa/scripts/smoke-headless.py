@@ -1,7 +1,7 @@
 """Headless smoke test that loads the WordLover PWA in Chromium and checks for JS errors.
 
-Skips the dictionary download to keep the run fast; only validates that the app shell
-loads cleanly, the new buttons/handlers from this session are wired, and the
+Loads the app dictionary, validates that the shell loads cleanly, confirms the
+new buttons/handlers from this session are wired, and checks that the
 WordLoverApp public surface exposes the new functions.
 
 Run with the Windows HTTP server already on port 4173.
@@ -17,6 +17,28 @@ from playwright.sync_api import Page, sync_playwright
 
 
 RATING_BUTTONS = ("again", "hard", "good", "easy")
+
+
+def wait_for_app_ready(page: Page, timeout: int = 15_000) -> None:
+    page.wait_for_load_state("domcontentloaded", timeout=timeout)
+    page.wait_for_function("window.WordLoverApp != null", timeout=timeout)
+
+
+def wait_for_service_worker_reload_settle(page: Page) -> None:
+    """Let first-install controllerchange reload finish before touch checks."""
+    try:
+        page.wait_for_function(
+            """async () => {
+                if (!("serviceWorker" in navigator)) return true;
+                await navigator.serviceWorker.ready;
+                return Boolean(navigator.serviceWorker.controller);
+            }""",
+            timeout=10_000,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    wait_for_app_ready(page)
+    page.wait_for_timeout(500)
 
 
 def dismiss_optional_modal(page: Page) -> None:
@@ -38,10 +60,10 @@ def ensure_dictionary_loaded_with_reload_retry(page: Page) -> None:
         try:
             page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
             page.wait_for_function("window.WordLoverApp.getState().loaded === true", timeout=60_000)
+            wait_for_service_worker_reload_settle(page)
             return
         except Exception:  # noqa: BLE001
-            page.wait_for_load_state("domcontentloaded", timeout=15_000)
-            page.wait_for_function("window.WordLoverApp != null", timeout=15_000)
+            wait_for_app_ready(page)
     page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
     page.wait_for_function("window.WordLoverApp.getState().loaded === true", timeout=60_000)
 
@@ -156,7 +178,8 @@ def main() -> int:
         page.on("pageerror", lambda err: errors.append(f"pageerror: {err}"))
 
         page.goto(f"{args.base}/?fresh=v35&reviewDebug=1", wait_until="domcontentloaded")
-        page.wait_for_function("window.WordLoverApp != null", timeout=15000)
+        wait_for_app_ready(page)
+        wait_for_service_worker_reload_settle(page)
 
         # New API surface from this session.
         api_surface = page.evaluate(

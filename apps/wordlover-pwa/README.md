@@ -51,6 +51,25 @@ python -m pip install zstandard
 python scripts\package_dictionary_web.py --copy-sqlite
 ```
 
+## CI Dictionary Fixture
+
+The production web dictionary is generated from offline source data and is not
+committed. A clean GitHub Actions checkout therefore does not have
+`public/dictionary.sqlite`, but the smoke and browser suites intentionally load
+the real app dictionary path.
+
+CI prepares a tiny valid SQLite package before serving `public/`:
+
+```powershell
+python apps\wordlover-pwa\scripts\create-ci-dictionary.py
+```
+
+That script reuses the slim dictionary schema and FTS population helper, writes
+`dictionary.sqlite`, `dictionary.sqlite.zst`, and `dictionary-manifest.json`,
+and includes only the terms required by browser smoke coverage such as
+`abandon`, `take off`, `in terms of`, `abundant`, and `accurate`. It is a CI
+fixture only; do not commit generated dictionary packages from this path.
+
 ## Run On iPhone
 
 Use the HTTPS server:
