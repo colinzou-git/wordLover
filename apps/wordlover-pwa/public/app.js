@@ -698,7 +698,8 @@ async function getEncryptionKey() {
         await saveRawValue(KEY_STORE, "localAesGcmKey", raw);
         await deleteRawValue(KEY_STORE, "wrappedDek");
         return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
-      } catch {
+      } catch (error) {
+        blockUserDataAfterDecryptFailure({ storeName: KEY_STORE, key: "wrappedDek" }, error);
         await deleteRawValue(KEY_STORE, "wrappedDek");
       }
     }
