@@ -5238,6 +5238,9 @@ async function deleteAllLocalUserData() {
   studyEvents = [];
   historyItems = [];
   knownWords = [];
+  spellingItems = [];
+  spellingEvents = [];
+  userDictionaryEntries = [];
 
   try {
     const db = await getUserDb();
