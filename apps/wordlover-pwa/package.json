@@ -3,8 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 4173"
+    "build": "npm run validate:shell-assets",
+    "preview": "python -m http.server 4173 --directory public",
+    "test": "npm run validate:shell-assets && python scripts/check_versions.py",
+    "test:browser": "python scripts/run-browser-tests.py",
+    "validate:shell-assets": "node scripts/validate-shell-assets.mjs"
   },
   "dependencies": {
     "ts-fsrs": "^5.4.1"

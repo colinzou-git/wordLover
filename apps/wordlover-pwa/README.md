@@ -80,3 +80,14 @@ Windows fallback automation verified this by stopping the local server, reloadin
 - Valid searches persist in IndexedDB history after reload.
 - Review due flow, proactive study flow, and FSRS ratings work.
 - Export button downloads a user data JSON file.
+# Build and Deploy Strategy
+
+`public/` is the deployed WordFan app and the GitHub Pages source of truth. The
+current app intentionally ships as static HTML/CSS/JS modules plus vendored
+runtime files; Vite is kept only as a dependency-management bridge for future
+bundling work and must not emit unused production bundles into `public/`.
+
+Use `npm run build` from `apps/wordlover-pwa` to validate that the public shell
+assets referenced by the service worker exist and that dictionary packages are
+not accidentally included in the shell cache. GitHub Pages should serve the
+contents of `public/` exactly.

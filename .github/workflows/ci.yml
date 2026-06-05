@@ -32,6 +32,10 @@ jobs:
       - name: Verify cache-version lockstep
         run: python apps/wordlover-pwa/scripts/check_versions.py
 
+      - name: Validate public shell assets
+        working-directory: apps/wordlover-pwa
+        run: npm run validate:shell-assets
+
   smoke:
     name: Headless app-shell smoke test
     runs-on: ubuntu-latest
@@ -59,3 +63,6 @@ jobs:
 
       - name: Run headless smoke test
         run: python apps/wordlover-pwa/scripts/smoke-headless.py --base http://127.0.0.1:4173
+
+      - name: Run browser automated suite
+        run: python apps/wordlover-pwa/scripts/run-browser-tests.py --base http://127.0.0.1:4173
