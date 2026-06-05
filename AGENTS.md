@@ -8,6 +8,8 @@ WordLover or WordFan is a local-first vocabulary/dictionary PWA. The runtime app
 
 Platform priority is deliberate and load-bearing: **iPhone first, Windows second (used as the automation/stress-test fallback for anything that can't be automated on iPhone), Android deferred**. Don't add Android-specific code paths or polish before iPhone and Windows are stable.
 
+Before search code, read docs/ai/AUTO_SYMBOL_MAP.md. So that save tokens.
+
 ## Two run paths (deliberate, both needed)
 
 ### Windows (HTTP, used for development + automation)
@@ -95,9 +97,6 @@ python apps\wordlover-pwa\scripts\smoke-headless.py
 ```
 
 It is not a replacement for the in-browser `automated-tests.html` suite (which exercises service worker readiness, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmarks) but it is the cheapest way to catch a regression in the main app shell before paying for an iPhone validation cycle.
-
-Before search code, read the following code and symbol map. So that save tokens.
-- docs/ai/AUTO_SYMBOL_MAP.md
 
 To create PR, use gh installed at: C:\Program Files\GitHub CLI\gh.exe
 
