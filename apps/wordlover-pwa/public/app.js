@@ -481,6 +481,7 @@ function openUserDb() {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("WordFan database upgrade is blocked by another open tab. Please close other WordFan tabs and reload."));
   });
 }
 
