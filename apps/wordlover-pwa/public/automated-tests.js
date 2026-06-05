@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260604-4";
+} from "./fsrs-scheduler.js?v=20260605-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v103";
+const SHELL_CACHE_NAME = "wordlover-shell-v104";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260604-4",
-  "/fsrs-scheduler.js?v=20260604-4",
-  "/styles.css?v=20260604-4",
-  "/wordlover-config.js?v=20260604-4",
+  "/app.js?v=20260605-1",
+  "/fsrs-scheduler.js?v=20260605-1",
+  "/styles.css?v=20260605-1",
+  "/wordlover-config.js?v=20260605-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260604-4",
+  "/automated-tests.js?v=20260605-1",
 ];
 
 let lastResults = null;
@@ -1590,10 +1590,22 @@ async function runMainAppStudySmoke() {
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const refreshedReviewText = frameDocument.querySelector("#startReview")?.textContent ?? "";
     if (!refreshedReviewText) throw new Error("Review schedule refresh did not leave a valid review button state.");
-    await frameWindow.WordLoverApp.checkForAppUpdate();
+    const applyBeforeCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
+    const applyBeforeCheckStatusText = frameDocument.querySelector("#updateStatus")?.textContent ?? "";
+    if (applyBeforeCheck?.status !== "no-update" || !/Check update first/i.test(applyBeforeCheckStatusText)) {
+      throw new Error(`Apply before Check update should show the no-update guidance: ${JSON.stringify({ applyBeforeCheck, applyBeforeCheckStatusText })}`);
+    }
+    const updateCheckResult = await frameWindow.WordLoverApp.checkForAppUpdate();
     const updateStatusText = frameDocument.querySelector("#updateStatus")?.textContent ?? "";
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
+    }
+    if (!/Device: 0\.6\.2-product\.\d{8}-v104/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v104") {
+      throw new Error(`App update check did not expose the current v104 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    }
+    const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
+    if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
+      throw new Error(`Apply after Check update should be actionable, not stuck: ${JSON.stringify({ applyAfterCheck, updateStatusText })}`);
     }
 
     return {
@@ -1611,6 +1623,9 @@ async function runMainAppStudySmoke() {
       localDateKeyUsesLocalTime,
       historyWritesBothTimestampFields,
       historyMergeUsesSearchedAtFallback,
+      applyBeforeCheckStatus: applyBeforeCheck?.status,
+      applyAfterCheckStatus: applyAfterCheck?.status,
+      updateCheckStatus: updateCheckResult?.status,
       studyOneMoreMissCreatesAgainReview,
       firstQuizIpa,
       vocabularyStatsRendered: true,

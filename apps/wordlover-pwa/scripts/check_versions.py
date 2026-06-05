@@ -29,7 +29,9 @@ ASSET_FILES = [APP_JS, SW_JS, TESTS_JS, INDEX_HTML, TESTS_HTML]
 
 CACHE_NAME_RE = re.compile(r'(?:CACHE_NAME|SHELL_CACHE_VERSION|SHELL_CACHE_NAME)\s*=\s*"([^"]+)"')
 ASSET_VERSION_RE = re.compile(r'\?v=([0-9]{8}-[0-9]+)')
-APP_VERSION_RE = re.compile(r'APP_VERSION\s*=\s*"([^"]+)"')
+APP_VERSION_RE = re.compile(r'^\s*const\s+APP_VERSION\s*=\s*"([^"]+)"', re.MULTILINE)
+APP_RELEASE_RE = re.compile(r'-v([0-9]+)$')
+CACHE_RELEASE_RE = re.compile(r'-v([0-9]+)$')
 
 
 def read(path: Path) -> str:
@@ -72,6 +74,22 @@ def main() -> int:
     app_versions = APP_VERSION_RE.findall(read(APP_JS))
     if not app_versions:
         failures.append("app.js: APP_VERSION constant not found")
+    elif len(set(app_versions)) > 1:
+        failures.append(f"app.js: multiple APP_VERSION constants found: {sorted(set(app_versions))}")
+
+    # 4. The user-visible app release and shell cache release must advance together.
+    if len(all_cache_names) == 1 and app_versions:
+        cache_name = next(iter(all_cache_names))
+        app_release = APP_RELEASE_RE.search(app_versions[0])
+        cache_release = CACHE_RELEASE_RE.search(cache_name)
+        if not app_release:
+            failures.append(f"APP_VERSION should end with -vNNN: {app_versions[0]}")
+        if not cache_release:
+            failures.append(f"shell cache name should end with -vNNN: {cache_name}")
+        if app_release and cache_release and app_release.group(1) != cache_release.group(1):
+            failures.append(
+                f"APP_VERSION release v{app_release.group(1)} does not match shell cache release v{cache_release.group(1)}"
+            )
 
     if failures:
         print("Version lockstep check FAILED:")

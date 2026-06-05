@@ -1,4 +1,10 @@
-﻿const loadButton = document.querySelector("#loadDictionary");
+import {
+  reviveFsrsCard,
+  scheduleFromFsrsRating as scheduleWithFsrs,
+  serializeFsrsCard,
+} from "./fsrs-scheduler.js?v=20260605-1";
+
+const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
 const appMenuButton = document.querySelector("#appMenuButton");
 const appMenu = document.querySelector("#appMenu");
@@ -46,18 +52,11 @@ const metrics = document.querySelector("#metrics");
 const diagnostics = document.querySelector("#diagnostics");
 const historyList = document.querySelector("#history");
 const recentSearchPopover = document.querySelector("#recentSearchPopover");
-import {
-  reviveFsrsCard,
-  scheduleFromFsrsRating as scheduleWithFsrs,
-  serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260604-4";
-
 const pwaStatus = document.querySelector("#pwaStatus");
 const dictionaryState = document.querySelector("#dictionaryState");
 const dictionarySource = document.querySelector("#dictionarySource");
 const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
-const autosaveToggle = document.querySelector("#autosaveToggle");
 const onReturnSelect = document.querySelector("#onReturnSelect");
 const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
 const vocabularySummary = document.querySelector("#vocabularySummary");
@@ -110,9 +109,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260604-v103";
+const APP_VERSION = "0.6.2-product.20260605-v104";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v103";
+const SHELL_CACHE_VERSION = "wordlover-shell-v104";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -5395,7 +5394,7 @@ function formatBytes(bytes) {
 function formatSyncTime(iso) {
   if (!iso) return "never";
   const ms = Date.parse(iso);
-  if (!ms) return "never";
+  if (!Number.isFinite(ms)) return "never";
   try {
     return new Date(ms).toLocaleString();
   } catch {
@@ -5711,7 +5710,12 @@ async function requestGeminiDetails(data) {
   if (!response.ok) throw new Error(explainGeminiError(response.status, await response.text()));
   const payload = await response.json();
   const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n") ?? "";
-  const structured = JSON.parse(text);
+  let structured;
+  try {
+    structured = JSON.parse(text);
+  } catch {
+    throw new Error(`Gemini returned non-JSON: ${text.slice(0, 200)}`);
+  }
   if (!Array.isArray(structured.meanings)) throw new Error("Gemini returned an invalid detail payload.");
   return { provider: "gemini", model, generatedAt: nowIso(), structured };
 }
@@ -6026,7 +6030,12 @@ async function requestAiChatPayload(term) {
   if (!response.ok) throw new Error(explainGeminiError(response.status, await response.text()));
   const payload = await response.json();
   const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n") ?? "";
-  const structured = JSON.parse(text);
+  let structured;
+  try {
+    structured = JSON.parse(text);
+  } catch {
+    throw new Error(`Gemini returned non-JSON: ${text.slice(0, 200)}`);
+  }
   return { ...structured, generatedAt: nowIso(), model };
 }
 
@@ -6602,22 +6611,21 @@ async function checkForAppUpdate() {
   return { status: "up-to-date", deviceVersion: APP_VERSION, serverVersion: latestVersion };
 }
 
-async function applyAppUpdate() {
+async function applyAppUpdate({ reload = true } = {}) {
   const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
   if (registration?.waiting) {
     updateStatus.textContent = "Applying update...";
     registration.waiting.postMessage({ type: "SKIP_WAITING" });
-    return;
+    return { status: "skip-waiting" };
   }
   if (pendingAppReloadUrl) {
     updateStatus.textContent = "Reloading the latest app shell. Local vocabulary and study data stay on this device.";
-    window.location.href = pendingAppReloadUrl;
-    return;
+    const reloadUrl = pendingAppReloadUrl;
+    if (reload) window.location.href = reloadUrl;
+    return { status: "reload", url: reloadUrl };
   }
-  if (!registration?.waiting) {
-    updateStatus.textContent = "No waiting update is available yet. Check update first.";
-    return;
-  }
+  updateStatus.textContent = "No waiting update is available yet. Check update first.";
+  return { status: "no-update" };
 }
 
 async function runReviewAutomation() {
@@ -6789,10 +6797,13 @@ async function init() {
   vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
   if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length || studyEvents.length) await persistVocabulary();
   if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await persistStudyEvents();
-  spellingItems = mergeVocabularySources(await loadAllRecordValues(SPELLING_STORE), []);
+  const spellingRecords = await loadAllRecordValues(SPELLING_STORE);
+  spellingItems = mergeVocabularySources(spellingRecords, []);
   spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
+  const spellingReviewStateBeforeRebuild = new Map(spellingItems.map((item) => [item.normalizedTerm, JSON.stringify(item.review ?? null)]));
   spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
-  if (spellingEvents.length) await persistSpelling();
+  const spellingWasRebuilt = spellingEvents.length > 0 && spellingItems.some((item) => spellingReviewStateBeforeRebuild.get(item.normalizedTerm) !== JSON.stringify(item.review ?? null));
+  if ((spellingWasRebuilt && spellingItems.length > 0) || spellingItems.length > spellingRecords.length) await persistSpelling();
   userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
   knownWords = mergeKnownSources(await loadAllRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
   // Migrate the old autosave toggle into the new On Return action.
@@ -6933,6 +6944,7 @@ function clearSearchField() {
 
 termInput.addEventListener("input", () => {
   sanitizeTermInput();
+  termInput.classList.remove("input-invalid");
   lastReturnValue = null; // any edit re-arms first-Return (save) behavior
   clearPendingUndo(); // editing means we've moved on from the just-saved word
   hideRecentSearchPopover();
@@ -6957,10 +6969,6 @@ termInput.addEventListener("keydown", (event) => {
     lastReturnValue = value;
     void handleReturnKey();
   }
-});
-
-termInput.addEventListener("input", () => {
-  termInput.classList.remove("input-invalid");
 });
 
 undoSaveButton?.addEventListener("click", () => {
@@ -7926,6 +7934,7 @@ window.WordLoverApp = {
   validateSnapshot: validateUserDataSnapshot,
   getActiveQuiz: () => activeQuiz,
   checkForAppUpdate,
+  applyAppUpdate,
   refreshReviewScheduleViews,
   runReviewAutomation,
   createCheckpoint,

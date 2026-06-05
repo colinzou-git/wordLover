@@ -97,3 +97,6 @@ python apps\wordlover-pwa\scripts\smoke-headless.py
 ```
 
 It is not a replacement for the in-browser `automated-tests.html` suite (which exercises service worker readiness, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmarks) but it is the cheapest way to catch a regression in the main app shell before paying for an iPhone validation cycle.
+
+Read the following code and symbol map before search code. So that save tokens.
+- docs/ai/AUTO_SYMBOL_MAP.md
