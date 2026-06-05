@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run validate:shell-assets",
+    "build": "npm run validate:shell-assets && python scripts/check_versions.py",
     "preview": "python -m http.server 4173 --directory public",
-    "test": "npm run validate:shell-assets && python scripts/check_versions.py",
+    "test": "npm run build",
     "test:browser": "python scripts/run-browser-tests.py",
     "validate:shell-assets": "node scripts/validate-shell-assets.mjs"
   },

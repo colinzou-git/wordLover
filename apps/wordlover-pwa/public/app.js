@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260605-3";
+} from "./fsrs-scheduler.js?v=20260605-4";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -109,9 +109,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260605-v106";
+const APP_VERSION = "0.6.2-product.20260605-v107";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v106";
+const SHELL_CACHE_VERSION = "wordlover-shell-v107";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -263,6 +263,11 @@ let dataDecryptBlock = null;
 let dataDecryptWarningOpen = false;
 let googleReconnectPromise = null;
 let backupPassphraseSession = null;
+let backupPassphrasePromptForTest = null;
+const recordStoreWriteStatsForTest = {
+  rewrites: 0,
+  puts: Object.create(null),
+};
 
 function formatMs(value) {
   return `${Math.round(value)} ms`;
@@ -721,10 +726,19 @@ async function setBackupPassphraseForTest(passphrase) {
 
 async function clearBackupPassphraseForTest() {
   backupPassphraseSession = null;
+  backupPassphrasePromptForTest = null;
   await saveValue("backupPassphraseVerifier", null);
 }
 
 async function promptForBackupPassphrase({ create = false, reason = "Google Drive backup" } = {}) {
+  if (backupPassphrasePromptForTest) {
+    const response = await backupPassphrasePromptForTest({ create, reason });
+    const passphrase = String(typeof response === "object" && response !== null ? response.passphrase ?? "" : response ?? "");
+    const confirm = String(typeof response === "object" && response !== null ? response.confirm ?? passphrase : passphrase);
+    if (passphrase.length < 8) throw new Error("Backup passphrase must be at least 8 characters.");
+    if (create && passphrase !== confirm) throw new Error("Backup passphrases do not match.");
+    return passphrase;
+  }
   const values = await showModal({
     title: create ? "Create backup passphrase" : "Enter backup passphrase",
     body: create
@@ -751,7 +765,11 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
   if (backupPassphraseSession) return { passphrase: backupPassphraseSession, source: "user-backup-passphrase" };
   const verifier = await loadValue("backupPassphraseVerifier", null);
   if (!verifier) {
-    if (!allowCreate) throw new Error("This backup needs a backup passphrase before it can be restored.");
+    if (!allowCreate) {
+      const passphrase = await promptForBackupPassphrase({ create: false, reason });
+      backupPassphraseSession = passphrase;
+      return { passphrase, source: "unverified-user-backup-passphrase" };
+    }
     const passphrase = await promptForBackupPassphrase({ create: true, reason });
     await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
     backupPassphraseSession = passphrase;
@@ -913,6 +931,7 @@ async function loadValue(key, fallback) {
 
 async function saveRecordValue(storeName, key, value) {
   assertUserDataWritable(`Saving "${key}"`);
+  recordStoreWriteStatsForTest.puts[storeName] = (recordStoreWriteStatsForTest.puts[storeName] ?? 0) + 1;
   await saveRawValue(storeName, key, await encryptValue(value));
 }
 
@@ -2195,6 +2214,7 @@ function mergeUserDictionarySources(localEntries, remoteEntries) {
 
 async function replaceRecordStore(storeName, records, keyOf) {
   assertUserDataWritable(`Rewriting ${storeName}`);
+  recordStoreWriteStatsForTest.rewrites += 1;
   const encryptedRecords = await Promise.all((records ?? []).map(async (record) => ({
     key: keyOf(record),
     value: await encryptValue(record),
@@ -2214,6 +2234,13 @@ async function replaceRecordStore(storeName, records, keyOf) {
 }
 
 async function persistVocabulary() {
+  await Promise.all(vocabularyItems.map((item) => saveRecordValue(VOCABULARY_STORE, item.normalizedTerm, item)));
+  renderVocabulary();
+  renderStudyStats();
+  renderHistoryChart();
+}
+
+async function replaceVocabularyStoreForMigration() {
   await replaceRecordStore(VOCABULARY_STORE, vocabularyItems, (item) => item.normalizedTerm);
   renderVocabulary();
   renderStudyStats();
@@ -2253,6 +2280,11 @@ async function saveReviewItemAndEvent({ itemStore, eventStore, itemKey, item, ev
 
 // --- Spelling track persistence (mirrors the vocabulary track) ---
 async function persistSpelling() {
+  await Promise.all(spellingItems.map((item) => saveRecordValue(SPELLING_STORE, item.normalizedTerm, item)));
+  renderSpellingViews();
+}
+
+async function replaceSpellingStoreForMigration() {
   await replaceRecordStore(SPELLING_STORE, spellingItems, (item) => item.normalizedTerm);
   renderSpellingViews();
 }
@@ -2293,6 +2325,11 @@ async function persistSpellingEvent(event) {
 }
 
 async function persistSpellingEvents() {
+  await Promise.all(spellingEvents.map((event) => saveRecordValue(SPELLING_EVENT_STORE, event.eventKey ?? event.id, event)));
+  renderSpellingViews();
+}
+
+async function replaceSpellingEventStoreForMigration() {
   await replaceRecordStore(SPELLING_EVENT_STORE, spellingEvents, (event) => event.eventKey ?? event.id);
   renderSpellingViews();
 }
@@ -2401,6 +2438,7 @@ async function saveVocabularyItem(data, reason = "manual") {
   await deleteKnownWord(normalizedTerm);
   const existing = getVocabularyItem(data.term);
   const now = nowIso();
+  let savedItem = existing;
   if (existing) {
     existing.archivedAt = null;
     existing.updatedAt = now;
@@ -2412,11 +2450,12 @@ async function saveVocabularyItem(data, reason = "manual") {
     const item = resultToVocabularyItem(data);
     item.lastSaveReason = reason;
     vocabularyItems = [item, ...vocabularyItems];
+    savedItem = item;
   }
   vocabularyItems = vocabularyItems
     .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
     .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
-  await persistVocabulary();
+  await persistVocabularyItem(savedItem ?? getVocabularyItem(data.term));
   renderStudyStats();
   if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
   prefetchAiChat(data.term);
@@ -2431,6 +2470,7 @@ async function saveSpellingItem(data, reason = "manual") {
   await deleteKnownWord(normalizedTerm);
   const existing = getSpellingItem(data.term);
   const now = nowIso();
+  let savedItem = existing;
   if (existing) {
     existing.archivedAt = null;
     existing.updatedAt = now;
@@ -2442,11 +2482,12 @@ async function saveSpellingItem(data, reason = "manual") {
     const item = resultToTrackItem(data);
     item.lastSaveReason = reason;
     spellingItems = [item, ...spellingItems];
+    savedItem = item;
   }
   spellingItems = spellingItems
     .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
     .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
-  await persistSpelling();
+  await persistSpellingItem(savedItem ?? getSpellingItem(data.term));
   if (currentResult && normalizeTerm(currentResult.term) === normalizedTerm) renderResult(currentResult);
   return getSpellingItem(data.term);
 }
@@ -2615,7 +2656,7 @@ async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese
   vocabularyItems = vocabularyItems
     .filter((item, index, all) => all.findIndex((candidate) => candidate.normalizedTerm === item.normalizedTerm) === index)
     .sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
-  await persistVocabulary();
+  await persistVocabularyItem(item);
   renderStudyStats();
   return getVocabularyItem(term);
 }
@@ -3576,6 +3617,11 @@ function inferFsrsRating(passed, responseMs) {
 }
 
 async function persistStudyEvents() {
+  await Promise.all(studyEvents.map((event) => saveRecordValue(STUDY_EVENT_STORE, event.eventKey ?? event.id, event)));
+  renderStudyStats();
+}
+
+async function replaceStudyEventStoreForMigration() {
   await replaceRecordStore(STUDY_EVENT_STORE, studyEvents, (event) => event.eventKey ?? event.id);
   renderStudyStats();
 }
@@ -5437,8 +5483,14 @@ async function decryptSnapshotPayload(envelope, options = {}) {
     }
     const passphraseInfo = await getCloudBackupPassphrase({ reason: "Google Drive backup restore", allowCreate: false });
     try {
-      return await decryptJsonWithPassphrase(envelope, passphraseInfo.passphrase);
+      const snapshot = await decryptJsonWithPassphrase(envelope, passphraseInfo.passphrase);
+      if (passphraseInfo.source === "unverified-user-backup-passphrase") {
+        await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphraseInfo.passphrase));
+        backupPassphraseSession = passphraseInfo.passphrase;
+      }
+      return snapshot;
     } catch {
+      if (passphraseInfo.source === "unverified-user-backup-passphrase") backupPassphraseSession = null;
       throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
     }
   }
@@ -7089,15 +7141,15 @@ async function init() {
   const legacyStudyEvents = await loadValue("studyEvents", []);
   studyEvents = mergeStudyEventSources(studyEventRecords, legacyStudyEvents);
   vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
-  if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length || studyEvents.length) await persistVocabulary();
-  if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await persistStudyEvents();
+  if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length || studyEvents.length) await replaceVocabularyStoreForMigration();
+  if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await replaceStudyEventStoreForMigration();
   const spellingRecords = await loadAllRecordValues(SPELLING_STORE);
   spellingItems = mergeVocabularySources(spellingRecords, []);
   spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
   const spellingReviewStateBeforeRebuild = new Map(spellingItems.map((item) => [item.normalizedTerm, JSON.stringify(item.review ?? null)]));
   spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
   const spellingWasRebuilt = spellingEvents.length > 0 && spellingItems.some((item) => spellingReviewStateBeforeRebuild.get(item.normalizedTerm) !== JSON.stringify(item.review ?? null));
-  if ((spellingWasRebuilt && spellingItems.length > 0) || spellingItems.length > spellingRecords.length) await persistSpelling();
+  if ((spellingWasRebuilt && spellingItems.length > 0) || spellingItems.length > spellingRecords.length) await replaceSpellingStoreForMigration();
   userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
   knownWords = mergeKnownSources(await loadAllRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
   // Migrate the old autosave toggle into the new On Return action.
@@ -8175,8 +8227,18 @@ window.WordLoverApp = {
   getKnownWords: () => knownWords,
   rewriteVocabularyForTest: async (items) => {
     vocabularyItems = Array.isArray(items) ? items : [];
-    await persistVocabulary();
+    await replaceVocabularyStoreForMigration();
     return loadAllRecordValues(VOCABULARY_STORE);
+  },
+  storageDebugForTest: {
+    resetWriteStats: () => {
+      recordStoreWriteStatsForTest.rewrites = 0;
+      recordStoreWriteStatsForTest.puts = Object.create(null);
+    },
+    writeStats: () => ({
+      rewrites: recordStoreWriteStatsForTest.rewrites,
+      puts: { ...recordStoreWriteStatsForTest.puts },
+    }),
   },
   buildUserDataSnapshot,
   mergeSnapshots,
@@ -8448,6 +8510,9 @@ window.WordLoverApp = {
       }),
       setPassphraseForTest: setBackupPassphraseForTest,
       clearPassphraseForTest: clearBackupPassphraseForTest,
+      setPromptForTest: (handler) => {
+        backupPassphrasePromptForTest = typeof handler === "function" ? handler : null;
+      },
       encryptForTest: (snapshot) => encryptSnapshotPayload(snapshot, { purpose: "cloud" }),
       decryptForTest: (envelope) => decryptSnapshotPayload(envelope, { purpose: "cloud", allowLegacyDefault: true }),
       decryptWithPassphraseForTest: (envelope, passphrase) => decryptJsonWithPassphrase(envelope, passphrase),

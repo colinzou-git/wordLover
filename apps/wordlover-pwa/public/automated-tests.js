@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260605-3";
+} from "./fsrs-scheduler.js?v=20260605-4";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v106";
+const SHELL_CACHE_NAME = "wordlover-shell-v107";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260605-3",
-  "/fsrs-scheduler.js?v=20260605-3",
-  "/styles.css?v=20260605-3",
-  "/wordlover-config.js?v=20260605-3",
+  "/app.js?v=20260605-4",
+  "/fsrs-scheduler.js?v=20260605-4",
+  "/styles.css?v=20260605-4",
+  "/wordlover-config.js?v=20260605-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260605-3",
+  "/automated-tests.js?v=20260605-4",
 ];
 
 let lastResults = null;
@@ -1079,6 +1079,28 @@ async function runMainAppStudySmoke() {
       encryptedCloudSnapshot.passphraseSource === "user-backup-passphrase"
       && decryptedCloudSnapshot.app === cloudSnapshot.app
       && decryptedCloudSnapshot.exportedAt === cloudSnapshot.exportedAt;
+    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
+    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => "correct horse battery staple");
+    const newDeviceDecryptedSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
+    const newDeviceStatusAfterRestore = await frameWindow.WordLoverApp.sync.backupEncryption.status();
+    const newDeviceCloudRestoreCreatesVerifier =
+      newDeviceDecryptedSnapshot.exportedAt === cloudSnapshot.exportedAt
+      && newDeviceStatusAfterRestore.hasVerifier
+      && newDeviceStatusAfterRestore.hasSessionPassphrase;
+    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
+    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => "wrong horse battery staple");
+    let wrongNewDevicePassphraseFailsSafely = false;
+    const vocabCountBeforeWrongNewDevicePass = frameWindow.WordLoverApp.getVocabulary().length;
+    try {
+      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
+    } catch {
+      const statusAfterWrongNewDevicePass = await frameWindow.WordLoverApp.sync.backupEncryption.status();
+      wrongNewDevicePassphraseFailsSafely =
+        frameWindow.WordLoverApp.getVocabulary().length === vocabCountBeforeWrongNewDevicePass
+        && statusAfterWrongNewDevicePass.hasVerifier === false
+        && statusAfterWrongNewDevicePass.hasSessionPassphrase === false;
+    }
+    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(null);
     let wrongBackupPassphraseFailsSafely = false;
     const vocabCountBeforeWrongPass = frameWindow.WordLoverApp.getVocabulary().length;
     try {
@@ -1090,8 +1112,8 @@ async function runMainAppStudySmoke() {
     await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
     const legacyDecrypted = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyEnvelope);
     const legacyDefaultBackupCanRestore = legacyDecrypted.exportedAt === cloudSnapshot.exportedAt;
-    if (!productionBackupPassphraseBlocksSync || !backupPassphraseRoundTrips || !wrongBackupPassphraseFailsSafely || !legacyDefaultBackupCanRestore) {
-      throw new Error(`Cloud backup encryption tests failed: ${JSON.stringify({ productionBackupPassphraseBlocksSync, backupPassphraseRoundTrips, wrongBackupPassphraseFailsSafely, legacyDefaultBackupCanRestore, noBackupPassphraseStatus, encryptedSource: encryptedCloudSnapshot.passphraseSource })}`);
+    if (!productionBackupPassphraseBlocksSync || !backupPassphraseRoundTrips || !newDeviceCloudRestoreCreatesVerifier || !wrongNewDevicePassphraseFailsSafely || !wrongBackupPassphraseFailsSafely || !legacyDefaultBackupCanRestore) {
+      throw new Error(`Cloud backup encryption tests failed: ${JSON.stringify({ productionBackupPassphraseBlocksSync, backupPassphraseRoundTrips, newDeviceCloudRestoreCreatesVerifier, wrongNewDevicePassphraseFailsSafely, wrongBackupPassphraseFailsSafely, legacyDefaultBackupCanRestore, noBackupPassphraseStatus, encryptedSource: encryptedCloudSnapshot.passphraseSource })}`);
     }
     const currentSnapshotValidates = Boolean(frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot()).checksum);
     const oldSnapshot = { ...frameWindow.WordLoverApp.buildUserDataSnapshot() };
@@ -1218,6 +1240,13 @@ async function runMainAppStudySmoke() {
       throw new Error(`Study/spelling event dedupe failed: ${JSON.stringify({ duplicate: duplicateEventMerge.studyEvents, distinct: distinctEventMerge.studyEvents, spelling: spellingDuplicateMerge.spellingEvents })}`);
     }
     const vocabularyBeforeRewrite = frameWindow.WordLoverApp.getVocabulary().map((item) => ({ ...item }));
+    frameWindow.WordLoverApp.storageDebugForTest.resetWriteStats();
+    const singleSaveLookup = frameWindow.WordLoverApp.lookupTerm(replayBase.word);
+    await frameWindow.WordLoverApp.saveVocabularyItem(singleSaveLookup, "single-record-persist-test");
+    const singleSaveStats = frameWindow.WordLoverApp.storageDebugForTest.writeStats();
+    const normalSaveUsesSingleRecord =
+      singleSaveStats.rewrites === 0
+      && singleSaveStats.puts.vocabularyRecords === 1;
     const rewriteA = await frameWindow.WordLoverApp.saveVocabularyItem(frameWindow.WordLoverApp.lookupTerm(replayBase.word), "rewrite-stale-test-a");
     const rewriteB = { ...rewriteA, term: "rewrite stale b", normalizedTerm: "rewrite stale b", savedAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" };
     const archivedRewriteB = { ...rewriteB, archivedAt: "2026-06-02T00:00:00.000Z" };
@@ -1227,8 +1256,8 @@ async function runMainAppStudySmoke() {
     const afterArchiveRecords = await frameWindow.WordLoverApp.rewriteVocabularyForTest([rewriteA, archivedRewriteB]);
     const persistAllPreservesArchivedRecords = afterArchiveRecords.some((item) => item.normalizedTerm === rewriteB.normalizedTerm && item.archivedAt);
     await frameWindow.WordLoverApp.rewriteVocabularyForTest(vocabularyBeforeRewrite);
-    if (!persistAllDeletesStaleRecords || !persistAllPreservesArchivedRecords) {
-      throw new Error(`Persist-all rewrite should delete absent stale records while preserving archived records: ${JSON.stringify({ afterDropRecords, afterArchiveRecords })}`);
+    if (!normalSaveUsesSingleRecord || !persistAllDeletesStaleRecords || !persistAllPreservesArchivedRecords) {
+      throw new Error(`Persist-all rewrite should be explicit while normal saves stay single-record: ${JSON.stringify({ singleSaveStats, afterDropRecords, afterArchiveRecords })}`);
     }
 
     await frameWindow.WordLoverApp.uiPreferences.set({
@@ -1860,8 +1889,8 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}-v106/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v106") {
-      throw new Error(`App update check did not expose the current v106 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    if (!/Device: 0\.6\.2-product\.\d{8}-v107/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v107") {
+      throw new Error(`App update check did not expose the current v107 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
