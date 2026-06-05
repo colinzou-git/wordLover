@@ -2418,13 +2418,14 @@ async function editVocabularyItemGeneric(item, persistFn) {
     title: `Edit ${item.term}`,
     body: "Use semicolons to separate multiple meanings.",
     fields: [
-      { id: "english", label: "English meaning", value: summarizeLines(item.user.englishMeanings), required: true },
-      { id: "chinese", label: "Chinese meaning", value: summarizeLines(item.user.chineseMeanings), required: true },
-      { id: "phonetic", label: "Pronunciation / IPA", value: item.user.phonetic ?? "" },
+      { id: "english", label: "English meaning", value: summarizeLines(item.user?.englishMeanings), required: true },
+      { id: "chinese", label: "Chinese meaning", value: summarizeLines(item.user?.chineseMeanings), required: true },
+      { id: "phonetic", label: "Pronunciation / IPA", value: item.user?.phonetic ?? "" },
     ],
     submitText: "Save",
   });
   if (!values) return;
+  if (!item.user) item.user = {};
   item.user.englishMeanings = values.english.split(";").map((line) => line.trim()).filter(Boolean);
   item.user.chineseMeanings = values.chinese.split(";").map((line) => line.trim()).filter(Boolean);
   item.user.phonetic = values.phonetic.trim();
