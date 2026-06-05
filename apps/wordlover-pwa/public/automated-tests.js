@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260605-1";
+} from "./fsrs-scheduler.js?v=20260605-3";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v104";
+const SHELL_CACHE_NAME = "wordlover-shell-v106";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260605-1",
-  "/fsrs-scheduler.js?v=20260605-1",
-  "/styles.css?v=20260605-1",
-  "/wordlover-config.js?v=20260605-1",
+  "/app.js?v=20260605-3",
+  "/fsrs-scheduler.js?v=20260605-3",
+  "/styles.css?v=20260605-3",
+  "/wordlover-config.js?v=20260605-3",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260605-1",
+  "/automated-tests.js?v=20260605-3",
 ];
 
 let lastResults = null;
@@ -849,6 +849,32 @@ async function runMainAppStudySmoke() {
       && /is_toefl|tag/i.test(frameWindow.WordLoverApp.studyOneMore.levelSql("toefl"));
     studyOneMoreTests.dictionaryCandidateQueryIsLimited =
       frameWindow.WordLoverApp.studyOneMore.queryCandidates("very_easy", 7).length <= 7;
+    const manyCandidates = Array.from({ length: 300 }, (_, index) => ({
+      word: `bulkword${index + 1}`,
+      normalized_word: `bulkword${index + 1}`,
+      frq: 20001 + index,
+      bnc: 20001 + index,
+      definition: `bulk definition ${index + 1}`,
+      translation: `bulk ${index + 1}`,
+    }));
+    const manyStats = { rowsScanned: 0, exclusionCounts: {} };
+    const manyCandidate = frameWindow.WordLoverApp.studyOneMore.pickFromOrderedCandidates(
+      manyCandidates,
+      "hard",
+      fakeSets({ memorize: manyCandidates.slice(0, 240).map((row) => row.normalized_word) }),
+      manyStats,
+    );
+    studyOneMoreTests.scansPastExcludedFirstBatch =
+      manyCandidate?.normalizedTerm === "bulkword241" && manyStats.rowsScanned === 241 && manyStats.exclusionCounts.memorize === 240;
+    const toeflCandidate = frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(
+      [
+        { word: "plain", normalized_word: "plain", frq: 1, definition: "plain definition", translation: "plain" },
+        { word: "academic", normalized_word: "academic", frq: 5000, definition: "academic definition", translation: "academic", tag: "TOEFL", is_toefl: 1 },
+      ],
+      "toefl",
+      fakeSets(),
+    );
+    studyOneMoreTests.toeflOnlyReturnsTagged = toeflCandidate?.normalizedTerm === "academic";
     if (!Object.values(studyOneMoreTests).every(Boolean)) {
       throw new Error(`Study One More selection tests failed: ${JSON.stringify(studyOneMoreTests)}`);
     }
@@ -966,6 +992,140 @@ async function runMainAppStudySmoke() {
       throw new Error(`Recent history timestamps should write and merge both fields: ${JSON.stringify({ savedHistoryEntry, mergedHistoryEntry })}`);
     }
 
+    const restoredGoalTargets = { newPerDay: 7, reviewsPerDay: 22, masteredPerWeek: 9, masteredPerMonth: 36 };
+    await frameWindow.WordLoverApp.setGoals(restoredGoalTargets);
+    const goalsSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
+    const goalPanelText = () => frameDocument.querySelector("#goalsPanel")?.textContent ?? "";
+    const localOlderGoalsSnapshot = {
+      ...goalsSnapshot,
+      exportedAt: "2026-06-01T00:00:00.000Z",
+      studyGoals: { ...goalsSnapshot.studyGoals, newPerDay: 3, updatedAt: "2026-06-01T00:00:00.000Z" },
+    };
+    const remoteNewerGoalsSnapshot = {
+      ...goalsSnapshot,
+      exportedAt: "2026-06-01T00:00:00.000Z",
+      studyGoals: { ...goalsSnapshot.studyGoals, newPerDay: 11, updatedAt: "2026-06-02T00:00:00.000Z" },
+    };
+    const mergedGoalsByUpdatedAt = frameWindow.WordLoverApp.mergeSnapshots(localOlderGoalsSnapshot, remoteNewerGoalsSnapshot);
+    const goalsMergeUsesNewerUpdatedAt = mergedGoalsByUpdatedAt.studyGoals?.newPerDay === 11;
+    const localNoGoalTimestampSnapshot = {
+      ...goalsSnapshot,
+      exportedAt: "2026-06-01T00:00:00.000Z",
+      studyGoals: { ...goalsSnapshot.studyGoals, newPerDay: 4, updatedAt: undefined },
+    };
+    const remoteNoGoalTimestampSnapshot = {
+      ...goalsSnapshot,
+      exportedAt: "2026-06-03T00:00:00.000Z",
+      studyGoals: { ...goalsSnapshot.studyGoals, newPerDay: 13, updatedAt: undefined },
+    };
+    const mergedGoalsBySnapshotDate = frameWindow.WordLoverApp.mergeSnapshots(localNoGoalTimestampSnapshot, remoteNoGoalTimestampSnapshot);
+    const goalsMergeFallsBackToNewerSnapshot = mergedGoalsBySnapshotDate.studyGoals?.newPerDay === 13;
+    if (!goalsMergeUsesNewerUpdatedAt || !goalsMergeFallsBackToNewerSnapshot) {
+      throw new Error(`Study goals merge should use updatedAt, then snapshot date: ${JSON.stringify({ mergedGoalsByUpdatedAt: mergedGoalsByUpdatedAt.studyGoals, mergedGoalsBySnapshotDate: mergedGoalsBySnapshotDate.studyGoals })}`);
+    }
+
+    const snapshotWithoutGoals = { ...goalsSnapshot };
+    delete snapshotWithoutGoals.studyGoals;
+    await frameWindow.WordLoverApp.applySnapshotForTest(snapshotWithoutGoals);
+    const olderSnapshotWithoutGoalsStable =
+      frameWindow.WordLoverApp.getGoals() === null
+      && /No goals yet/i.test(goalPanelText());
+    if (!olderSnapshotWithoutGoalsStable) {
+      throw new Error(`Applying an older snapshot without studyGoals should keep the app stable with no goals: ${goalPanelText()}`);
+    }
+
+    await frameWindow.WordLoverApp.applySnapshotForTest(goalsSnapshot);
+    const goalsRestoredImmediately =
+      frameWindow.WordLoverApp.getGoals()?.newPerDay === restoredGoalTargets.newPerDay
+      && /Targets: 7 new \+ 22 reviews\/day, 9 mastered\/week/i.test(goalPanelText());
+    if (!goalsRestoredImmediately) {
+      throw new Error(`Applying a snapshot should restore study goals and rerender the Goals panel immediately: ${goalPanelText()}`);
+    }
+    frame.src = `/?suite-study-smoke=${Date.now()}&goals-reload=1`;
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const reloadedWindow = frame.contentWindow;
+        unlockMainAppFrame(frame);
+        const input = frame.contentDocument?.querySelector("#termInput");
+        const reloadedGoals = reloadedWindow?.WordLoverApp?.getGoals?.();
+        const text = frame.contentDocument?.querySelector("#goalsPanel")?.textContent ?? "";
+        if (reloadedWindow?.WordLoverApp?.getState?.().loaded && input && !input.disabled && reloadedGoals?.newPerDay === 7 && /Targets: 7 new \+ 22 reviews\/day, 9 mastered\/week/i.test(text)) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 30000) {
+          window.clearInterval(timer);
+          reject(new Error(`Timed out waiting for restored study goals after reload. Goals panel: ${text}`));
+        }
+      }, 250);
+    });
+    frameWindow = frame.contentWindow;
+    frameDocument = frame.contentDocument;
+    const goalsRestoreSurvivesReload = frameWindow.WordLoverApp.getGoals()?.newPerDay === restoredGoalTargets.newPerDay;
+
+    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
+    const noBackupPassphraseStatus = await frameWindow.WordLoverApp.sync.backupEncryption.status();
+    const productionBackupPassphraseBlocksSync =
+      noBackupPassphraseStatus.developmentOverride === false
+      && noBackupPassphraseStatus.hasVerifier === false
+      && /backup passphrase is required/i.test(noBackupPassphraseStatus.notice);
+    await frameWindow.WordLoverApp.sync.backupEncryption.setPassphraseForTest("correct horse battery staple");
+    const cloudSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
+    const encryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.encryptForTest(cloudSnapshot);
+    const decryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
+    const backupPassphraseRoundTrips =
+      encryptedCloudSnapshot.passphraseSource === "user-backup-passphrase"
+      && decryptedCloudSnapshot.app === cloudSnapshot.app
+      && decryptedCloudSnapshot.exportedAt === cloudSnapshot.exportedAt;
+    let wrongBackupPassphraseFailsSafely = false;
+    const vocabCountBeforeWrongPass = frameWindow.WordLoverApp.getVocabulary().length;
+    try {
+      await frameWindow.WordLoverApp.sync.backupEncryption.decryptWithPassphraseForTest(encryptedCloudSnapshot, "wrong horse battery staple");
+    } catch {
+      wrongBackupPassphraseFailsSafely = frameWindow.WordLoverApp.getVocabulary().length === vocabCountBeforeWrongPass;
+    }
+    const legacyEnvelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptLegacyForTest(cloudSnapshot);
+    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
+    const legacyDecrypted = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyEnvelope);
+    const legacyDefaultBackupCanRestore = legacyDecrypted.exportedAt === cloudSnapshot.exportedAt;
+    if (!productionBackupPassphraseBlocksSync || !backupPassphraseRoundTrips || !wrongBackupPassphraseFailsSafely || !legacyDefaultBackupCanRestore) {
+      throw new Error(`Cloud backup encryption tests failed: ${JSON.stringify({ productionBackupPassphraseBlocksSync, backupPassphraseRoundTrips, wrongBackupPassphraseFailsSafely, legacyDefaultBackupCanRestore, noBackupPassphraseStatus, encryptedSource: encryptedCloudSnapshot.passphraseSource })}`);
+    }
+    const currentSnapshotValidates = Boolean(frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot()).checksum);
+    const oldSnapshot = { ...frameWindow.WordLoverApp.buildUserDataSnapshot() };
+    delete oldSnapshot.uiPreferences;
+    delete oldSnapshot.studyGoals;
+    delete oldSnapshot.knownWords;
+    const oldSnapshotValidates = Boolean(frameWindow.WordLoverApp.validateSnapshot(oldSnapshot).checksum);
+    let wrongAppRejected = false;
+    let dangerousEventRejected = false;
+    let restoreFailurePreservesLocalData = false;
+    try {
+      frameWindow.WordLoverApp.validateSnapshot({ ...oldSnapshot, app: "not-wordlover" });
+    } catch {
+      wrongAppRejected = true;
+    }
+    const badSnapshot = {
+      ...frameWindow.WordLoverApp.buildUserDataSnapshot(),
+      studyEvents: [{ id: "bad", type: "review", normalizedTerm: "bad", rating: "easyy", occurredAt: "not-a-date" }],
+    };
+    try {
+      frameWindow.WordLoverApp.validateSnapshot(badSnapshot);
+    } catch {
+      dangerousEventRejected = true;
+    }
+    const beforeBadRestoreVocabCount = frameWindow.WordLoverApp.getVocabulary().length;
+    try {
+      await frameWindow.WordLoverApp.applySnapshotForTest(badSnapshot);
+    } catch {
+      restoreFailurePreservesLocalData = frameWindow.WordLoverApp.getVocabulary().length === beforeBadRestoreVocabCount;
+    }
+    if (!currentSnapshotValidates || !oldSnapshotValidates || !wrongAppRejected || !dangerousEventRejected || !restoreFailurePreservesLocalData) {
+      throw new Error(`Snapshot validation tests failed: ${JSON.stringify({ currentSnapshotValidates, oldSnapshotValidates, wrongAppRejected, dangerousEventRejected, restoreFailurePreservesLocalData })}`);
+    }
+
     const replayBase = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("event sourced fsrs test", "event sourced meaning", "event sourced");
     const replayLookup = frameWindow.WordLoverApp.lookupTerm(replayBase.word);
     const replayItem = await frameWindow.WordLoverApp.saveVocabularyItem(replayLookup, "event-source-test");
@@ -1028,17 +1188,65 @@ async function runMainAppStudySmoke() {
     if (!eventSourcedMergeRebuiltFsrs) {
       throw new Error(`Merged FSRS state should replay review events and ignore practice events: ${JSON.stringify(replayMergedItem?.review)}`);
     }
+    const logicalEventBase = {
+      type: "review",
+      track: "vocabulary",
+      term: replayItem.term,
+      normalizedTerm: replayItem.normalizedTerm,
+      rating: "good",
+      source: "review",
+      practiceMode: "review",
+      occurredAt: "2026-06-04T08:00:00.000Z",
+    };
+    const duplicateEventMerge = frameWindow.WordLoverApp.mergeSnapshots(
+      { ...replaySnapshotBase, vocabularyItems: [replayItem], studyEvents: [{ ...logicalEventBase, id: "same-logical-a" }] },
+      { ...replaySnapshotBase, vocabularyItems: [replayItem], studyEvents: [{ ...logicalEventBase, id: "same-logical-b" }] },
+    );
+    const distinctEventMerge = frameWindow.WordLoverApp.mergeSnapshots(
+      { ...replaySnapshotBase, vocabularyItems: [replayItem], studyEvents: [{ ...logicalEventBase, id: "distinct-a", occurredAt: "2026-06-04T08:00:00.000Z" }] },
+      { ...replaySnapshotBase, vocabularyItems: [replayItem], studyEvents: [{ ...logicalEventBase, id: "distinct-b", occurredAt: "2026-06-04T08:05:00.000Z" }] },
+    );
+    const spellingDuplicateMerge = frameWindow.WordLoverApp.mergeSnapshots(
+      { ...replaySnapshotBase, spellingItems: [replayItem], spellingEvents: [{ ...logicalEventBase, track: "spelling", id: "same-spelling-a" }] },
+      { ...replaySnapshotBase, spellingItems: [replayItem], spellingEvents: [{ ...logicalEventBase, track: "spelling", id: "same-spelling-b" }] },
+    );
+    const eventDeduplicationWorks =
+      duplicateEventMerge.studyEvents.length === 1
+      && distinctEventMerge.studyEvents.length === 2
+      && spellingDuplicateMerge.spellingEvents.length === 1;
+    if (!eventDeduplicationWorks) {
+      throw new Error(`Study/spelling event dedupe failed: ${JSON.stringify({ duplicate: duplicateEventMerge.studyEvents, distinct: distinctEventMerge.studyEvents, spelling: spellingDuplicateMerge.spellingEvents })}`);
+    }
+    const vocabularyBeforeRewrite = frameWindow.WordLoverApp.getVocabulary().map((item) => ({ ...item }));
+    const rewriteA = await frameWindow.WordLoverApp.saveVocabularyItem(frameWindow.WordLoverApp.lookupTerm(replayBase.word), "rewrite-stale-test-a");
+    const rewriteB = { ...rewriteA, term: "rewrite stale b", normalizedTerm: "rewrite stale b", savedAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" };
+    const archivedRewriteB = { ...rewriteB, archivedAt: "2026-06-02T00:00:00.000Z" };
+    await frameWindow.WordLoverApp.rewriteVocabularyForTest([rewriteA, rewriteB]);
+    const afterDropRecords = await frameWindow.WordLoverApp.rewriteVocabularyForTest([rewriteA]);
+    const persistAllDeletesStaleRecords = !afterDropRecords.some((item) => item.normalizedTerm === rewriteB.normalizedTerm);
+    const afterArchiveRecords = await frameWindow.WordLoverApp.rewriteVocabularyForTest([rewriteA, archivedRewriteB]);
+    const persistAllPreservesArchivedRecords = afterArchiveRecords.some((item) => item.normalizedTerm === rewriteB.normalizedTerm && item.archivedAt);
+    await frameWindow.WordLoverApp.rewriteVocabularyForTest(vocabularyBeforeRewrite);
+    if (!persistAllDeletesStaleRecords || !persistAllPreservesArchivedRecords) {
+      throw new Error(`Persist-all rewrite should delete absent stale records while preserving archived records: ${JSON.stringify({ afterDropRecords, afterArchiveRecords })}`);
+    }
 
     await frameWindow.WordLoverApp.uiPreferences.set({
       todayTrack: "spelling",
       vocabularyTrack: "spelling",
       historyTrack: "spelling",
+      historyGranularity: "weeks",
+      fontScale: 1.3,
+      goalsPeriod: "week",
     });
     const uiPreferenceSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
     const uiPreferencesIncludedInSnapshot =
       uiPreferenceSnapshot.uiPreferences?.todayTrack === "spelling"
       && uiPreferenceSnapshot.uiPreferences?.vocabularyTrack === "spelling"
-      && uiPreferenceSnapshot.uiPreferences?.historyTrack === "spelling";
+      && uiPreferenceSnapshot.uiPreferences?.historyTrack === "spelling"
+      && uiPreferenceSnapshot.uiPreferences?.historyGranularity === "weeks"
+      && uiPreferenceSnapshot.uiPreferences?.fontScale === 1.3
+      && uiPreferenceSnapshot.uiPreferences?.goalsPeriod === "week";
     frame.src = `/?suite-study-smoke=${Date.now()}&prefs-reload=1`;
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -1065,6 +1273,9 @@ async function runMainAppStudySmoke() {
       reloadedUiPreferences.todayTrack === "spelling"
       && reloadedUiPreferences.vocabularyTrack === "spelling"
       && reloadedUiPreferences.historyTrack === "spelling"
+      && reloadedUiPreferences.historyGranularity === "weeks"
+      && reloadedUiPreferences.fontScale === 1.3
+      && reloadedUiPreferences.goalsPeriod === "week"
       && uiPreferencesIncludedInSnapshot;
     if (!uiPreferencesSurviveReload) {
       throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
@@ -1445,27 +1656,35 @@ async function runMainAppStudySmoke() {
       item.archivedAt = null;
       stalledReviewItems.push(item);
     }
-    let reviewDuePersistenceTimeoutStillAdvances = false;
+    let reviewDuePersistenceFailureSafe = false;
     let reviewDuePersistenceTimeoutDebug = null;
     try {
       frameWindow.WordLoverApp.reviewDebug.clear();
       frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest(() => new Promise(() => {}), 150);
       await frameWindow.WordLoverApp.startDueReview();
       const stalledFirstTerm = await waitForVocabularyQuizTerm();
+      const stalledItem = stalledReviewItems.find((item) => item.term === stalledFirstTerm);
+      const beforeReview = JSON.stringify(stalledItem?.review ?? null);
+      const beforeEventCount = frameWindow.WordLoverApp.getStudyEvents().length;
+      const beforeDueCount = frameWindow.WordLoverApp.getDueVocabularyItems().length;
       await answerActiveVocabularyQuiz();
       clickFsrsRating("good");
-      const stalledSecondTerm = await waitForVocabularyQuizTerm(stalledFirstTerm);
+      await new Promise((resolve) => setTimeout(resolve, 350));
       reviewDuePersistenceTimeoutDebug = frameWindow.WordLoverApp.reviewDebug.events().slice(-20);
-      reviewDuePersistenceTimeoutStillAdvances =
-        Boolean(stalledSecondTerm && stalledSecondTerm !== stalledFirstTerm)
+      const afterTerm = frameWindow.WordLoverApp.getActiveQuiz()?.entry?.term ?? null;
+      reviewDuePersistenceFailureSafe =
+        afterTerm === stalledFirstTerm
+        && JSON.stringify(stalledItem?.review ?? null) === beforeReview
+        && frameWindow.WordLoverApp.getStudyEvents().length === beforeEventCount
+        && frameWindow.WordLoverApp.getDueVocabularyItems().length === beforeDueCount
+        && /Could not record this rating/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")
         && reviewDuePersistenceTimeoutDebug.some((event) => event.stage === "rating-persist-failed" && event.status === "timeout")
-        && reviewDuePersistenceTimeoutDebug.some((event) => event.stage === "rating-recorded" && event.persistenceStatus === "timeout");
     } finally {
       frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest(null);
     }
     for (const item of stalledReviewItems) item.archivedAt = new Date().toISOString();
-    if (!reviewDuePersistenceTimeoutStillAdvances) {
-      throw new Error(`Review due should advance even when rating persistence stalls. Debug: ${JSON.stringify(reviewDuePersistenceTimeoutDebug)}`);
+    if (!reviewDuePersistenceFailureSafe) {
+      throw new Error(`Review due should not advance or mutate state when persistence stalls. Debug: ${JSON.stringify(reviewDuePersistenceTimeoutDebug)}`);
     }
 
     const repairedReviewOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due repaired fsrs one", "review due repaired fsrs one meaning", "review due repaired fsrs one");
@@ -1555,6 +1774,13 @@ async function runMainAppStudySmoke() {
     if (!spellingRetryBefore?.currentTerm || spellingRetryBefore.queueLength < 2) throw new Error("Spelling retry design test did not start a multi-word session.");
     frameWindow.WordLoverApp.spelling.answer(`${spellingRetryBefore.currentTerm}-wrong`);
     if (!frameWindow.WordLoverApp.spelling.state()?.awaitingRetry) throw new Error("Spelling retry design test did not enter retry state after a wrong answer.");
+    const strictWrongText = frameDocument.querySelector("#spellingFeedback")?.textContent ?? "";
+    const spellingWrongHidesAnswer = !strictWrongText.includes(spellingRetryBefore.currentTerm) && /Try again/i.test(strictWrongText);
+    click("[data-spelling-show-answer]");
+    const spellingShowAnswerReveals = (frameDocument.querySelector("#spellingFeedback")?.textContent ?? "").includes(spellingRetryBefore.currentTerm);
+    if (!spellingWrongHidesAnswer || !spellingShowAnswerReveals) {
+      throw new Error(`Strict spelling feedback should hide answer until Show answer. Text: ${strictWrongText}`);
+    }
     frameWindow.WordLoverApp.spelling.retry();
     frameWindow.WordLoverApp.spelling.answer(spellingRetryBefore.currentTerm);
     const spellingAfterOneRetryCorrect = await waitForSpellingState(
@@ -1577,6 +1803,40 @@ async function runMainAppStudySmoke() {
     if (!spellingRetryEvent || spellingRetryEvent.rating !== "good") {
       throw new Error(`Spelling retry completion should record retry-based rating. Event: ${JSON.stringify(spellingRetryEvent)}`);
     }
+
+    const spellingPersistFailOne = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingpersistfailone", "persist fail one meaning", "persist fail one");
+    const spellingPersistFailTwo = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingpersistfailtwo", "persist fail two meaning", "persist fail two");
+    for (const item of [spellingPersistFailOne, spellingPersistFailTwo]) {
+      item.review.dueAt = duePast;
+      item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: duePast };
+    }
+    let spellingPersistenceFailureSafe = false;
+    try {
+      frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest((details) => {
+        if (details?.track === "spelling") throw new Error("forced spelling persistence failure");
+      }, 150);
+      frameWindow.WordLoverApp.spelling.start();
+      const before = frameWindow.WordLoverApp.spelling.state();
+      const beforeSpellingEvents = frameWindow.WordLoverApp.getSpellingEvents().length;
+      const beforeReview = JSON.stringify(frameWindow.WordLoverApp.getSpelling().find((item) => item.term === before.currentTerm)?.review ?? null);
+      frameWindow.WordLoverApp.spelling.answer(before.currentTerm);
+      await new Promise((resolve) => setTimeout(resolve, 1300));
+      const after = frameWindow.WordLoverApp.spelling.state();
+      const afterReview = JSON.stringify(frameWindow.WordLoverApp.getSpelling().find((item) => item.term === before.currentTerm)?.review ?? null);
+      spellingPersistenceFailureSafe =
+        after?.currentTerm === before.currentTerm
+        && after?.completed === 0
+        && frameWindow.WordLoverApp.getSpellingEvents().length === beforeSpellingEvents
+        && afterReview === beforeReview
+        && /Could not save this spelling review/i.test(frameDocument.querySelector("#spellingFeedback")?.textContent ?? "");
+    } finally {
+      frameWindow.WordLoverApp.reviewDebug.setPersistenceHookForTest(null);
+      frameWindow.WordLoverApp.spelling.close();
+    }
+    if (!spellingPersistenceFailureSafe) {
+      throw new Error("Spelling persistence failure should not advance, count completion, or mutate review state.");
+    }
+
     const snapshotIntegrity = frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot());
     const snapshotIntegrityIncludesSpelling =
       snapshotIntegrity.spellingCount === frameWindow.WordLoverApp.getSpelling().length
@@ -1600,8 +1860,8 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}-v104/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v104") {
-      throw new Error(`App update check did not expose the current v104 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    if (!/Device: 0\.6\.2-product\.\d{8}-v106/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v106") {
+      throw new Error(`App update check did not expose the current v106 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
@@ -1618,11 +1878,28 @@ async function runMainAppStudySmoke() {
       studyOneMoreShowsImmediateLoading,
       reviewSchedulingTests,
       eventSourcedMergeRebuiltFsrs,
+      eventDeduplicationWorks,
+      persistAllDeletesStaleRecords,
+      persistAllPreservesArchivedRecords,
       uiPreferencesSurviveReload,
       googleExpiredSessionAutoReconnectMessage,
       localDateKeyUsesLocalTime,
       historyWritesBothTimestampFields,
       historyMergeUsesSearchedAtFallback,
+      goalsMergeUsesNewerUpdatedAt,
+      goalsMergeFallsBackToNewerSnapshot,
+      goalsRestoredImmediately,
+      goalsRestoreSurvivesReload,
+      olderSnapshotWithoutGoalsStable,
+      productionBackupPassphraseBlocksSync,
+      backupPassphraseRoundTrips,
+      wrongBackupPassphraseFailsSafely,
+      legacyDefaultBackupCanRestore,
+      currentSnapshotValidates,
+      oldSnapshotValidates,
+      wrongAppRejected,
+      dangerousEventRejected,
+      restoreFailurePreservesLocalData,
       applyBeforeCheckStatus: applyBeforeCheck?.status,
       applyAfterCheckStatus: applyAfterCheck?.status,
       updateCheckStatus: updateCheckResult?.status,
@@ -1637,12 +1914,15 @@ async function runMainAppStudySmoke() {
       reviewDueRatingButtonsVisible,
       reviewDueWaitsForManualRating,
       reviewDueManualRatingAdvancesPastSecondWord,
-      reviewDuePersistenceTimeoutStillAdvances,
+      reviewDuePersistenceFailureSafe,
       reviewDueFsrsRepairStillAdvances,
       spellingDueIncluded,
       snapshotIntegrityIncludesSpelling,
       spellingAutoAdvanceAfterFirstTry: Boolean(spellingFirstTryAfter),
       spellingRequiresThreeCorrectAfterMiss: Boolean(spellingAfterOneRetryCorrect && spellingRetryAfter),
+      spellingWrongHidesAnswer,
+      spellingShowAnswerReveals,
+      spellingPersistenceFailureSafe,
       detailRevealedAfterClick: true,
       refreshedReviewText,
       updateStatusText,

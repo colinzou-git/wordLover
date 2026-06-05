@@ -1,15 +1,18 @@
-const CACHE_NAME = "wordlover-shell-v104";
-const SHELL_ASSETS = [
+const CACHE_NAME = "wordlover-shell-v106";
+const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260605-1",
-  "/fsrs-scheduler.js?v=20260605-1",
-  "/styles.css?v=20260605-1",
-  "/wordlover-config.js?v=20260605-1",
+  "/app.js?v=20260605-3",
+  "/fsrs-scheduler.js?v=20260605-3",
+  "/styles.css?v=20260605-3",
+  "/wordlover-config.js?v=20260605-3",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
   "/vendor/sql-wasm.wasm",
   "/vendor/ts-fsrs/index.mjs",
+];
+
+const OPTIONAL_SHELL_ASSETS = [
   "/wa-sqlite-opfs-worker.js",
   "/vendor/wa-sqlite/LICENSE",
   "/vendor/wa-sqlite/dist/wa-sqlite-async.mjs",
@@ -20,11 +23,26 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260605-1",
+  "/automated-tests.js?v=20260605-3",
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    try {
+      await cache.addAll(REQUIRED_SHELL_ASSETS);
+    } catch (error) {
+      throw new Error(`Required WordFan shell asset failed to cache: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await Promise.all(OPTIONAL_SHELL_ASSETS.map(async (asset) => {
+      try {
+        const response = await fetch(asset, { cache: "reload" });
+        if (response.ok) await cache.put(asset, response);
+      } catch {
+        /* Optional experimental/test assets must not block install. */
+      }
+    }));
+  })());
 });
 
 self.addEventListener("activate", (event) => {
