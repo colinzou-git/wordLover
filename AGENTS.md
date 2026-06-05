@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository.
 
 ## What this is
 
-WordLover is a local-first vocabulary/dictionary PWA. The runtime app is plain HTML/JS/CSS served from `apps/wordlover-pwa/public/` — there is no bundler, no `package.json`, no `node_modules`. The current build is `app.js` + `sw.js` loaded directly as ES modules. A Vite/TypeScript migration is planned but not started.
+WordLover or WordFan is a local-first vocabulary/dictionary PWA. The runtime app is plain HTML/JS/CSS served from `apps/wordlover-pwa/public/` — there is no bundler, no `package.json`, no `node_modules`. The current build is `app.js` + `sw.js` loaded directly as ES modules. 
 
 Platform priority is deliberate and load-bearing: **iPhone first, Windows second (used as the automation/stress-test fallback for anything that can't be automated on iPhone), Android deferred**. Don't add Android-specific code paths or polish before iPhone and Windows are stable.
 
@@ -62,8 +62,6 @@ If you only bump one, users will see a stale shell, or the service worker will f
 
 The shipped query engine is `sql.js`, which loads the entire SQLite file into WASM memory. With the **slim 32 MB dictionary** that's now ~32 MB resident, which fits comfortably under the 50 MB iPhone DRAM target — the architecture's `wa-sqlite` + OPFS engine remains the production direction for larger future dictionaries but is no longer the only path that can meet the memory target. The wa-sqlite vendor bundle is present under `public/vendor/wa-sqlite/` and a smoke-test worker exists at `public/wa-sqlite-opfs-worker.js`.
 
-Confirm the 50 MB target with a real iPhone measurement before declaring it met; the previous gap was specifically that `sql.js` + 200 MB dictionary blew through the budget by ~4×.
-
 Either way, route dictionary access through the repository abstraction in `app.js` rather than calling `sql.js` directly from UI/vocabulary/quiz code — the whole point is to be able to swap the engine.
 
 ## App-level data architecture
@@ -98,5 +96,12 @@ python apps\wordlover-pwa\scripts\smoke-headless.py
 
 It is not a replacement for the in-browser `automated-tests.html` suite (which exercises service worker readiness, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmarks) but it is the cheapest way to catch a regression in the main app shell before paying for an iPhone validation cycle.
 
-Read the following code and symbol map before search code. So that save tokens.
+Before search code, read the following code and symbol map. So that save tokens.
 - docs/ai/AUTO_SYMBOL_MAP.md
+
+To create PR, use gh installed at: C:\Program Files\GitHub CLI\gh.exe
+
+At the end of a run, do the following:
+Report the new source files introduced. Otherwise, print 'No new source files added.'
+For new source files, update .\scripts\generate_code_map.py. Report updating status in a short sentence.
+Run 'python .\scripts\generate_code_map.py' to update code map and symbol map. Report running results in one short sentence after run.
