@@ -40,7 +40,9 @@ CORE_SOURCE_PATHS = [
     "apps/wordlover-pwa/scripts/smoke-sync.py",
     "apps/wordlover-pwa/scripts/smoke-ai-chat.py",
     "apps/wordlover-pwa/scripts/smoke-update-flow.py",
+    "apps/wordlover-pwa/scripts/run-browser-tests.py",
     "apps/wordlover-pwa/scripts/serve-https.py",
+    "apps/wordlover-pwa/scripts/validate-shell-assets.mjs",
 ]
 
 DISCOVERY_ROOTS = [
@@ -55,7 +57,7 @@ EXTRA_SOURCE_PATHS = [
     "start-iphone-https.ps1",
 ]
 
-SOURCE_SUFFIXES = {".js", ".py", ".html", ".htm", ".json", ".webmanifest", ".ps1"}
+SOURCE_SUFFIXES = {".js", ".mjs", ".py", ".html", ".htm", ".json", ".webmanifest", ".ps1"}
 EXCLUDED_PARTS = {
     ".git",
     "__pycache__",
@@ -219,7 +221,7 @@ def parse_powershell(text: str) -> dict[str, list[Symbol]]:
 
 def parse_file(path: Path) -> dict[str, list[Symbol]]:
     text = path.read_text(encoding="utf-8-sig", errors="replace")
-    if path.suffix == ".js":
+    if path.suffix in {".js", ".mjs"}:
         return parse_js(text)
     if path.suffix == ".py":
         return parse_python(path, text)
@@ -270,9 +272,13 @@ def tracked_source_files(root: Path) -> list[Path]:
 
 
 def discover_source_files(root: Path) -> list[Path]:
-    tracked = tracked_source_files(root)
-    if tracked:
-        return tracked
+    paths: set[Path] = set(tracked_source_files(root))
+    for rel in [*CORE_SOURCE_PATHS, *EXTRA_SOURCE_PATHS]:
+        path = root / rel
+        if path.exists() and is_source_candidate(path):
+            paths.add(path)
+    if paths:
+        return sorted(paths, key=lambda path: path.relative_to(root).as_posix())
     paths: set[Path] = set()
     for rel in [*CORE_SOURCE_PATHS, *EXTRA_SOURCE_PATHS]:
         path = root / rel

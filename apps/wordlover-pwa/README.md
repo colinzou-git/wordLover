@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\s
 Then open:
 
 ```text
-http://127.0.0.1:4173/?fresh=v34
+http://127.0.0.1:4173/?fresh=latest
 ```
 
 Keep that PowerShell window open while using WordLover. If the server is closed, an already-open browser tab can still show the app shell from cache, but first-time dictionary install cannot fetch `dictionary.sqlite`.
@@ -35,7 +35,7 @@ When the app asks to unlock encrypted local data on Windows, enter the passphras
 To run the automated suite, open:
 
 ```text
-http://127.0.0.1:4173/automated-tests.html?fresh=v34
+http://127.0.0.1:4173/automated-tests.html?fresh=latest
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
@@ -50,6 +50,42 @@ To create the compressed production dictionary package:
 python -m pip install zstandard
 python scripts\package_dictionary_web.py --copy-sqlite
 ```
+
+## Local test commands (from apps/wordlover-pwa/)
+
+Run the same checks that CI runs, from a fresh checkout:
+
+```powershell
+# Static checks (JS syntax + version lockstep + shell-asset manifest)
+npm run build
+
+# In-browser automated suite — requires a running server and a dictionary
+# Option A: you already have a server running on port 4173
+npm run test:browser
+
+# Option B: one-shot — creates CI dictionary, starts a temp server, runs suite, stops it
+python -m pip install playwright && python -m playwright install chromium
+npm run test:browser:ci
+```
+
+## CI Dictionary Fixture
+
+The production web dictionary is generated from offline source data and is not
+committed. A clean GitHub Actions checkout therefore does not have
+`public/dictionary.sqlite`, but the smoke and browser suites intentionally load
+the real app dictionary path.
+
+CI prepares a tiny valid SQLite package before serving `public/`:
+
+```powershell
+python apps\wordlover-pwa\scripts\create-ci-dictionary.py
+```
+
+That script reuses the slim dictionary schema and FTS population helper, writes
+`dictionary.sqlite`, `dictionary.sqlite.zst`, and `dictionary-manifest.json`,
+and includes only the terms required by browser smoke coverage such as
+`abandon`, `take off`, `in terms of`, `abundant`, and `accurate`. It is a CI
+fixture only; do not commit generated dictionary packages from this path.
 
 ## Run On iPhone
 
@@ -80,3 +116,14 @@ Windows fallback automation verified this by stopping the local server, reloadin
 - Valid searches persist in IndexedDB history after reload.
 - Review due flow, proactive study flow, and FSRS ratings work.
 - Export button downloads a user data JSON file.
+# Build and Deploy Strategy
+
+`public/` is the deployed WordFan app and the GitHub Pages source of truth. The
+current app intentionally ships as static HTML/CSS/JS modules plus vendored
+runtime files; Vite is kept only as a dependency-management bridge for future
+bundling work and must not emit unused production bundles into `public/`.
+
+Use `npm run build` from `apps/wordlover-pwa` to validate that the public shell
+assets referenced by the service worker exist and that dictionary packages are
+not accidentally included in the shell cache. GitHub Pages should serve the
+contents of `public/` exactly.

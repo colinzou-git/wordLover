@@ -4,96 +4,145 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-WordLover is a local-first vocabulary/dictionary PWA. The runtime app is plain HTML/JS/CSS served from `apps/wordlover-pwa/public/` — there is no bundler, no `package.json`, no `node_modules`. The current build is `app.js` + `sw.js` loaded directly as ES modules. A Vite/TypeScript migration is planned but not started.
+WordFan is a local-first vocabulary/dictionary PWA for English learners. The runtime app is **plain HTML/CSS/ES modules** served from `apps/wordlover-pwa/public/` — no bundler, no build step, no `node_modules` at runtime. The app brand is "WordFan" in UI and manifest; internal identifiers, IndexedDB names, and Drive file names stay as "wordlover" for data continuity.
 
-Platform priority is deliberate and load-bearing: **iPhone first, Windows second (used as the automation/stress-test fallback for anything that can't be automated on iPhone), Android deferred**. Don't add Android-specific code paths or polish before iPhone and Windows are stable. See `docs/architecture-design.md` for full rationale and `prd.md` (Status column = current source of truth for which requirements are `done`/`partial`/`open`/`deferred`).
+**Platform priority (load-bearing):** iPhone first, Windows second (automation/stress-test fallback), Android deferred. Don't add Android code paths before iPhone and Windows are stable.
 
-## Two run paths (deliberate, both needed)
+Before searching code, read `docs/ai/AUTO_SYMBOL_MAP.md` — it maps feature areas to functions and line numbers, saving token-heavy file reads.
 
-### Windows (HTTP, used for development + automation)
+## Development commands
+
+### Run on Windows (HTTP, dev + automation)
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\start-windows.ps1 -Port 4173
 ```
 
-Then open `http://127.0.0.1:4173/?fresh=v34` (the `?fresh=...` cache-buster matters — see "Cache versioning" below). The automated suite lives at `/automated-tests.html?fresh=v34` and is run by clicking **Run automated tests** in the page, or with `?autorun=1`. Results JSON is POSTed to `/__test_results` (HTTPS server only) and saved under `apps/wordlover-pwa/received-results/` (gitignored).
+Open `http://127.0.0.1:4173/?fresh=v<N>` — the `?fresh=` cache-buster matters, use the current shell version number.
 
-### iPhone (HTTPS, required because PWA APIs need a secure context)
+### Run on iPhone (HTTPS, required for PWA APIs)
 
 ```powershell
 .\start-iphone-https.ps1
 ```
 
-This wraps `apps/wordlover-pwa/scripts/serve-https.py`, which adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (required for OPFS + threaded WASM) and serves over TLS using certs under `apps/wordlover-pwa/certs/` (gitignored). First-time setup uses `apps/wordlover-pwa/scripts/create-local-ca-and-cert.ps1 -IpAddress <LAN-IP>`.
+Wraps `apps/wordlover-pwa/scripts/serve-https.py`, which adds the COOP/COEP headers required for OPFS + threaded WASM and serves over TLS using certs under `apps/wordlover-pwa/certs/` (gitignored).
 
-Both server scripts prefer the Codex-bundled Python at `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe` and fall back to `python` on PATH.
+### Automated in-browser test suite
 
-## Dictionary data pipeline (separate from the app)
+Open `http://127.0.0.1:4173/automated-tests.html?fresh=v<N>` and click **Run automated tests**, or append `?autorun=1` for unattended mode.
 
-The dictionary is built offline by Python scripts under `scripts/` from ECDICT source data and consumed by the PWA as a static asset. The generated SQLite files are **gitignored** — rebuild from source rather than committing them.
-
-```powershell
-python scripts/build_dictionary.py              # ECDICT zip → data/dictionary.sqlite (~197 MB, ~770k rows)
-python scripts/augment_dictionary_wordnet.py    # fill missing English defs from WordNet 3.0
-python scripts/augment_dictionary_opted.py      # fill remaining from OPTED/Webster 1913
-python scripts/build_slim_dictionary.py         # data/dictionary.sqlite → data/dictionary-slim.sqlite (~32 MB, ~100k rows)
-python scripts/package_dictionary_web.py --copy-sqlite   # → public/dictionary.sqlite + .zst + manifest (uses slim by default)
-```
-
-The product PWA ships **only the slim 100k-entry dictionary** (~32 MB raw, ~15 MB zstd). The full ~200 MB / ~770k-row dictionary stays under `data/` as the build-time source of truth, never packaged into the install bundle. The slim set is composed of all TOEFL-tagged entries + all single words with any frequency signal (frq/bnc/Collins/Oxford) + phrases whose constituents are all in the slim set, ranked by average constituent frequency. See `docs/dictionary-data.md` for full details.
-
-`package_dictionary_web.py` defaults to `data/dictionary-slim.sqlite`; pass `--input data/dictionary.sqlite` if you need a full-dictionary build for memory benchmarking.
-
-**Upgrade behavior for already-installed devices**: the app fetches `/dictionary-manifest.json` on every dictionary load (service worker bypasses cache for it), compares the manifest's `dictionaryDataVersion` against the locally-stored value, and on mismatch invalidates the local IndexedDB / OPFS copy before re-downloading. So a device that previously installed the 200 MB dictionary drops to the 32 MB slim version automatically on the next online launch with this build.
-
-Source dataset details (counts, TOEFL coverage, source priority for meaning display) are in `docs/dictionary-data.md`.
-
-## Cache versioning — the easiest thing to break
-
-The service worker pre-caches a fixed list of versioned URLs. Three things must move together when shipping changes that affect the app shell:
-
-1. `CACHE_NAME` and `SHELL_CACHE_VERSION` constant (`sw.js` line 1, `app.js` near top, `automated-tests.js` `SHELL_CACHE_NAME`) — bump to the new shell version.
-2. `?v=YYYYMMDD-N` query strings on every shell asset reference in `index.html`, `automated-tests.html`, `sw.js` `SHELL_ASSETS`, and `automated-tests.js` `SHELL_ASSETS` — bump in lockstep.
-3. `APP_VERSION` in `app.js` (user-visible in the menu).
-
-If you only bump one, users will see a stale shell, or the service worker will fail to pre-cache (mismatched URLs), or the automated test suite's shell-cache readiness check will report the wrong version. The service worker is **never** allowed to call `skipWaiting()` during install — only after the user clicks **Apply update** in the menu (the app posts a `SKIP_WAITING` message). Don't bypass this; the manual update flow is a product requirement, not an oversight.
-
-## Dictionary engine: two paths, one production gate
-
-The shipped query engine is `sql.js`, which loads the entire SQLite file into WASM memory. With the **slim 32 MB dictionary** that's now ~32 MB resident, which fits comfortably under the 50 MB iPhone DRAM target — the architecture's `wa-sqlite` + OPFS engine remains the production direction for larger future dictionaries but is no longer the only path that can meet the memory target. The wa-sqlite vendor bundle is present under `public/vendor/wa-sqlite/` and a smoke-test worker exists at `public/wa-sqlite-opfs-worker.js`.
-
-Confirm the 50 MB target with a real iPhone measurement before declaring it met; the previous gap was specifically that `sql.js` + 200 MB dictionary blew through the budget by ~4×.
-
-Either way, route dictionary access through the repository abstraction in `app.js` rather than calling `sql.js` directly from UI/vocabulary/quiz code — the whole point is to be able to swap the engine.
-
-## App-level data architecture
-
-Two stores, kept separate on purpose:
-
-- **Dictionary** (read-only, rebuildable): `dictionary.sqlite` lives in OPFS / IndexedDB blob, plus the in-app `sql.js` instance.
-- **User data** (authoritative, must survive shell updates): encrypted records in IndexedDB (`wordlover-user` DB, stores: `kv`, `files`, `keys`, `vocabularyRecords`, `studyEventRecords`, `checkpoints`). Encryption uses Web Crypto AES-GCM with a passphrase-wrapped DEK.
-
-Service-worker cache replacement may delete old shell caches **only** — it must never clear IndexedDB / OPFS / local storage / vocabulary / study events / dictionary packages. Migrations between data format versions must merge legacy and current stores (legacy aggregate vocabulary list + per-record store), not replace one with the other. Snapshot restore (e.g. Google Drive sync) must use an atomic IndexedDB transaction so an interrupted restore can't leave stores empty.
-
-Study events are immutable; mutable vocabulary state is separate. `syncVersion` lives on every event so the future event-log sync (Tier 2) can be added without redesigning the store. The current sync (Tier 1) is full encrypted snapshot upsert to Drive `appDataFolder`.
-
-## When making changes
-
-- Treat `prd.md`'s Status column as the source of truth for what's actually shipped. Don't claim a requirement is `done` just because code references it — check it works in the app.
-- Local development passphrase before v34 was silently `wordlover-localhost-development-passphrase`; users who never set their own need this value to unlock encrypted records on Windows.
-- Mac iPhone simulator / Safari Web Inspector / Xcode Instruments is the only reliable way to measure iPhone DRAM. Don't infer iPhone memory from Windows browser numbers — note the limitation explicitly when measurement isn't available.
-- The `?q=...&report=1` and `?autorun=1` URL parameters drive automated smoke tests; preserve them when touching `app.js` startup logic.
-- iPhone validation reports land in `apps/wordlover-pwa/received-results/` (gitignored) via POST to the HTTPS server's `/__test_results` endpoint; Windows results are saved manually under `docs/validation/phase0-automation/`.
-
-## Headless smoke harness
-
-`apps/wordlover-pwa/scripts/smoke-headless.py` drives the running Windows HTTP server through Playwright Chromium for non-interactive validation. It loads the page, waits for `window.WordLoverApp` to initialize, forces a dictionary load, then exercises a few API entry points (manual unknown-term save, `lookupTerm`, vocabulary state). Run it with the local server already up:
+### Headless smoke test (cheapest regression check)
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\start-windows.ps1 -Port 4173   # in one window
-python -m pip install --user playwright
-python -m playwright install chromium
 python apps\wordlover-pwa\scripts\smoke-headless.py
 ```
 
-It is not a replacement for the in-browser `automated-tests.html` suite (which exercises service worker readiness, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmarks) but it is the cheapest way to catch a regression in the main app shell before paying for an iPhone validation cycle.
+Requires the Windows server to be running and Playwright/Chromium installed (`python -m playwright install chromium`).
+
+### CI checks (run locally before pushing)
+
+```powershell
+# JS syntax check
+cd apps/wordlover-pwa/public
+node --check app.js; node --check sw.js; node --check automated-tests.js
+
+# Cache-version lockstep
+python apps/wordlover-pwa/scripts/check_versions.py
+
+# Shell-asset manifest validation
+cd apps/wordlover-pwa && npm run validate:shell-assets
+```
+
+### CI dictionary fixture (for headless smoke without production data)
+
+```powershell
+python apps\wordlover-pwa\scripts\create-ci-dictionary.py
+```
+
+Writes a tiny `dictionary.sqlite` + `.zst` + `dictionary-manifest.json` with only the terms CI needs (`abandon`, `take off`, etc.). Do not commit generated dictionary files.
+
+## Cache versioning — the easiest thing to break
+
+**Three things must be bumped together** every time app shell files change:
+
+1. `CACHE_NAME` / `SHELL_CACHE_VERSION` — in `sw.js` line 1, `app.js` near top, and `automated-tests.js` `SHELL_CACHE_NAME`.
+2. `?v=YYYYMMDD-N` query strings — on every shell asset reference in `index.html`, `automated-tests.html`, `sw.js` `SHELL_ASSETS`, and `automated-tests.js` `SHELL_ASSETS`. All must match.
+3. `APP_VERSION` in `app.js` (user-visible in the menu).
+
+If only one moves, users see stale shells or the service worker fails to pre-cache. `check_versions.py` enforces this in CI.
+
+**Never** add `skipWaiting()` to the install handler. The service worker only calls it after the user clicks **Apply update** (via `SKIP_WAITING` message). This is a product requirement.
+
+## Architecture
+
+### App entry points
+
+| File | Role |
+|------|------|
+| `apps/wordlover-pwa/public/app.js` | Single-file app (~8000+ lines): dictionary engine, vocabulary/spelling CRUD, FSRS scheduling, review/quiz UI, Google Auth, Drive sync, Gemini AI, checkpoints |
+| `apps/wordlover-pwa/public/sw.js` | Service worker: shell pre-cache, offline fetch, `SKIP_WAITING` handler |
+| `apps/wordlover-pwa/public/fsrs-scheduler.js` | FSRS scheduling helpers (imported by `app.js`) |
+| `apps/wordlover-pwa/public/wordlover-config.js` | Local configuration overrides (Google client ID, Gemini key, passphrase) |
+| `apps/wordlover-pwa/public/index.html` | Static DOM shell with versioned asset URLs |
+| `apps/wordlover-pwa/public/automated-tests.html/js` | In-browser test suite |
+
+### Two data stores (kept separate on purpose)
+
+- **Dictionary** (read-only, rebuildable): `dictionary.sqlite` fetched on first online launch, stored in IndexedDB blob (OPFS optional). Queried via `sql.js` (WASM, entire file in memory). The shipped dictionary is the slim ~32 MB / ~100k-entry set.
+- **User data** (authoritative, must survive shell updates): IndexedDB `wordlover-user` DB, stores `kv`, `files`, `keys`, `vocabularyRecords`, `studyEventRecords`, `spellingRecords`, `spellingEventRecords`, `userDictionary`, `known`, `checkpoints`. Encrypted with Web Crypto AES-GCM (passphrase-wrapped DEK).
+
+Service-worker cache replacement may delete old shell caches **only** — it must never clear IndexedDB, OPFS, local storage, or any user data.
+
+### Dictionary engine
+
+Current production path: `sql.js` loads the 32 MB slim SQLite file into WASM memory. The `wa-sqlite` + OPFS engine is vendored at `public/vendor/wa-sqlite/` and tested via a smoke worker (`public/wa-sqlite-opfs-worker.js`) but is not yet the default — it's the production target when iPhone memory validation runs. Route all dictionary access through the abstraction in `app.js` (not directly to `sql.js`) to keep the engine swappable.
+
+### Google Drive sync
+
+Tier 1: full encrypted snapshot upsert to Drive `appDataFolder`. Study events carry a `syncVersion` for the planned Tier 2 event-log sync. Snapshot restore uses an atomic IndexedDB transaction.
+
+### Feature routing (quick reference)
+
+| Feature | Look in |
+|---------|---------|
+| Dictionary search / install | `app.js`: `loadDictionary`, `lookupTerm`, `lookupChineseTerm`, `suggestTerms` |
+| Vocabulary save / edit / archive | `app.js`: `saveVocabularyItem`, `resultToVocabularyItem`, `renderVocabulary` |
+| Review / scheduling | `app.js`: `getDueVocabularyItems`, `scheduleFromFsrsRating`, `recordReviewRating` |
+| Spelling track | `app.js`: `startSpellingReview`, `checkSpelling`, `recordSpellingReview` |
+| Offline shell / update flow | `sw.js` + `app.js`: `checkForAppUpdate`, `applyAppUpdate` |
+| Google auth / Drive sync | `app.js`: `requestGoogleAccessToken`, `syncToGoogleDrive`, `restoreFromGoogleDrive` |
+| Gemini AI / AI chat | `app.js`: `requestGeminiDetails`, `openAiChatPanel`, `prefetchAiChat` |
+| Checkpoints / rollback | `app.js`: `createCheckpoint`, `rollbackLatestCheckpoint` |
+| Study goals | `app.js`: `openGoalsWizard`, `renderGoalsPanel`, `saveStudyGoals` |
+
+## Dictionary data pipeline (offline, separate from the app)
+
+Generated SQLite files are **gitignored** — rebuild from source:
+
+```powershell
+python scripts/build_dictionary.py              # ECDICT → data/dictionary.sqlite (~197 MB)
+python scripts/augment_dictionary_wordnet.py    # fill missing English defs from WordNet
+python scripts/augment_dictionary_opted.py      # fill remaining from OPTED/Webster 1913
+python scripts/build_slim_dictionary.py         # → data/dictionary-slim.sqlite (~32 MB, ~100k rows)
+python scripts/package_dictionary_web.py --copy-sqlite  # → public/dictionary.sqlite + .zst + manifest
+```
+
+The app compares `dictionaryDataVersion` in the manifest against the locally-stored version on every load; a mismatch invalidates the local copy and triggers a re-download.
+
+## Key invariants
+
+- **prd.md Status column** is the source of truth for what's actually shipped. `done` means verified working in the app, not just referenced in code.
+- **Windows passphrase for pre-v34 local data**: `wordlover-localhost-development-passphrase`. Users who never set their own passphrase need this to unlock local records.
+- **iPhone memory**: don't infer from Windows numbers. Mac iPhone Simulator / Safari Web Inspector / Xcode Instruments is the only reliable path. Note explicitly when measurement isn't available.
+- **`?q=...&report=1`** and **`?autorun=1`** URL params drive automated smoke; preserve them when touching `app.js` startup logic.
+- Migrations must merge legacy and current stores (never replace one with the other). Snapshot restore must use an atomic IndexedDB transaction.
+
+## After adding new source files
+
+1. Update `scripts/generate_code_map.py` to include the new file.
+2. Run `python scripts/generate_code_map.py` to regenerate `docs/ai/AUTO_SYMBOL_MAP.md`.
+
+## Creating PRs
+
+Use `gh` at `C:\Program Files\GitHub CLI\gh.exe`.
