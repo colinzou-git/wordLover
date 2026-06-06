@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260605-5";
+} from "./fsrs-scheduler.js?v=20260606-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -109,9 +109,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260605-v108";
+const APP_VERSION = "0.6.2-product.20260606-v109";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v108";
+const SHELL_CACHE_VERSION = "wordlover-shell-v109";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -1384,6 +1384,7 @@ function renderResult(data) {
         ${renderAiChatButton(data.term)}
       </div>
       <p class="result-entry-type">${escapeHtml(data.entryType)}</p>
+      ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
     <div class="meaning-grid">
       <section>
@@ -1686,6 +1687,8 @@ function lookupTerm(input) {
   try {
     statement.bind({ ":term": normalized, ":raw": input.trim() });
     if (!statement.step()) {
+      const inflection = lookupInflectedTerm(input, normalized, start);
+      if (inflection) return inflection;
       const alternatives = findFuzzySuggestions(normalized, 6);
       return { status: "not_found", term: input, queryMs: performance.now() - start, alternatives };
     }
@@ -1701,6 +1704,76 @@ function lookupTerm(input) {
       tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
       queryMs: performance.now() - start,
     };
+  } finally {
+    statement.free();
+  }
+}
+
+function parseExchangeForms(exchange) {
+  return String(exchange ?? "")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => {
+      const colon = part.indexOf(":");
+      if (colon < 0) return [];
+      const code = part.slice(0, colon);
+      return part
+        .slice(colon + 1)
+        .split(",")
+        .map((form) => ({ code, form: normalizeTerm(form) }))
+        .filter((item) => item.form);
+    });
+}
+
+function exchangeCodeLabel(code) {
+  if (code.includes("p")) return "past tense";
+  if (code.includes("d")) return "past participle";
+  if (code.includes("i")) return "present participle";
+  if (code.includes("3")) return "third-person singular";
+  if (code.includes("s")) return "plural";
+  return "inflected form";
+}
+
+function lookupInflectedTerm(input, normalized, start) {
+  const statement = dictionaryDb.prepare(`
+    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, exchange
+    FROM dictionary_entries
+    WHERE exchange LIKE :needle
+    ORDER BY
+      frq IS NULL,
+      frq,
+      bnc IS NULL,
+      bnc,
+      length(word),
+      word
+    LIMIT 80
+  `);
+  try {
+    statement.bind({ ":needle": `%${normalized}%` });
+    while (statement.step()) {
+      const row = statement.getAsObject();
+      const match = parseExchangeForms(row.exchange).find((item) => item.form === normalized);
+      if (!match) continue;
+      const baseTerm = row.word ?? row.normalized_word;
+      const inflectionLabel = exchangeCodeLabel(match.code);
+      return {
+        status: "found",
+        term: input.trim(),
+        entryType: `${inflectionLabel} of ${baseTerm}`,
+        phonetic: row.phonetic,
+        englishMeanings: topLines(row.definition),
+        englishMeaningSource: row.definition_source ?? "unknown",
+        chineseMeanings: topLines(row.translation),
+        tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
+        queryMs: performance.now() - start,
+        baseTerm,
+        baseNormalizedTerm: row.normalized_word,
+        inflectionLabel,
+        source: "dictionary-inflection",
+      };
+    }
+    return null;
   } finally {
     statement.free();
   }

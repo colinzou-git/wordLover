@@ -3,7 +3,7 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260605-5";
+} from "./fsrs-scheduler.js?v=20260606-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +17,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v108";
+const SHELL_CACHE_NAME = "wordlover-shell-v109";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +28,10 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260605-5",
-  "/fsrs-scheduler.js?v=20260605-5",
-  "/styles.css?v=20260605-5",
-  "/wordlover-config.js?v=20260605-5",
+  "/app.js?v=20260606-1",
+  "/fsrs-scheduler.js?v=20260606-1",
+  "/styles.css?v=20260606-1",
+  "/wordlover-config.js?v=20260606-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +47,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260605-5",
+  "/automated-tests.js?v=20260606-1",
 ];
 
 let lastResults = null;
@@ -969,6 +969,21 @@ async function runMainAppStudySmoke() {
     const localDateKeyUsesLocalTime = localTodayKey === expectedLocalDateKey;
     if (!localDateKeyUsesLocalTime) {
       throw new Error(`localDateKey should use the browser's local date. Got ${localTodayKey}, expected ${expectedLocalDateKey}.`);
+    }
+
+    const tookLookup = frameWindow.WordLoverApp.lookupTerm("took");
+    const hurriesLookup = frameWindow.WordLoverApp.lookupTerm("hurries");
+    const inflectionFallbackWorks =
+      tookLookup.status === "found"
+      && tookLookup.term === "took"
+      && tookLookup.baseTerm === "take"
+      && /past tense/i.test(tookLookup.entryType)
+      && hurriesLookup.status === "found"
+      && hurriesLookup.term === "hurries"
+      && hurriesLookup.baseTerm === "hurry"
+      && /third-person singular/i.test(hurriesLookup.entryType);
+    if (!inflectionFallbackWorks) {
+      throw new Error(`Inflected dictionary lookup should fall back to base exchange metadata: ${JSON.stringify({ tookLookup, hurriesLookup })}`);
     }
 
     await frameWindow.WordLoverApp.runAutomatedSearchSmoke("abandon", false);
@@ -1898,8 +1913,8 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}-v108/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260605-v108") {
-      throw new Error(`App update check did not expose the current v108 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    if (!/Device: 0\.6\.2-product\.\d{8}-v109/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260606-v109") {
+      throw new Error(`App update check did not expose the current v109 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
