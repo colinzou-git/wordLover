@@ -1,12 +1,12 @@
 // Pure UI preference normalizers. No globals, no DOM.
 
 export const STUDY_ONE_MORE_LEVELS = [
-  { id: "very_easy", label: "Very Easy" },
-  { id: "easy", label: "Easy" },
-  { id: "medium", label: "Medium" },
-  { id: "hard", label: "Hard" },
-  { id: "advanced", label: "Advanced" },
-  { id: "toefl", label: "TOEFL" },
+  { id: "very_easy", label: "Top 3k common words" },
+  { id: "easy", label: "Top 8k common words" },
+  { id: "medium", label: "Top 20k words" },
+  { id: "hard", label: "20k–50k less frequent words" },
+  { id: "advanced", label: "50k+ rare/advanced words" },
+  { id: "toefl", label: "TOEFL tagged words" },
 ];
 
 export const DEFAULT_FONT_SCALE = 1;

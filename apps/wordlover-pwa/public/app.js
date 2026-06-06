@@ -4344,7 +4344,7 @@ async function startNewWordStudy() {
     const entry = pickNewStudyEntry(level);
     if (!entry) {
       quizPanel.hidden = false;
-      const label = STUDY_ONE_MORE_LEVELS.find((item) => item.id === level)?.label ?? "Very Easy";
+      const label = STUDY_ONE_MORE_LEVELS.find((item) => item.id === level)?.label ?? "Top 3k common words";
       quizPanel.innerHTML = `<p class="muted">No ${escapeHtml(label)} candidate found right now.</p>`;
       return;
     }
