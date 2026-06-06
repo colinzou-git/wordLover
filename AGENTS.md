@@ -4,11 +4,21 @@ This file provides guidance to Codex when working with code in this repository.
 
 ## What this is
 
-WordLover or WordFan is a local-first vocabulary/dictionary PWA. The runtime app is plain HTML/JS/CSS served from `apps/wordlover-pwa/public/` — there is no bundler, no `package.json`, no `node_modules`. The current build is `app.js` + `sw.js` loaded directly as ES modules. 
+WordLover or WordFan is a local-first vocabulary/dictionary PWA. The runtime app is plain HTML/JS/CSS served from `apps/wordlover-pwa/public/` — no bundler, no `node_modules` at runtime. The current build is `app.js` + `sw.js` loaded directly as ES modules. `apps/wordlover-pwa/package.json` exists for validation and test scripts only; it does not bundle anything into `public/`.
+
+**npm scripts (from `apps/wordlover-pwa/`):**
+
+| Script | What it does |
+|--------|-------------|
+| `npm run build` | Shell-asset existence check + cache-version lockstep; required before every release |
+| `npm run test` | Alias for `npm run build` |
+| `npm run test:browser` | In-browser automated suite via Playwright — requires a running server and a dictionary |
+| `npm run ci:dictionary` | Creates the minimal CI dictionary fixture (`dictionary.sqlite` + `.zst` + manifest) |
+| `npm run test:browser:ci` | Creates CI dictionary, starts a local server, runs the browser suite, stops the server |
 
 Platform priority is deliberate and load-bearing: **iPhone first, Windows second (used as the automation/stress-test fallback for anything that can't be automated on iPhone), Android deferred**. Don't add Android-specific code paths or polish before iPhone and Windows are stable.
 
-Before search code, read docs/ai/AUTO_SYMBOL_MAP.md. So that save tokens.
+Before searching code, read docs/ai/AUTO_SYMBOL_MAP.md to save tokens.
 
 ## Two run paths (deliberate, both needed)
 
@@ -18,7 +28,7 @@ Before search code, read docs/ai/AUTO_SYMBOL_MAP.md. So that save tokens.
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\start-windows.ps1 -Port 4173
 ```
 
-Then open `http://127.0.0.1:4173/?fresh=v34` (the `?fresh=...` cache-buster matters — see "Cache versioning" below). The automated suite lives at `/automated-tests.html?fresh=v34` and is run by clicking **Run automated tests** in the page, or with `?autorun=1`. Results JSON is POSTed to `/__test_results` (HTTPS server only) and saved under `apps/wordlover-pwa/received-results/` (gitignored).
+Then open `http://127.0.0.1:4173/?fresh=latest` (the `?fresh=...` cache-buster matters — see "Cache versioning" below). The automated suite lives at `/automated-tests.html?fresh=latest` and is run by clicking **Run automated tests** in the page, or with `?autorun=1`. Results JSON is POSTed to `/__test_results` (HTTPS server only) and saved under `apps/wordlover-pwa/received-results/` (gitignored).
 
 ### iPhone (HTTPS, required because PWA APIs need a secure context)
 
@@ -55,7 +65,7 @@ Source dataset details (counts, TOEFL coverage, source priority for meaning disp
 The service worker pre-caches a fixed list of versioned URLs. Three things must move together when shipping changes that affect the app shell:
 
 1. `CACHE_NAME` and `SHELL_CACHE_VERSION` constant (`sw.js` line 1, `app.js` near top, `automated-tests.js` `SHELL_CACHE_NAME`) — bump to the new shell version.
-2. `?v=YYYYMMDD-N` query strings on every shell asset reference in `index.html`, `automated-tests.html`, `sw.js` `SHELL_ASSETS`, and `automated-tests.js` `SHELL_ASSETS` — bump in lockstep.
+2. `?v=YYYYMMDD-N` query strings on every shell asset reference in `index.html`, `automated-tests.html`, `sw.js` `REQUIRED_SHELL_ASSETS`, and `automated-tests.js` `SHELL_ASSETS` — bump in lockstep. (`sw.js` also has `OPTIONAL_SHELL_ASSETS` for experimental/test-only files; those use versioned URLs too when present, but their absence does not fail the service-worker install.)
 3. `APP_VERSION` in `app.js` (user-visible in the menu).
 
 If you only bump one, users will see a stale shell, or the service worker will fail to pre-cache (mismatched URLs), or the automated test suite's shell-cache readiness check will report the wrong version. The service worker is **never** allowed to call `skipWaiting()` during install — only after the user clicks **Apply update** in the menu (the app posts a `SKIP_WAITING` message). Don't bypass this; the manual update flow is a product requirement, not an oversight.

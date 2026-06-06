@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\s
 Then open:
 
 ```text
-http://127.0.0.1:4173/?fresh=v34
+http://127.0.0.1:4173/?fresh=latest
 ```
 
 Keep that PowerShell window open while using WordLover. If the server is closed, an already-open browser tab can still show the app shell from cache, but first-time dictionary install cannot fetch `dictionary.sqlite`.
@@ -35,7 +35,7 @@ When the app asks to unlock encrypted local data on Windows, enter the passphras
 To run the automated suite, open:
 
 ```text
-http://127.0.0.1:4173/automated-tests.html?fresh=v34
+http://127.0.0.1:4173/automated-tests.html?fresh=latest
 ```
 
 If the test suite shows `Dictionary fetch failed before an HTTP response`, the browser tab is still open but the local server is not running. Start the server again, reload the page, and rerun the suite.
@@ -49,6 +49,23 @@ To create the compressed production dictionary package:
 ```powershell
 python -m pip install zstandard
 python scripts\package_dictionary_web.py --copy-sqlite
+```
+
+## Local test commands (from apps/wordlover-pwa/)
+
+Run the same checks that CI runs, from a fresh checkout:
+
+```powershell
+# Static checks (JS syntax + version lockstep + shell-asset manifest)
+npm run build
+
+# In-browser automated suite — requires a running server and a dictionary
+# Option A: you already have a server running on port 4173
+npm run test:browser
+
+# Option B: one-shot — creates CI dictionary, starts a temp server, runs suite, stops it
+python -m pip install playwright && python -m playwright install chromium
+npm run test:browser:ci
 ```
 
 ## CI Dictionary Fixture

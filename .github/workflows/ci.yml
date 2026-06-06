@@ -17,13 +17,8 @@ jobs:
           node-version: "20"
 
       - name: Syntax-check shell JavaScript
-        run: |
-          set -e
-          cd apps/wordlover-pwa/public
-          for f in app.js sw.js automated-tests.js wordlover-config.js wa-sqlite-opfs-worker.js; do
-            echo "node --check $f"
-            node --check "$f"
-          done
+        working-directory: apps/wordlover-pwa
+        run: node scripts/check-js-syntax.mjs
 
       - uses: actions/setup-python@v5
         with:
@@ -65,7 +60,21 @@ jobs:
           done
 
       - name: Run headless smoke test
-        run: python apps/wordlover-pwa/scripts/smoke-headless.py --base http://127.0.0.1:4173
+        run: >
+          python apps/wordlover-pwa/scripts/smoke-headless.py
+          --base http://127.0.0.1:4173
+          --report apps/wordlover-pwa/test-results/smoke-report.json
 
       - name: Run browser automated suite
-        run: python apps/wordlover-pwa/scripts/run-browser-tests.py --base http://127.0.0.1:4173
+        run: >
+          python apps/wordlover-pwa/scripts/run-browser-tests.py
+          --base http://127.0.0.1:4173
+          --report apps/wordlover-pwa/test-results/browser-report.json
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: apps/wordlover-pwa/test-results/
+          if-no-files-found: ignore

@@ -15,5 +15,6 @@ apps/wordlover-pwa/.offline-test-stopped.pid
 apps/wordlover-pwa/server.*.log
 apps/wordlover-pwa/certs/
 apps/wordlover-pwa/received-results/
+apps/wordlover-pwa/test-results/
 __pycache__/
 *.pyc
