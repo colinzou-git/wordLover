@@ -789,6 +789,13 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
     return { passphrase: await getLocalDataPassphrase(), source: "development-override-local-passphrase" };
   }
   if (backupPassphraseSession) return { passphrase: backupPassphraseSession, source: "user-backup-passphrase" };
+  // Recover session from persisted storage before prompting. backupPassphrasePersisted is only
+  // written after successful verification, so it is safe to use without re-verifying.
+  const persisted = await loadValue("backupPassphrasePersisted", null);
+  if (persisted) {
+    backupPassphraseSession = persisted;
+    return { passphrase: persisted, source: "user-backup-passphrase" };
+  }
   const verifier = await loadValue("backupPassphraseVerifier", null);
   if (!verifier) {
     if (!allowCreate) {
