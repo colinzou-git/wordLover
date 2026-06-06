@@ -1291,6 +1291,7 @@ async function runMainAppStudySmoke() {
       historyGranularity: "weeks",
       fontScale: 1.3,
       goalsPeriod: "week",
+      studyOneMoreLevel: "hard",
     });
     const uiPreferenceSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
     const uiPreferencesIncludedInSnapshot =
@@ -1299,7 +1300,8 @@ async function runMainAppStudySmoke() {
       && uiPreferenceSnapshot.uiPreferences?.historyTrack === "spelling"
       && uiPreferenceSnapshot.uiPreferences?.historyGranularity === "weeks"
       && uiPreferenceSnapshot.uiPreferences?.fontScale === 1.3
-      && uiPreferenceSnapshot.uiPreferences?.goalsPeriod === "week";
+      && uiPreferenceSnapshot.uiPreferences?.goalsPeriod === "week"
+      && uiPreferenceSnapshot.uiPreferences?.studyOneMoreLevel === "hard";
     frame.src = `/?suite-study-smoke=${Date.now()}&prefs-reload=1`;
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -1322,6 +1324,7 @@ async function runMainAppStudySmoke() {
     frameWindow = frame.contentWindow;
     frameDocument = frame.contentDocument;
     const reloadedUiPreferences = frameWindow.WordLoverApp.uiPreferences.state();
+    const reloadedStudyOneMoreLevelSelect = frameDocument.querySelector("#studyOneMoreLevel");
     const uiPreferencesSurviveReload =
       reloadedUiPreferences.todayTrack === "spelling"
       && reloadedUiPreferences.vocabularyTrack === "spelling"
@@ -1329,9 +1332,24 @@ async function runMainAppStudySmoke() {
       && reloadedUiPreferences.historyGranularity === "weeks"
       && reloadedUiPreferences.fontScale === 1.3
       && reloadedUiPreferences.goalsPeriod === "week"
+      && reloadedUiPreferences.studyOneMoreLevel === "hard"
+      && reloadedStudyOneMoreLevelSelect?.value === "hard"
       && uiPreferencesIncludedInSnapshot;
     if (!uiPreferencesSurviveReload) {
-      throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
+      throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, reloadedStudyOneMoreLevelSelectValue: reloadedStudyOneMoreLevelSelect?.value, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
+    }
+
+    // Verify selector change event persists studyOneMoreLevel
+    const studyOneMoreLevelSelectEl = frameDocument.querySelector("#studyOneMoreLevel");
+    if (studyOneMoreLevelSelectEl) {
+      studyOneMoreLevelSelectEl.value = "medium";
+      studyOneMoreLevelSelectEl.dispatchEvent(new frameWindow.Event("change", { bubbles: true }));
+      await new Promise((resolve) => frameWindow.setTimeout(resolve, 100));
+      const afterChangeSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
+      const selectorChangePersists = afterChangeSnapshot.uiPreferences?.studyOneMoreLevel === "medium";
+      if (!selectorChangePersists) {
+        throw new Error(`studyOneMoreLevel selector change should persist: got ${afterChangeSnapshot.uiPreferences?.studyOneMoreLevel}`);
+      }
     }
 
     await frameWindow.WordLoverApp.auth.setGrantForTest(true);

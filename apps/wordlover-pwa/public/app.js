@@ -301,6 +301,7 @@ function currentUiPreferences() {
     historyGranularity: normalizeHistoryGranularity(historyView.granularity),
     fontScale: normalizeFontScale(fontScale),
     goalsPeriod: normalizeGoalsPeriod(goalsPeriod),
+    studyOneMoreLevel: normalizeStudyOneMoreLevel(studyOneMoreLevel),
   };
 }
 
@@ -317,6 +318,8 @@ function applyUiPreferences(preferences = {}) {
   };
   if (preferences.fontScale !== undefined) applyFontScale(preferences.fontScale);
   goalsPeriod = normalizeGoalsPeriod(preferences.goalsPeriod ?? goalsPeriod);
+  studyOneMoreLevel = normalizeStudyOneMoreLevel(preferences.studyOneMoreLevel ?? studyOneMoreLevel);
+  if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.value = studyOneMoreLevel;
   return currentUiPreferences();
 }
 
@@ -328,6 +331,7 @@ function normalizeUiPreferences(preferences = {}, fallback = currentUiPreference
     historyGranularity: normalizeHistoryGranularity(preferences.historyGranularity ?? fallback.historyGranularity),
     fontScale: normalizeFontScale(preferences.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE),
     goalsPeriod: normalizeGoalsPeriod(preferences.goalsPeriod ?? fallback.goalsPeriod ?? "day"),
+    studyOneMoreLevel: normalizeStudyOneMoreLevel(preferences.studyOneMoreLevel ?? fallback.studyOneMoreLevel ?? "very_easy"),
   };
 }
 
@@ -7612,6 +7616,7 @@ studyNewWordButton.addEventListener("click", () => {
 
 studyOneMoreLevelSelect?.addEventListener("change", () => {
   studyOneMoreLevel = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect.value);
+  void persistUiPreferences();
 });
 
 startSpellingReviewButton?.addEventListener("click", () => {
