@@ -52,6 +52,12 @@ const APP_KV_STORE = "kv";
 const APP_VOCABULARY_STORE = "vocabularyRecords";
 const APP_STUDY_EVENT_STORE = "studyEventRecords";
 const APP_KNOWN_STORE = "knownRecords";
+const APP_FILE_STORE = "files";
+const APP_KEY_STORE = "keys";
+const APP_SPELLING_STORE = "spellingRecords";
+const APP_SPELLING_EVENT_STORE = "spellingEventRecords";
+const APP_USER_DICTIONARY_STORE = "userDictionary";
+const APP_CHECKPOINT_STORE = "checkpoints";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
@@ -160,13 +166,36 @@ function openAppDb() {
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(APP_KV_STORE)) db.createObjectStore(APP_KV_STORE);
+      if (!db.objectStoreNames.contains(APP_FILE_STORE)) db.createObjectStore(APP_FILE_STORE);
+      if (!db.objectStoreNames.contains(APP_KEY_STORE)) db.createObjectStore(APP_KEY_STORE);
       if (!db.objectStoreNames.contains(APP_VOCABULARY_STORE)) db.createObjectStore(APP_VOCABULARY_STORE);
       if (!db.objectStoreNames.contains(APP_STUDY_EVENT_STORE)) db.createObjectStore(APP_STUDY_EVENT_STORE);
+      if (!db.objectStoreNames.contains(APP_SPELLING_STORE)) db.createObjectStore(APP_SPELLING_STORE);
+      if (!db.objectStoreNames.contains(APP_SPELLING_EVENT_STORE)) db.createObjectStore(APP_SPELLING_EVENT_STORE);
+      if (!db.objectStoreNames.contains(APP_USER_DICTIONARY_STORE)) db.createObjectStore(APP_USER_DICTIONARY_STORE);
       if (!db.objectStoreNames.contains(APP_KNOWN_STORE)) db.createObjectStore(APP_KNOWN_STORE);
+      if (!db.objectStoreNames.contains(APP_CHECKPOINT_STORE)) db.createObjectStore(APP_CHECKPOINT_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+async function runAppDbSchemaTest() {
+  const REQUIRED_STORES = [
+    APP_KV_STORE, APP_FILE_STORE, APP_KEY_STORE,
+    APP_VOCABULARY_STORE, APP_STUDY_EVENT_STORE,
+    APP_SPELLING_STORE, APP_SPELLING_EVENT_STORE,
+    APP_USER_DICTIONARY_STORE, APP_KNOWN_STORE, APP_CHECKPOINT_STORE,
+  ];
+  try {
+    const db = await openAppDb();
+    const missing = REQUIRED_STORES.filter((name) => !db.objectStoreNames.contains(name));
+    db.close();
+    return { passed: missing.length === 0, missing, checked: REQUIRED_STORES };
+  } catch (error) {
+    return { passed: false, error: String(error), missing: REQUIRED_STORES, checked: REQUIRED_STORES };
+  }
 }
 
 async function putAppStoreValue(storeName, key, value) {
@@ -2539,6 +2568,9 @@ async function runAllPocs() {
   addProgress("Running Study One More skip cooldown and ignore test.");
   const studyOneMoreSkipCooldown = await runStudyOneMoreSkipCooldownTest();
 
+  addProgress("Checking app DB schema has all required object stores.");
+  const appDbSchema = await runAppDbSchemaTest();
+
   addProgress("Fetching current SQLite dictionary.");
   let dictionary = await fetchDictionary();
   const dictionaryFetchMetrics = dictionary.metrics;
@@ -2596,6 +2628,7 @@ async function runAllPocs() {
       checkpointRollback: checkpointRollback.passed ? "pass" : "fail",
       earlyPracticePersistence: earlyPracticePersistence.passed ? "pass" : "fail",
       studyOneMoreSkipCooldown: studyOneMoreSkipCooldown.passed ? "pass" : "fail",
+      appDbSchema: appDbSchema.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
@@ -2611,6 +2644,7 @@ async function runAllPocs() {
     checkpointRollback,
     earlyPracticePersistence,
     studyOneMoreSkipCooldown,
+    appDbSchema,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
     benchmark,

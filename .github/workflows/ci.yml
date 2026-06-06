@@ -27,6 +27,9 @@ jobs:
       - name: Verify cache-version lockstep
         run: python apps/wordlover-pwa/scripts/check_versions.py
 
+      - name: Check symbol map is up to date
+        run: python scripts/generate_code_map.py --check
+
       - name: Validate public shell assets
         working-directory: apps/wordlover-pwa
         run: npm run validate:shell-assets
