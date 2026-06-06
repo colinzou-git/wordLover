@@ -736,6 +736,7 @@ async function clearBackupPassphraseForTest() {
   backupPassphraseSession = null;
   backupPassphrasePromptForTest = null;
   await saveValue("backupPassphraseVerifier", null);
+  await saveValue("backupPassphrasePersisted", null);
 }
 
 function validateBackupPassphrase(passphrase, confirm, { create = false } = {}) {
@@ -793,11 +794,13 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
     if (!allowCreate) {
       const passphrase = await promptForBackupPassphrase({ create: false, reason });
       backupPassphraseSession = passphrase;
+      // Don't persist yet — passphrase is unverified until decryption succeeds.
       return { passphrase, source: "unverified-user-backup-passphrase" };
     }
     const passphrase = await promptForBackupPassphrase({ create: true, reason });
     await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
     backupPassphraseSession = passphrase;
+    await saveValue("backupPassphrasePersisted", passphrase);
     return { passphrase, source: "user-backup-passphrase" };
   }
   const passphrase = await promptForBackupPassphrase({ create: false, reason });
@@ -805,6 +808,7 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
     throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
   }
   backupPassphraseSession = passphrase;
+  await saveValue("backupPassphrasePersisted", passphrase);
   return { passphrase, source: "user-backup-passphrase" };
 }
 
@@ -5233,6 +5237,7 @@ async function decryptSnapshotPayload(envelope, options = {}) {
       if (passphraseInfo.source === "unverified-user-backup-passphrase") {
         await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphraseInfo.passphrase));
         backupPassphraseSession = passphraseInfo.passphrase;
+        await saveValue("backupPassphrasePersisted", passphraseInfo.passphrase);
       }
       return snapshot;
     } catch {
@@ -6604,22 +6609,7 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
 }
 
 function exportState() {
-  const payload = {
-    exportedAt: nowIso(),
-    app: "wordlover",
-    appVersion: APP_VERSION,
-    userDataFormatVersion: USER_DATA_FORMAT_VERSION,
-    historyItems,
-    vocabularyItems,
-    studyEvents,
-    spellingItems,
-    spellingEvents,
-    userDictionary: userDictionaryEntries,
-    onReturnAction,
-    speakOnReturn,
-    autosaveEnabled,
-    lastMetrics,
-  };
+  const payload = buildUserDataSnapshot();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -6848,6 +6838,8 @@ async function init() {
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));
+  const savedBackupPassphrase = await loadValue("backupPassphrasePersisted", null);
+  if (savedBackupPassphrase) backupPassphraseSession = savedBackupPassphrase;
   lastSyncSummary = await loadValue("lastSyncSummary", null);
   const savedAuth = await loadValue("googleAuth", null);
   if (savedAuth && typeof savedAuth === "object") {
@@ -7579,9 +7571,11 @@ googleSignOutButton.addEventListener("click", async () => {
   }
   googleAuth = { accessToken: null, expiresAt: 0, profile: null, scopes: [] };
   googleGrantGranted = false;
+  backupPassphraseSession = null;
   await saveValue("googleProfile", null);
   await saveValue("googleAuth", null);
   await saveValue("googleGrant", false);
+  await saveValue("backupPassphrasePersisted", null);
   stopAutoSync();
   renderAppMenu();
 });

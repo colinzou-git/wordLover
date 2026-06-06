@@ -2046,8 +2046,8 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d{4})?-v109/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260606-1400-v109") {
-      throw new Error(`App update check did not expose the current v109 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d+)?-v110/i.test(updateStatusText) && !/v110/.test(updateCheckResult?.deviceVersion ?? "")) {
+      throw new Error(`App update check did not expose the current v110 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
@@ -2435,6 +2435,50 @@ async function collectDeviceDiagnostics() {
   };
 }
 
+async function runManualExportFieldsTest() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-export-fields=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Manual export fields test timed out waiting for app load."));
+        }
+      }, 250);
+    });
+
+    const snapshot = frame.contentWindow.WordLoverApp.buildUserDataSnapshot();
+    const hasKnownWords = "knownWords" in snapshot && Array.isArray(snapshot.knownWords);
+    const hasUiPreferencesStudyOneMoreLevel = typeof snapshot.uiPreferences?.studyOneMoreLevel === "string";
+    const hasStudyGoals = "studyGoals" in snapshot;
+    const hasTheme = "theme" in snapshot;
+    const hasVocabularyItems = "vocabularyItems" in snapshot && Array.isArray(snapshot.vocabularyItems);
+    const hasStudyEvents = "studyEvents" in snapshot && Array.isArray(snapshot.studyEvents);
+    const hasSpellingItems = "spellingItems" in snapshot && Array.isArray(snapshot.spellingItems);
+    const hasSpellingEvents = "spellingEvents" in snapshot && Array.isArray(snapshot.spellingEvents);
+
+    const passed = hasKnownWords && hasUiPreferencesStudyOneMoreLevel && hasStudyGoals && hasTheme
+      && hasVocabularyItems && hasStudyEvents && hasSpellingItems && hasSpellingEvents;
+    if (!passed) {
+      throw new Error(`Manual export snapshot missing required fields: ${JSON.stringify({ hasKnownWords, hasUiPreferencesStudyOneMoreLevel, hasStudyGoals, hasTheme, hasVocabularyItems, hasStudyEvents, hasSpellingItems, hasSpellingEvents })}`);
+    }
+    return { passed, hasKnownWords, hasUiPreferencesStudyOneMoreLevel, hasStudyGoals, hasTheme, hasVocabularyItems, hasStudyEvents, hasSpellingItems, hasSpellingEvents };
+  } finally {
+    frame.remove();
+  }
+}
+
 function runModuleSmokeTests() {
   const failures = [];
   function assert(label, got, expected) {
@@ -2568,6 +2612,9 @@ async function runAllPocs() {
   addProgress("Running Study One More skip cooldown and ignore test.");
   const studyOneMoreSkipCooldown = await runStudyOneMoreSkipCooldownTest();
 
+  addProgress("Verifying manual export snapshot includes all required fields.");
+  const manualExportFields = await runManualExportFieldsTest();
+
   addProgress("Checking app DB schema has all required object stores.");
   const appDbSchema = await runAppDbSchemaTest();
 
@@ -2628,6 +2675,7 @@ async function runAllPocs() {
       checkpointRollback: checkpointRollback.passed ? "pass" : "fail",
       earlyPracticePersistence: earlyPracticePersistence.passed ? "pass" : "fail",
       studyOneMoreSkipCooldown: studyOneMoreSkipCooldown.passed ? "pass" : "fail",
+      manualExportFields: manualExportFields.passed ? "pass" : "fail",
       appDbSchema: appDbSchema.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
@@ -2644,6 +2692,7 @@ async function runAllPocs() {
     checkpointRollback,
     earlyPracticePersistence,
     studyOneMoreSkipCooldown,
+    manualExportFields,
     appDbSchema,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
