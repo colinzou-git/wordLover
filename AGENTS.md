@@ -108,7 +108,7 @@ python apps\wordlover-pwa\scripts\smoke-headless.py
 
 It is not a replacement for the in-browser `automated-tests.html` suite (which exercises service worker readiness, OPFS persistence, encrypted export/import, mock sync, and timed lookup benchmarks) but it is the cheapest way to catch a regression in the main app shell before paying for an iPhone validation cycle.
 
-To create PR, use gh installed at: C:\Program Files\GitHub CLI\gh.exe
+To create PR or run GitHub actions, use gh installed at: C:\Program Files\GitHub CLI\gh.exe
 
 At the end of a run, do the following:
 Report the new source files introduced. Otherwise, print 'No new source files added.'

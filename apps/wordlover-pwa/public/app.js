@@ -740,6 +740,7 @@ async function clearBackupPassphraseForTest() {
 }
 
 function validateBackupPassphrase(passphrase, confirm, { create = false } = {}) {
+  if (!create) return null;
   const POLICY_MSG = "Backup passphrase is too simple. Use at least 12 characters and include uppercase letters, lowercase letters, numbers, and symbols, or use a longer 20+ character passphrase made of several words.";
   if (passphrase.length < 12) return POLICY_MSG;
   const lower = passphrase.toLowerCase();
@@ -751,7 +752,7 @@ function validateBackupPassphrase(passphrase, confirm, { create = false } = {}) 
     const categories = [/[A-Z]/.test(passphrase), /[a-z]/.test(passphrase), /[0-9]/.test(passphrase), /[^A-Za-z0-9]/.test(passphrase)].filter(Boolean).length;
     if (categories < 3) return POLICY_MSG;
   }
-  if (create && passphrase !== confirm) return "Backup passphrases do not match.";
+  if (passphrase !== confirm) return "Backup passphrases do not match.";
   return null;
 }
 
