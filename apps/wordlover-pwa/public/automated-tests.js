@@ -1352,6 +1352,52 @@ async function runMainAppStudySmoke() {
       }
     }
 
+    // Regression: level set via selector change must survive a full page reload (not reset to very_easy)
+    const regressionSelectorEl = frameDocument.querySelector("#studyOneMoreLevel");
+    if (!regressionSelectorEl) throw new Error("Regression setup: #studyOneMoreLevel missing from frame DOM");
+    frameWindow.WordLoverApp.studyOneMore.setLevel("hard");
+    regressionSelectorEl.dispatchEvent(new frameWindow.Event("change", { bubbles: true }));
+    await new Promise((resolve) => frameWindow.setTimeout(resolve, 200));
+    frame.src = `/?suite-study-smoke=${Date.now()}&level-persist-reload=1`;
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const input = frame.contentDocument?.querySelector("#termInput");
+        const loaded = Boolean(frame.contentWindow?.WordLoverApp?.getState?.().loaded && input && !input.disabled);
+        if (loaded) { window.clearInterval(timer); resolve(); return; }
+        if (performance.now() - startedAt > 30000) {
+          window.clearInterval(timer);
+          reject(new Error("Timed out waiting for level-persist-reload."));
+        }
+      }, 250);
+    });
+    frameWindow = frame.contentWindow;
+    frameDocument = frame.contentDocument;
+    const levelAfterReload = frameWindow.WordLoverApp.uiPreferences.state().studyOneMoreLevel;
+    const selectValAfterReload = frameDocument.querySelector("#studyOneMoreLevel")?.value;
+    if (levelAfterReload !== "hard" || selectValAfterReload !== "hard") {
+      throw new Error(`studyOneMoreLevel set via selector change must survive reload: state=${levelAfterReload}, select=${selectValAfterReload}`);
+    }
+    let selectorLevelCapturedByPick = null;
+    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(({ level }) => { selectorLevelCapturedByPick = level; });
+    frameDocument.querySelector("#studyNewWord")?.click();
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (selectorLevelCapturedByPick !== null) { window.clearInterval(timer); resolve(); return; }
+        if (performance.now() - startedAt > 5000) {
+          window.clearInterval(timer);
+          reject(new Error("Timed out waiting for startNewWordStudy hook after level-persist reload."));
+        }
+      }, 50);
+    });
+    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(null);
+    if (selectorLevelCapturedByPick !== "hard") {
+      throw new Error(`startNewWordStudy must use persisted "hard" level after reload, got "${selectorLevelCapturedByPick}"`);
+    }
+    frameWindow.WordLoverApp.studyOneMore.setLevel("very_easy");
+
     await frameWindow.WordLoverApp.auth.setGrantForTest(true);
     frameWindow.WordLoverApp.auth.clearTokenForTest();
     const expiredAuthStatus = frameWindow.WordLoverApp.auth.statusText();
@@ -1980,6 +2026,7 @@ async function runMainAppStudySmoke() {
       applyAfterCheckStatus: applyAfterCheck?.status,
       updateCheckStatus: updateCheckResult?.status,
       studyOneMoreMissCreatesAgainReview,
+      studyOneMoreLevelPersistsViaSelector: true,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,
