@@ -2,7 +2,72 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260606-1";
+} from "./fsrs-scheduler.js?v=20260606-2";
+
+import {
+  isEncryptedRecord,
+  bytesToBase64,
+  base64ToBytes,
+  checksumText,
+  derivePassphraseAesKey,
+  deriveKek,
+  encryptJsonWithPassphrase,
+  decryptJsonWithPassphrase,
+} from "./persistence.js?v=20260606-2";
+
+import {
+  ratingFromRetries,
+  spellingThreshold as _spellingThreshold,
+} from "./spelling.js?v=20260606-2";
+
+import {
+  STUDY_ONE_MORE_LEVELS,
+  DEFAULT_FONT_SCALE,
+  FONT_SCALE_MIN,
+  FONT_SCALE_MAX,
+  FONT_SCALE_STEP,
+  normalizeTrack,
+  normalizeHistoryGranularity,
+  normalizeGoalsPeriod,
+  normalizeStudyOneMoreLevel,
+  normalizeFontScale,
+  normalizeUiPreferences as _normalizeUiPreferences,
+} from "./ui-preferences.js?v=20260606-2";
+
+import {
+  createFsrsCard,
+  normalizeReviewState as _normalizeReviewState,
+  rebuildReviewStateFromEvents,
+  rebuildItemsReviewStateFromEvents,
+} from "./review-state.js?v=20260606-2";
+
+import {
+  STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
+  frequencyRankOf,
+  hasToeflTag,
+  fallbackStudyOneMoreLevel,
+  candidateMatchesStudyOneMoreLevel,
+  normalizeStudyOneMoreCandidateRow,
+  introducedByStudyOneMore,
+  buildStudyOneMoreExclusionSets as _buildStudyOneMoreExclusionSets,
+  studyOneMoreExclusionReason,
+  studyOneMoreCandidateAllowed,
+  pickStudyOneMoreCandidateFromRows,
+  pickStudyOneMoreCandidateFromOrderedRows,
+  studyOneMoreRankSql,
+  studyOneMoreLevelSql,
+} from "./study-one-more.js?v=20260606-2";
+
+import {
+  studyEventTrack,
+  computeStudyEventKey,
+  mergeStudyEventSources,
+  mergeHistoryItems,
+  mergeKnownSources,
+  activeStudyTermsFromItems,
+  mergeVocabularySources as _mergeVocabularySources,
+  mergeUserDictionarySources,
+} from "./sync.js?v=20260606-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -109,19 +174,15 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260606-1400-v109";
+const APP_VERSION = "0.6.2-product.20260606-2-v110";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v109";
+const SHELL_CACHE_VERSION = "wordlover-shell-v110";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
 const DEFAULT_THEME = "sunrise";
-const DEFAULT_FONT_SCALE = 1;
-const FONT_SCALE_MIN = 0.9;
-const FONT_SCALE_MAX = 2;
-const FONT_SCALE_STEP = 0.1;
 const DEBUG_DAY_MS = 20 * 1000;
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
@@ -144,15 +205,6 @@ const FSRS_RATING_LABELS = {
 };
 const FSRS_RATINGS = Object.keys(FSRS_RATING_LABELS);
 const VOCABULARY_PAGE_SIZE = 10;
-const STUDY_ONE_MORE_LEVELS = [
-  { id: "very_easy", label: "Very Easy" },
-  { id: "easy", label: "Easy" },
-  { id: "medium", label: "Medium" },
-  { id: "hard", label: "Hard" },
-  { id: "advanced", label: "Advanced" },
-  { id: "toefl", label: "TOEFL" },
-];
-const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
 const GEMINI_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -282,18 +334,6 @@ function isValidFsrsRating(rating) {
   return FSRS_RATINGS.includes(String(rating ?? "").toLowerCase());
 }
 
-function normalizeTrack(value) {
-  return value === "spelling" ? "spelling" : "vocabulary";
-}
-
-function normalizeHistoryGranularity(value) {
-  return ["days", "weeks", "months"].includes(value) ? value : "days";
-}
-
-function normalizeGoalsPeriod(value) {
-  return ["day", "week", "month"].includes(value) ? value : "day";
-}
-
 function currentUiPreferences() {
   return {
     todayTrack: normalizeTrack(todayTrack),
@@ -325,15 +365,7 @@ function applyUiPreferences(preferences = {}) {
 }
 
 function normalizeUiPreferences(preferences = {}, fallback = currentUiPreferences()) {
-  return {
-    todayTrack: normalizeTrack(preferences.todayTrack ?? fallback.todayTrack),
-    vocabularyTrack: normalizeTrack(preferences.vocabularyTrack ?? fallback.vocabularyTrack),
-    historyTrack: normalizeTrack(preferences.historyTrack ?? fallback.historyTrack),
-    historyGranularity: normalizeHistoryGranularity(preferences.historyGranularity ?? fallback.historyGranularity),
-    fontScale: normalizeFontScale(preferences.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE),
-    goalsPeriod: normalizeGoalsPeriod(preferences.goalsPeriod ?? fallback.goalsPeriod ?? "day"),
-    studyOneMoreLevel: normalizeStudyOneMoreLevel(preferences.studyOneMoreLevel ?? fallback.studyOneMoreLevel ?? "very_easy"),
-  };
+  return _normalizeUiPreferences(preferences, fallback);
 }
 
 async function persistUiPreferences() {
@@ -570,30 +602,6 @@ async function loadAllRawValues(storeName) {
   return requestToPromise(tx.objectStore(storeName).getAll());
 }
 
-function isEncryptedRecord(value) {
-  return Boolean(value && value.__encrypted === true && value.iv && value.ciphertext);
-}
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function base64ToBytes(value) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-function checksumText(value) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
 function snapshotIntegrity(snapshot) {
   const vocabularyCount = Array.isArray(snapshot.vocabularyItems) ? snapshot.vocabularyItems.length : 0;
   const studyEventCount = Array.isArray(snapshot.studyEvents) ? snapshot.studyEvents.length : 0;
@@ -674,20 +682,6 @@ function validateUserDataSnapshot(snapshot) {
   return snapshotIntegrity(snapshot);
 }
 
-async function deriveKek(passphrase, salt) {
-  return derivePassphraseAesKey(passphrase, salt, ["wrapKey", "unwrapKey"]);
-}
-
-async function derivePassphraseAesKey(passphrase, salt, usages) {
-  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
-    material,
-    { name: "AES-GCM", length: 256 },
-    false,
-    usages,
-  );
-}
 
 const DEFAULT_LOCAL_PASSPHRASE = "wordlover-localhost-development-passphrase";
 
@@ -812,30 +806,6 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
   }
   backupPassphraseSession = passphrase;
   return { passphrase, source: "user-backup-passphrase" };
-}
-
-async function encryptJsonWithPassphrase(value, passphrase, usages = ["encrypt"]) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await derivePassphraseAesKey(passphrase, salt, usages);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify(value));
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
-  return {
-    kdf: "PBKDF2-SHA256",
-    iterations: 200000,
-    salt: bytesToBase64(salt),
-    iv: bytesToBase64(iv),
-    data: bytesToBase64(ciphertext),
-  };
-}
-
-async function decryptJsonWithPassphrase(envelope, passphrase) {
-  const salt = base64ToBytes(envelope.salt);
-  const key = await derivePassphraseAesKey(passphrase, salt, ["decrypt"]);
-  const iv = base64ToBytes(envelope.iv);
-  const ciphertext = base64ToBytes(envelope.data);
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
-  return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
 function showDataDecryptWarning() {
@@ -1151,12 +1121,6 @@ function renderAppMenu() {
 function applyTheme(nextTheme) {
   theme = THEME_IDS.includes(nextTheme) ? nextTheme : DEFAULT_THEME;
   document.documentElement.dataset.theme = theme;
-}
-
-function normalizeFontScale(nextScale) {
-  const numeric = Number(nextScale);
-  if (!Number.isFinite(numeric)) return DEFAULT_FONT_SCALE;
-  return Math.round(clamp(numeric, FONT_SCALE_MIN, FONT_SCALE_MAX) * 10) / 10;
 }
 
 function renderFontZoomControls() {
@@ -2048,186 +2012,14 @@ function summarizeLines(lines) {
   return Array.isArray(lines) && lines.length ? lines.join("; ") : "No meaning yet";
 }
 
-function createFsrsCard(now = nowIso()) {
-  return serializeFsrsCard(reviveFsrsCard(null, now));
-}
-
-function fallbackReviewDueAt(review = {}) {
-  const existingDue = review.dueAt ?? review.fsrsCard?.due;
-  if (existingDue && Number.isFinite(Date.parse(existingDue))) return existingDue;
-  if (review.masteredAt || review.fsrsCard?.state === "mastered") {
-    const basis = Date.parse(review.lastReviewedAt ?? review.masteredAt ?? nowIso());
-    const preferred = Number.isFinite(basis) ? basis + 90 * NORMAL_DAY_MS : 0;
-    const future = Math.max(preferred, appNowMs() + NORMAL_DAY_MS);
-    return new Date(future).toISOString();
-  }
-  return nowIso();
-}
-
+// Wrapper: passes appNowMs() so debug-mode time scaling applies to FSRS due date computation.
 function normalizeReviewState(review = {}) {
-  const rawCard = review.fsrsCard && typeof review.fsrsCard === "object" ? { ...review.fsrsCard } : review.fsrsCard;
-  if (rawCard && review.dueAt) rawCard.due = review.dueAt;
-  const fsrsCard = serializeFsrsCard(reviveFsrsCard(rawCard, fallbackReviewDueAt(review)));
-  return {
-    ...review,
-    lastRating: review.lastRating ?? "again",
-    intervalDays: review.intervalDays ?? fsrsCard.scheduled_days ?? 0,
-    dueAt: fsrsCard.due,
-    reviewCount: review.reviewCount ?? 0,
-    lastReviewedAt: review.lastReviewedAt ?? null,
-    masteredAt: review.masteredAt ?? null,
-    fsrsCard,
-  };
+  return _normalizeReviewState(review, appNowMs());
 }
 
+// Wrapper: passes appNowMs() through to normalizeReviewState for each item's review.
 function mergeVocabularySources(recordItems, legacyItems) {
-  const byTerm = new Map();
-  for (const item of [...(legacyItems ?? []), ...(recordItems ?? [])]) {
-    if (!item?.term) continue;
-    const normalizedTerm = item.normalizedTerm ?? normalizeTerm(item.term);
-    const normalizedItem = {
-      ...item,
-      normalizedTerm,
-      review: normalizeReviewState(item.review ?? { dueAt: item.savedAt ?? nowIso() }),
-    };
-    const existing = byTerm.get(normalizedTerm);
-    if (!existing) {
-      byTerm.set(normalizedTerm, normalizedItem);
-      continue;
-    }
-    const existingUpdated = Date.parse(existing.updatedAt ?? existing.savedAt ?? 0) || 0;
-    const incomingUpdated = Date.parse(normalizedItem.updatedAt ?? normalizedItem.savedAt ?? 0) || 0;
-    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? { ...existing, ...normalizedItem } : { ...normalizedItem, ...existing });
-  }
-  return [...byTerm.values()].sort((left, right) => (right.savedAt ?? "").localeCompare(left.savedAt ?? ""));
-}
-
-function studyEventTrack(event = {}) {
-  if (event.track) return event.track;
-  return String(event.id ?? "").startsWith("spelling-") || Number.isFinite(Number(event.retries)) ? "spelling" : "vocabulary";
-}
-
-function computeStudyEventKey(event = {}) {
-  const track = normalizeTrack(studyEventTrack(event));
-  const type = event.type ?? "event";
-  const normalizedTerm = event.normalizedTerm ?? normalizeTerm(event.term ?? "");
-  const occurredAt = event.occurredAt ?? "";
-  const rating = event.rating ?? "";
-  const source = event.source ?? event.practiceMode ?? "";
-  if (!normalizedTerm || !occurredAt) return event.id ?? `${track}:${type}:${normalizedTerm || "unknown"}:${Date.now()}`;
-  return [track, type, normalizedTerm, occurredAt, rating, source].map((part) => encodeURIComponent(String(part ?? ""))).join("|");
-}
-
-function mergeStudyEventSources(recordEvents, legacyEvents) {
-  const byKey = new Map();
-  for (const event of [...(legacyEvents ?? []), ...(recordEvents ?? [])]) {
-    if (!event) continue;
-    const id = event.id ?? `${event.type ?? "event"}-${event.normalizedTerm ?? event.term ?? "unknown"}-${event.occurredAt ?? nowIso()}`;
-    const normalizedTerm = event.normalizedTerm ?? normalizeTerm(event.term ?? "");
-    const normalized = {
-      ...event,
-      id,
-      normalizedTerm,
-      eventKey: event.eventKey ?? computeStudyEventKey({ ...event, id, normalizedTerm }),
-    };
-    byKey.set(normalized.eventKey, normalized);
-  }
-  return [...byKey.values()].sort((left, right) => (left.occurredAt ?? "").localeCompare(right.occurredAt ?? ""));
-}
-
-function mergeHistoryItems(localItems, remoteItems) {
-  const byTerm = new Map();
-  const timeOf = (item) => Date.parse(item?.queriedAt ?? item?.searchedAt ?? 0) || 0;
-  for (const item of [...(remoteItems ?? []), ...(localItems ?? [])]) {
-    if (!item?.term) continue;
-    const at = item.queriedAt ?? item.searchedAt ?? null;
-    const normalizedItem = at ? { ...item, queriedAt: item.queriedAt ?? at, searchedAt: item.searchedAt ?? at } : item;
-    const existing = byTerm.get(item.term);
-    if (!existing) {
-      byTerm.set(item.term, normalizedItem);
-      continue;
-    }
-    if (timeOf(normalizedItem) >= timeOf(existing)) byTerm.set(item.term, normalizedItem);
-  }
-  return [...byTerm.values()]
-    .sort((left, right) => timeOf(right) - timeOf(left))
-    .slice(0, 10);
-}
-
-function mergeKnownSources(localKnown, remoteKnown, activeTerms = new Set()) {
-  const byTerm = new Map();
-  for (const record of [...(remoteKnown ?? []), ...(localKnown ?? [])]) {
-    if (!record?.term && !record?.normalizedTerm) continue;
-    const normalizedTerm = record.normalizedTerm ?? normalizeTerm(record.term);
-    if (!normalizedTerm || activeTerms.has(normalizedTerm)) continue;
-    const knownAt = record.knownAt ?? record.updatedAt ?? nowIso();
-    const incoming = {
-      ...record,
-      term: record.term ?? normalizedTerm,
-      normalizedTerm,
-      knownAt,
-      updatedAt: record.updatedAt ?? knownAt,
-      source: record.source ?? "study-one-more",
-    };
-    const existing = byTerm.get(normalizedTerm);
-    if (!existing) {
-      byTerm.set(normalizedTerm, incoming);
-      continue;
-    }
-    const existingUpdated = Date.parse(existing.updatedAt ?? existing.knownAt ?? 0) || 0;
-    const incomingUpdated = Date.parse(incoming.updatedAt ?? incoming.knownAt ?? 0) || 0;
-    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? { ...existing, ...incoming } : { ...incoming, ...existing });
-  }
-  return [...byTerm.values()].sort((left, right) => (right.knownAt ?? "").localeCompare(left.knownAt ?? ""));
-}
-
-function activeStudyTermsFromItems(vocabulary = [], spelling = []) {
-  const terms = new Set();
-  for (const item of [...(vocabulary ?? []), ...(spelling ?? [])]) {
-    if (item?.normalizedTerm && !item.archivedAt) terms.add(item.normalizedTerm);
-  }
-  return terms;
-}
-
-function rebuildReviewStateFromEvents(item, events = []) {
-  const normalizedTerm = item?.normalizedTerm ?? normalizeTerm(item?.term ?? "");
-  if (!normalizedTerm) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? nowIso() });
-  const reviewEvents = (events ?? [])
-    .filter((event) => event?.type === "review" && event.normalizedTerm === normalizedTerm && event.rating && event.occurredAt)
-    .slice()
-    .sort((left, right) => (left.occurredAt ?? "").localeCompare(right.occurredAt ?? ""));
-  if (!reviewEvents.length) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? nowIso() });
-
-  const createdAt = item?.savedAt ?? reviewEvents[0].occurredAt ?? nowIso();
-  let review = normalizeReviewState({
-    dueAt: createdAt,
-    fsrsCard: createFsrsCard(createdAt),
-  });
-  for (const event of reviewEvents) {
-    if (!isValidFsrsRating(event.rating)) {
-      console.warn(`Skipping invalid FSRS review rating for "${normalizedTerm}": ${event.rating}`);
-      continue;
-    }
-    const schedule = scheduleWithFsrs(review, event.rating, event.occurredAt);
-    review = {
-      ...review,
-      lastRating: event.rating,
-      intervalDays: schedule.intervalDays,
-      dueAt: schedule.dueAt,
-      masteredAt: schedule.masteredAt,
-      lastReviewedAt: event.occurredAt,
-      reviewCount: (review.reviewCount ?? 0) + 1,
-      fsrsCard: schedule.fsrsCard,
-    };
-  }
-  return normalizeReviewState(review);
-}
-
-function rebuildItemsReviewStateFromEvents(items = [], events = []) {
-  return (items ?? []).map((item) => ({
-    ...item,
-    review: rebuildReviewStateFromEvents(item, events),
-  }));
+  return _mergeVocabularySources(recordItems, legacyItems, appNowMs());
 }
 
 function chooseMergedStudyGoals(localSnapshot, remoteSnapshot) {
@@ -2296,24 +2088,6 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
     studyGoals: chooseMergedStudyGoals(localSnapshot, remoteSnapshot),
     lastMetrics: newer.lastMetrics ?? localSnapshot.lastMetrics,
   };
-}
-
-function mergeUserDictionarySources(localEntries, remoteEntries) {
-  const byTerm = new Map();
-  for (const entry of [...(remoteEntries ?? []), ...(localEntries ?? [])]) {
-    if (!entry?.normalizedTerm && !entry?.word) continue;
-    const normalizedTerm = entry.normalizedTerm ?? normalizeTerm(entry.word);
-    const incoming = { ...entry, normalizedTerm };
-    const existing = byTerm.get(normalizedTerm);
-    if (!existing) {
-      byTerm.set(normalizedTerm, incoming);
-      continue;
-    }
-    const existingUpdated = Date.parse(existing.updatedAt ?? existing.createdAt ?? 0) || 0;
-    const incomingUpdated = Date.parse(incoming.updatedAt ?? incoming.createdAt ?? 0) || 0;
-    byTerm.set(normalizedTerm, incomingUpdated >= existingUpdated ? incoming : existing);
-  }
-  return [...byTerm.values()];
 }
 
 async function replaceRecordStore(storeName, records, keyOf) {
@@ -3903,14 +3677,7 @@ function isElementTopmost(element) {
 }
 
 function spellingThreshold() {
-  return (activeSpellingSession?.retries ?? 0) === 0 ? 1 : 3;
-}
-
-function ratingFromRetries(retries) {
-  if (retries <= 0) return "easy";
-  if (retries === 1) return "good";
-  if (retries === 2) return "hard";
-  return "again";
+  return _spellingThreshold(activeSpellingSession?.retries ?? 0);
 }
 
 function spellingMeaningHint(item) {
@@ -4189,185 +3956,14 @@ function meaningPreviewFromEntry(entry) {
   return topLines(entry.translation, 1)[0] ?? topLines(entry.definition, 1)[0] ?? "No meaning available";
 }
 
-function normalizeStudyOneMoreLevel(level) {
-  return STUDY_ONE_MORE_LEVELS.some((item) => item.id === level) ? level : "very_easy";
-}
-
-function frequencyRankOf(candidate) {
-  const frq = Number(candidate?.frq ?? candidate?.frequencyRank);
-  if (Number.isFinite(frq) && frq > 0) return frq;
-  const bnc = Number(candidate?.bnc);
-  return Number.isFinite(bnc) && bnc > 0 ? bnc : Number.POSITIVE_INFINITY;
-}
-
-function hasToeflTag(candidate) {
-  if (Number(candidate?.is_toefl ?? candidate?.isToefl) === 1) return true;
-  const tags = Array.isArray(candidate?.tags)
-    ? candidate.tags
-    : String(candidate?.tag ?? "").split(/\s+/).filter(Boolean);
-  return tags.some((tag) => tag.toLowerCase() === "toefl");
-}
-
-function fallbackStudyOneMoreLevel(candidate) {
-  const rank = frequencyRankOf(candidate);
-  const length = normalizeTerm(candidate?.normalized_word ?? candidate?.normalizedTerm ?? candidate?.word ?? candidate?.term).length;
-  if (rank <= 3000 && length <= 8) return "very_easy";
-  if (rank <= 8000 && length <= 12) return "easy";
-  if (rank <= 20000) return "medium";
-  if (rank <= 50000) return "hard";
-  return "advanced";
-}
-
-function candidateMatchesStudyOneMoreLevel(candidate, level) {
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
-  if (normalizedLevel === "toefl") return hasToeflTag(candidate);
-  return fallbackStudyOneMoreLevel(candidate) === normalizedLevel;
-}
-
-function normalizeStudyOneMoreCandidateRow(row, level) {
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
-  const normalizedTerm = normalizeTerm(row?.normalized_word ?? row?.normalizedTerm ?? row?.word ?? row?.term);
-  return {
-    ...row,
-    normalizedTerm,
-    frequencyRank: frequencyRankOf(row),
-    studyLevel: normalizedLevel === "toefl" ? "toefl" : fallbackStudyOneMoreLevel({ ...row, normalizedTerm }),
-  };
-}
-
-function introducedByStudyOneMore(event) {
-  return ["study-one-more-introduced", "study-one-more-skipped", "new-word-first-pass"].includes(event?.type);
-}
-
+// Wrapper: provides global app state as defaults so callers need not pass explicit args.
 function buildStudyOneMoreExclusionSets({
   vocabulary = vocabularyItems,
   spelling = spellingItems,
   events = studyEvents,
   known = knownWords,
 } = {}) {
-  const memorizeTerms = new Set();
-  const spellingTerms = new Set();
-  const archivedIgnoredOrMastered = new Set();
-  for (const item of vocabulary ?? []) {
-    const term = item?.normalizedTerm;
-    if (!term) continue;
-    if (!item.archivedAt) memorizeTerms.add(term);
-    if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
-  }
-  for (const item of spelling ?? []) {
-    const term = item?.normalizedTerm;
-    if (!term) continue;
-    if (!item.archivedAt) spellingTerms.add(term);
-    if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
-  }
-  const introducedToday = new Set();
-  const firstTryPassed = new Set();
-  const skippedRecently = new Set();
-  const skipCutoffMs = appNowMs() - STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS * NORMAL_DAY_MS;
-  for (const event of events ?? []) {
-    if (!event?.normalizedTerm) continue;
-    if (event.type === "new-word-first-pass") firstTryPassed.add(event.normalizedTerm);
-    if (introducedByStudyOneMore(event) && isToday(event.occurredAt)) introducedToday.add(event.normalizedTerm);
-    if (event.type === "study-one-more-skipped" && Date.parse(event.occurredAt) >= skipCutoffMs) {
-      skippedRecently.add(event.normalizedTerm);
-    }
-  }
-  const knownTerms = new Set(
-    (known ?? [])
-      .map((record) => record?.normalizedTerm)
-      .filter(Boolean)
-      .filter((term) => !memorizeTerms.has(term) && !spellingTerms.has(term)),
-  );
-  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, knownTerms, archivedIgnoredOrMastered, skippedRecently };
-}
-
-function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyOneMoreExclusionSets()) {
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
-  return [...(rows ?? [])]
-    .map((row) => normalizeStudyOneMoreCandidateRow(row, normalizedLevel))
-    .filter((row) => row.normalizedTerm)
-    .filter((row) => candidateMatchesStudyOneMoreLevel(row, normalizedLevel))
-    .filter((row) => !exclusions.memorizeTerms?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.spellingTerms?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.knownTerms?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.introducedToday?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.firstTryPassed?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.archivedIgnoredOrMastered?.has(row.normalizedTerm))
-    .filter((row) => !exclusions.skippedRecently?.has(row.normalizedTerm))
-    .sort((left, right) => {
-      const leftRank = Number.isFinite(left.frequencyRank) ? left.frequencyRank : Number.MAX_SAFE_INTEGER;
-      const rightRank = Number.isFinite(right.frequencyRank) ? right.frequencyRank : Number.MAX_SAFE_INTEGER;
-      if (leftRank !== rightRank) return leftRank - rightRank;
-      return String(left.word ?? left.term).localeCompare(String(right.word ?? right.term));
-    })[0] ?? null;
-}
-
-function studyOneMoreCandidateAllowed(candidate, exclusions) {
-  return !studyOneMoreExclusionReason(candidate, exclusions);
-}
-
-function studyOneMoreExclusionReason(candidate, exclusions) {
-  const term = candidate?.normalizedTerm;
-  if (!term) return "invalid";
-  if (exclusions.memorizeTerms?.has(term)) return "memorize";
-  if (exclusions.spellingTerms?.has(term)) return "spelling";
-  if (exclusions.knownTerms?.has(term)) return "known";
-  if (exclusions.introducedToday?.has(term)) return "introducedToday";
-  if (exclusions.firstTryPassed?.has(term)) return "firstTryPassed";
-  if (exclusions.archivedIgnoredOrMastered?.has(term)) return "archivedIgnoredOrMastered";
-  if (exclusions.skippedRecently?.has(term)) return "skippedRecently";
-  return null;
-}
-
-function pickStudyOneMoreCandidateFromOrderedRows(rows, level, exclusions = buildStudyOneMoreExclusionSets(), stats = null) {
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
-  for (const row of rows ?? []) {
-    if (stats) {
-      stats.rowsScanned = (stats.rowsScanned ?? stats.rowsVisited ?? 0) + 1;
-      stats.rowsVisited = stats.rowsScanned;
-    }
-    const candidate = normalizeStudyOneMoreCandidateRow(row, normalizedLevel);
-    if (!candidate.normalizedTerm) continue;
-    if (!candidateMatchesStudyOneMoreLevel(candidate, normalizedLevel)) continue;
-    const reason = studyOneMoreExclusionReason(candidate, exclusions);
-    if (!reason) {
-      if (stats) {
-        stats.selectedRank = Number.isFinite(candidate.frequencyRank) ? candidate.frequencyRank : null;
-        stats.selectedTerm = candidate.normalizedTerm;
-      }
-      return candidate;
-    }
-    if (stats) {
-      stats.exclusionCounts = stats.exclusionCounts ?? {};
-      stats.exclusionCounts[reason] = (stats.exclusionCounts[reason] ?? 0) + 1;
-    }
-  }
-  return null;
-}
-
-function studyOneMoreRankSql() {
-  return "CASE WHEN frq IS NOT NULL AND frq > 0 THEN frq WHEN bnc IS NOT NULL AND bnc > 0 THEN bnc ELSE NULL END";
-}
-
-function studyOneMoreLevelSql(level) {
-  const rank = studyOneMoreRankSql();
-  const wordLength = "length(normalized_word)";
-  switch (normalizeStudyOneMoreLevel(level)) {
-    case "very_easy":
-      return `${rank} <= 3000 AND ${wordLength} <= 8`;
-    case "easy":
-      return `${rank} <= 8000 AND ${wordLength} <= 12 AND NOT (${rank} <= 3000 AND ${wordLength} <= 8)`;
-    case "medium":
-      return `${rank} <= 20000 AND NOT (${rank} <= 8000 AND ${wordLength} <= 12)`;
-    case "hard":
-      return `${rank} > 20000 AND ${rank} <= 50000`;
-    case "advanced":
-      return `(${rank} IS NULL OR ${rank} > 50000)`;
-    case "toefl":
-      return `(is_toefl = 1 OR lower(coalesce(tag, '')) LIKE '%toefl%')`;
-    default:
-      return `${rank} <= 3000 AND ${wordLength} <= 8`;
-  }
+  return _buildStudyOneMoreExclusionSets({ vocabulary, spelling, events, known, nowMs: appNowMs() });
 }
 
 function queryStudyOneMoreCandidates(level, limit = 240, offset = 0) {

@@ -3,7 +3,35 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260606-1";
+} from "./fsrs-scheduler.js?v=20260606-2";
+
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260606-2";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260606-2";
+import {
+  normalizeTrack,
+  normalizeHistoryGranularity,
+  normalizeGoalsPeriod,
+  normalizeStudyOneMoreLevel,
+  normalizeFontScale,
+  normalizeUiPreferences,
+  STUDY_ONE_MORE_LEVELS,
+  DEFAULT_FONT_SCALE,
+} from "./ui-preferences.js?v=20260606-2";
+import {
+  studyEventTrack,
+  computeStudyEventKey,
+  mergeStudyEventSources,
+  mergeHistoryItems,
+  mergeKnownSources,
+  activeStudyTermsFromItems,
+  mergeVocabularySources,
+  mergeUserDictionarySources,
+} from "./sync.js?v=20260606-2";
+import {
+  fallbackStudyOneMoreLevel,
+  buildStudyOneMoreExclusionSets,
+  studyOneMoreLevelSql,
+} from "./study-one-more.js?v=20260606-2";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -17,7 +45,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v109";
+const SHELL_CACHE_NAME = "wordlover-shell-v110";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -28,10 +56,16 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260606-1",
-  "/fsrs-scheduler.js?v=20260606-1",
-  "/styles.css?v=20260606-1",
-  "/wordlover-config.js?v=20260606-1",
+  "/app.js?v=20260606-2",
+  "/persistence.js?v=20260606-2",
+  "/spelling.js?v=20260606-2",
+  "/ui-preferences.js?v=20260606-2",
+  "/review-state.js?v=20260606-2",
+  "/study-one-more.js?v=20260606-2",
+  "/sync.js?v=20260606-2",
+  "/fsrs-scheduler.js?v=20260606-2",
+  "/styles.css?v=20260606-2",
+  "/wordlover-config.js?v=20260606-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -47,7 +81,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260606-1",
+  "/automated-tests.js?v=20260606-2",
 ];
 
 let lastResults = null;
@@ -2237,8 +2271,7 @@ async function runEarlyPracticePersistenceTest() {
     const practiceItemFsrsUnchanged = (item.review.fsrsCard?.reps ?? 0) === originalFsrsReps;
 
     // Verify IndexedDB still has the original future dueAt after practice
-    const db = await openAppDb();
-    const persistedAfterPractice = await getAppStoreValue(db, APP_VOCABULARY_STORE, item.normalizedTerm);
+    const persistedAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
     const practiceNotUpdatedInDb = persistedAfterPractice?.review?.dueAt === futureIso;
 
     // Practice again/miss → early-practice-full-failure → event type "review", item updated
@@ -2249,7 +2282,7 @@ async function runEarlyPracticePersistenceTest() {
     const failItemDueChanged = item.review.dueAt !== originalDueAt;
 
     // Verify IndexedDB was updated after full review
-    const persistedAfterFail = await getAppStoreValue(db, APP_VOCABULARY_STORE, item.normalizedTerm);
+    const persistedAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
     const failUpdatedInDb = persistedAfterFail?.review?.dueAt !== null && persistedAfterFail?.review?.dueAt !== futureIso;
 
     return {
@@ -2373,6 +2406,106 @@ async function collectDeviceDiagnostics() {
   };
 }
 
+function runModuleSmokeTests() {
+  const failures = [];
+  function assert(label, got, expected) {
+    if (JSON.stringify(got) !== JSON.stringify(expected)) {
+      failures.push(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // persistence.js
+  const bytes = new Uint8Array([72, 101, 108, 108, 111]);
+  const b64 = bytesToBase64(bytes);
+  assert("bytesToBase64", b64, "SGVsbG8=");
+  const roundTrip = base64ToBytes(b64);
+  assert("base64ToBytes length", roundTrip.length, 5);
+  assert("base64ToBytes[0]", roundTrip[0], 72);
+  assert("checksumText is string", typeof checksumText("test"), "string");
+  assert("checksumText length", checksumText("test").length, 8);
+  assert("isEncryptedRecord false for plain obj", isEncryptedRecord({ foo: "bar" }), false);
+  assert("isEncryptedRecord true for encrypted shape", isEncryptedRecord({ __encrypted: true, iv: "x", ciphertext: "y" }), true);
+
+  // spelling.js
+  assert("ratingFromRetries 0 => easy", ratingFromRetries(0), "easy");
+  assert("ratingFromRetries 1 => good", ratingFromRetries(1), "good");
+  assert("ratingFromRetries 2 => hard", ratingFromRetries(2), "hard");
+  assert("ratingFromRetries 3 => again", ratingFromRetries(3), "again");
+  assert("spellingThreshold 0 retries => 1", spellingThreshold(0), 1);
+  assert("spellingThreshold 1 retry => 3", spellingThreshold(1), 3);
+
+  // ui-preferences.js
+  assert("normalizeTrack spelling", normalizeTrack("spelling"), "spelling");
+  assert("normalizeTrack unknown", normalizeTrack("other"), "vocabulary");
+  assert("normalizeHistoryGranularity weeks", normalizeHistoryGranularity("weeks"), "weeks");
+  assert("normalizeHistoryGranularity invalid", normalizeHistoryGranularity("hourly"), "days");
+  assert("normalizeGoalsPeriod week", normalizeGoalsPeriod("week"), "week");
+  assert("normalizeGoalsPeriod invalid", normalizeGoalsPeriod("decade"), "day");
+  assert("normalizeStudyOneMoreLevel valid", normalizeStudyOneMoreLevel("easy"), "easy");
+  assert("normalizeStudyOneMoreLevel invalid", normalizeStudyOneMoreLevel("unknown"), "very_easy");
+  assert("normalizeFontScale valid", normalizeFontScale(1.5), 1.5);
+  assert("normalizeFontScale NaN => default", normalizeFontScale(NaN), DEFAULT_FONT_SCALE);
+  assert("normalizeFontScale clamp high", normalizeFontScale(99), 2);
+  assert("STUDY_ONE_MORE_LEVELS has 6 items", STUDY_ONE_MORE_LEVELS.length, 6);
+  const prefs = normalizeUiPreferences({ todayTrack: "spelling" }, {});
+  assert("normalizeUiPreferences todayTrack", prefs.todayTrack, "spelling");
+  assert("normalizeUiPreferences vocabularyTrack default", prefs.vocabularyTrack, "vocabulary");
+
+  // study-one-more.js
+  assert("fallbackStudyOneMoreLevel very_easy", fallbackStudyOneMoreLevel({ frq: 100, normalizedTerm: "cat" }), "very_easy");
+  assert("studyOneMoreLevelSql very_easy nonempty", studyOneMoreLevelSql("very_easy").length > 0, true);
+  const exclusions = buildStudyOneMoreExclusionSets({
+    vocabulary: [{ normalizedTerm: "cat", archivedAt: null }],
+    spelling: [],
+    events: [],
+    known: [],
+  });
+  assert("buildStudyOneMoreExclusionSets memorizeTerms has cat", exclusions.memorizeTerms.has("cat"), true);
+  assert("buildStudyOneMoreExclusionSets spellingTerms empty", exclusions.spellingTerms.size, 0);
+
+  // sync.js
+  assert("studyEventTrack vocabulary event", studyEventTrack({ track: "vocabulary" }), "vocabulary");
+  assert("studyEventTrack spelling id prefix", studyEventTrack({ id: "spelling-123" }), "spelling");
+  const merged = mergeStudyEventSources(
+    [{ type: "review", normalizedTerm: "cat", occurredAt: "2025-01-02T00:00:00.000Z", rating: "good", id: "e1" }],
+    [{ type: "review", normalizedTerm: "cat", occurredAt: "2025-01-01T00:00:00.000Z", rating: "hard", id: "e2" }],
+  );
+  assert("mergeStudyEventSources length", merged.length, 2);
+  assert("mergeStudyEventSources sorted", merged[0].occurredAt < merged[1].occurredAt, true);
+  const history = mergeHistoryItems(
+    [{ term: "cat", queriedAt: "2025-01-02T00:00:00.000Z" }],
+    [{ term: "cat", queriedAt: "2025-01-01T00:00:00.000Z" }],
+  );
+  assert("mergeHistoryItems keeps newer", history[0].queriedAt, "2025-01-02T00:00:00.000Z");
+  const activeTerms = activeStudyTermsFromItems([{ normalizedTerm: "cat", archivedAt: null }], []);
+  assert("activeStudyTermsFromItems", activeTerms.has("cat"), true);
+  const known = mergeKnownSources(
+    [{ normalizedTerm: "dog", knownAt: "2025-01-01T00:00:00.000Z" }],
+    [],
+    new Set(),
+  );
+  assert("mergeKnownSources length", known.length, 1);
+  const vocabMerged = mergeVocabularySources(
+    [{ term: "cat", normalizedTerm: "cat", savedAt: "2025-01-01T00:00:00.000Z", review: {} }],
+    [],
+  );
+  assert("mergeVocabularySources length", vocabMerged.length, 1);
+  assert("mergeVocabularySources normalizedTerm", vocabMerged[0].normalizedTerm, "cat");
+  assert("mergeVocabularySources has review.dueAt", typeof vocabMerged[0].review?.dueAt, "string");
+  const userDict = mergeUserDictionarySources(
+    [{ word: "cat", normalizedTerm: "cat", updatedAt: "2025-01-02T00:00:00.000Z" }],
+    [{ word: "cat", normalizedTerm: "cat", updatedAt: "2025-01-01T00:00:00.000Z" }],
+  );
+  assert("mergeUserDictionarySources deduped", userDict.length, 1);
+  assert("mergeUserDictionarySources prefers newer", userDict[0].updatedAt, "2025-01-02T00:00:00.000Z");
+
+  return {
+    passed: failures.length === 0,
+    failures,
+    assertionCount: 38,
+  };
+}
+
 async function runAllPocs() {
   setStatus("Running");
   progressList.innerHTML = "";
@@ -2380,6 +2513,9 @@ async function runAllPocs() {
   rawResults.textContent = "{}";
   addProgress("Collecting browser and storage diagnostics.");
   const diagnostics = await collectDeviceDiagnostics();
+
+  addProgress("Running module smoke tests (pure-function unit checks).");
+  const moduleSmokeTests = runModuleSmokeTests();
 
   addProgress("Registering service worker and checking app shell cache.");
   const serviceWorker = await registerServiceWorker();
@@ -2448,6 +2584,7 @@ async function runAllPocs() {
   const results = {
     completedAt,
     verdict: {
+        moduleSmokeTests: moduleSmokeTests.passed ? "pass" : "fail",
       sqliteWasmDirection: benchmark.allFound && benchmark.timing.p95Ms < 1000 ? "pass" : "investigate",
       indexedDbDictionaryPersistence: indexedDbLookup.status === "found" ? "pass" : "fail",
       opfsDictionaryPersistence: opfs.supported ? (opfs.sampleChecksum === originalChecksum ? "pass" : "fail") : "not-supported",
@@ -2491,6 +2628,7 @@ async function runAllPocs() {
     mockGoogleDriveSync: mockSync,
     reviewQuizRating,
     deviceCoverage,
+    moduleSmokeTests,
   };
   await saveStoreValue(KV_STORE, "lastResults", results);
   localStorage.setItem("wordlover-product-test-last-results", JSON.stringify(results));
