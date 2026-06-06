@@ -109,7 +109,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260606-v109";
+const APP_VERSION = "0.6.2-product.20260606-1400-v109";
 const USER_DATA_FORMAT_VERSION = "0.3";
 const SHELL_CACHE_VERSION = "wordlover-shell-v109";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
@@ -152,6 +152,7 @@ const STUDY_ONE_MORE_LEVELS = [
   { id: "advanced", label: "Advanced" },
   { id: "toefl", label: "TOEFL" },
 ];
+const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
 const GEMINI_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -4261,10 +4262,15 @@ function buildStudyOneMoreExclusionSets({
   }
   const introducedToday = new Set();
   const firstTryPassed = new Set();
+  const skippedRecently = new Set();
+  const skipCutoffMs = appNowMs() - STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS * NORMAL_DAY_MS;
   for (const event of events ?? []) {
     if (!event?.normalizedTerm) continue;
     if (event.type === "new-word-first-pass") firstTryPassed.add(event.normalizedTerm);
     if (introducedByStudyOneMore(event) && isToday(event.occurredAt)) introducedToday.add(event.normalizedTerm);
+    if (event.type === "study-one-more-skipped" && Date.parse(event.occurredAt) >= skipCutoffMs) {
+      skippedRecently.add(event.normalizedTerm);
+    }
   }
   const knownTerms = new Set(
     (known ?? [])
@@ -4272,7 +4278,7 @@ function buildStudyOneMoreExclusionSets({
       .filter(Boolean)
       .filter((term) => !memorizeTerms.has(term) && !spellingTerms.has(term)),
   );
-  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, knownTerms, archivedIgnoredOrMastered };
+  return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, knownTerms, archivedIgnoredOrMastered, skippedRecently };
 }
 
 function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyOneMoreExclusionSets()) {
@@ -4287,6 +4293,7 @@ function pickStudyOneMoreCandidateFromRows(rows, level, exclusions = buildStudyO
     .filter((row) => !exclusions.introducedToday?.has(row.normalizedTerm))
     .filter((row) => !exclusions.firstTryPassed?.has(row.normalizedTerm))
     .filter((row) => !exclusions.archivedIgnoredOrMastered?.has(row.normalizedTerm))
+    .filter((row) => !exclusions.skippedRecently?.has(row.normalizedTerm))
     .sort((left, right) => {
       const leftRank = Number.isFinite(left.frequencyRank) ? left.frequencyRank : Number.MAX_SAFE_INTEGER;
       const rightRank = Number.isFinite(right.frequencyRank) ? right.frequencyRank : Number.MAX_SAFE_INTEGER;
@@ -4308,6 +4315,7 @@ function studyOneMoreExclusionReason(candidate, exclusions) {
   if (exclusions.introducedToday?.has(term)) return "introducedToday";
   if (exclusions.firstTryPassed?.has(term)) return "firstTryPassed";
   if (exclusions.archivedIgnoredOrMastered?.has(term)) return "archivedIgnoredOrMastered";
+  if (exclusions.skippedRecently?.has(term)) return "skippedRecently";
   return null;
 }
 
@@ -4438,6 +4446,7 @@ function renderStudyOneMoreActions(passed) {
         ${passed
           ? `<button type="button" data-study-next="1">Study another</button><button class="secondary-button" type="button" data-quiz-close="1">Close</button>`
           : `<button class="secondary-button" type="button" data-study-one-more-skip="1">Skip</button>`}
+        <button class="secondary-button" type="button" data-study-one-more-ignore="1">Ignore Word</button>
       </div>
     </div>
   `;
@@ -4786,12 +4795,50 @@ async function skipStudyOneMoreCandidate() {
   activeQuiz = null;
   quizPanel.hidden = false;
   quizPanel.innerHTML = `
-    <p class="muted">Skipped. WordFan will avoid this word for the rest of today.</p>
+    <p class="muted">Skipped. WordFan will avoid this word for ${STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS} days.</p>
     <div class="quiz-actions">
       <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
       <button type="button" data-study-next="1">Study another</button>
     </div>
   `;
+}
+
+async function ignoreStudyOneMoreCandidate() {
+  if (!activeStudyOneMoreEntry) return;
+  const entry = activeStudyOneMoreEntry;
+  const normalizedTerm = normalizeTerm(entry.term);
+  const now = nowIso();
+  const existing = getVocabularyItem(entry.term);
+  if (existing) {
+    existing.ignoredAt = now;
+    existing.updatedAt = now;
+    existing.syncVersion = (existing.syncVersion ?? 0) + 1;
+    existing.isSynced = false;
+    await persistVocabularyItem(existing);
+  } else {
+    const lookup = lookupTerm(entry.term);
+    if (lookup.status === "found") {
+      const item = resultToVocabularyItem(lookup);
+      item.ignoredAt = now;
+      item.archivedAt = now;
+      item.lastSaveReason = "study-one-more-ignored";
+      vocabularyItems = [item, ...vocabularyItems.filter((v) => v.normalizedTerm !== normalizedTerm)];
+      await persistVocabularyItem(item);
+    }
+  }
+  await recordStudyOneMoreEvent(entry, "study-one-more-ignored");
+  activeStudyOneMoreEntry = null;
+  activeQuiz = null;
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <p class="muted">Ignored "${escapeHtml(entry.term)}". WordFan will not suggest it again.</p>
+    <div class="quiz-actions">
+      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
+      <button type="button" data-study-next="1">Study another</button>
+    </div>
+  `;
+  renderStudyStats();
+  renderVocabulary();
 }
 
 function showStudyOneMoreMeaning() {
@@ -7744,6 +7791,10 @@ quizPanel.addEventListener("click", (event) => {
     void skipStudyOneMoreCandidate();
     return;
   }
+  if (target.closest("[data-study-one-more-ignore]")) {
+    void ignoreStudyOneMoreCandidate();
+    return;
+  }
   if (target.closest("[data-quiz-close]")) {
     hideQuiz();
     return;
@@ -8358,6 +8409,8 @@ window.WordLoverApp = {
     levelSql: studyOneMoreLevelSql,
     current: () => activeStudyOneMoreEntry,
     diagnostics: () => lastStudyOneMoreDiagnostics,
+    buildExclusionSets: buildStudyOneMoreExclusionSets,
+    SKIP_COOLDOWN_DAYS: STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
     setBeforePickHookForTest: (hook) => {
       studyOneMoreBeforePickForTest = typeof hook === "function" ? hook : null;
     },
@@ -8367,6 +8420,8 @@ window.WordLoverApp = {
       return studyOneMoreLevel;
     },
   },
+  recordReviewRating,
+  persistVocabularyItemForTest: (item) => persistVocabularyItem(item),
   reviewScheduling: {
     applyPolicy: applyVocabularyReviewSchedulingPolicy,
   },

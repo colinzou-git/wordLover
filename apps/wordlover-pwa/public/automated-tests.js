@@ -812,6 +812,7 @@ async function runMainAppStudySmoke() {
       firstTryPassed = [],
       known = [],
       archivedIgnoredOrMastered = [],
+      skippedRecently = [],
     } = {}) => ({
       memorizeTerms: new Set(memorize),
       spellingTerms: new Set(spelling),
@@ -819,6 +820,7 @@ async function runMainAppStudySmoke() {
       firstTryPassed: new Set(firstTryPassed),
       knownTerms: new Set(known),
       archivedIgnoredOrMastered: new Set(archivedIgnoredOrMastered),
+      skippedRecently: new Set(skippedRecently),
     });
     const studyOneMoreTests = {
       excludesMemorizeWords: frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ memorize: ["echo"] })).normalizedTerm === "delta",
@@ -875,6 +877,10 @@ async function runMainAppStudySmoke() {
       fakeSets(),
     );
     studyOneMoreTests.toeflOnlyReturnsTagged = toeflCandidate?.normalizedTerm === "academic";
+    studyOneMoreTests.excludesRecentlySkippedWords =
+      frameWindow.WordLoverApp.studyOneMore.pickFromCandidates(candidateRows, "very_easy", fakeSets({ skippedRecently: ["echo"] })).normalizedTerm === "delta";
+    studyOneMoreTests.skippedCooldownDaysIsPositive =
+      (frameWindow.WordLoverApp.studyOneMore.SKIP_COOLDOWN_DAYS ?? 0) > 0;
     if (!Object.values(studyOneMoreTests).every(Boolean)) {
       throw new Error(`Study One More selection tests failed: ${JSON.stringify(studyOneMoreTests)}`);
     }
@@ -1977,7 +1983,7 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}-v109/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260606-v109") {
+    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d{4})?-v109/i.test(updateStatusText) && updateCheckResult?.deviceVersion !== "0.6.2-product.20260606-1400-v109") {
       throw new Error(`App update check did not expose the current v109 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
@@ -2182,6 +2188,163 @@ async function runCheckpointRollbackSmoke() {
   }
 }
 
+async function runEarlyPracticePersistenceTest() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-early-practice-persist=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Early practice persistence test timed out waiting for app load."));
+        }
+      }, 250);
+    });
+
+    const app = frame.contentWindow.WordLoverApp;
+    const entry = await app.addUserDictionaryEntryForTest("early practice persist word", "a test definition", "测试定义");
+    const lookup = app.lookupTerm(entry.word);
+    if (lookup.status !== "found") throw new Error("Early practice persistence: dictionary lookup failed.");
+    const item = await app.saveVocabularyItem(lookup, "early-practice-persist-test");
+
+    const futureIso = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    item.review.dueAt = futureIso;
+    item.review.intervalDays = 10;
+    item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: futureIso };
+    await app.persistVocabularyItemForTest(item);
+
+    const originalDueAt = item.review.dueAt;
+    const originalIntervalDays = item.review.intervalDays;
+    const originalFsrsReps = item.review.fsrsCard?.reps ?? 0;
+
+    // Practice pass/hard → early-practice-record-only → event type "practice", item unchanged
+    await app.recordReviewRating(item, "hard", "pass", 12000, "practice", "early-practice-persist-test");
+    const eventsAfterPractice = app.getStudyEvents();
+    const practiceEvent = eventsAfterPractice[eventsAfterPractice.length - 1];
+    const practiceEventType = practiceEvent?.type;
+    const practiceItemDueUnchanged = item.review.dueAt === originalDueAt;
+    const practiceItemIntervalUnchanged = item.review.intervalDays === originalIntervalDays;
+    const practiceItemFsrsUnchanged = (item.review.fsrsCard?.reps ?? 0) === originalFsrsReps;
+
+    // Verify IndexedDB still has the original future dueAt after practice
+    const db = await openAppDb();
+    const persistedAfterPractice = await getAppStoreValue(db, APP_VOCABULARY_STORE, item.normalizedTerm);
+    const practiceNotUpdatedInDb = persistedAfterPractice?.review?.dueAt === futureIso;
+
+    // Practice again/miss → early-practice-full-failure → event type "review", item updated
+    await app.recordReviewRating(item, "again", "miss", 5000, "practice", "early-practice-fail-test");
+    const eventsAfterFail = app.getStudyEvents();
+    const failEvent = eventsAfterFail[eventsAfterFail.length - 1];
+    const failEventType = failEvent?.type;
+    const failItemDueChanged = item.review.dueAt !== originalDueAt;
+
+    // Verify IndexedDB was updated after full review
+    const persistedAfterFail = await getAppStoreValue(db, APP_VOCABULARY_STORE, item.normalizedTerm);
+    const failUpdatedInDb = persistedAfterFail?.review?.dueAt !== null && persistedAfterFail?.review?.dueAt !== futureIso;
+
+    return {
+      passed: practiceEventType === "practice" && practiceItemDueUnchanged && practiceItemIntervalUnchanged && practiceItemFsrsUnchanged && practiceNotUpdatedInDb && failEventType === "review" && failItemDueChanged && failUpdatedInDb,
+      practiceEventType,
+      failEventType,
+      practiceItemDueUnchanged,
+      practiceItemIntervalUnchanged,
+      practiceItemFsrsUnchanged,
+      practiceNotUpdatedInDb,
+      failItemDueChanged,
+      failUpdatedInDb,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
+async function runStudyOneMoreSkipCooldownTest() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-skip-cooldown=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Skip cooldown test timed out waiting for app load."));
+        }
+      }, 250);
+    });
+
+    const app = frame.contentWindow.WordLoverApp;
+    const cooldownDays = app.studyOneMore.SKIP_COOLDOWN_DAYS;
+    const nowMs = Date.now();
+    const msPerDay = 24 * 60 * 60 * 1000;
+
+    const makeEvent = (term, type, daysAgo) => ({
+      id: `test-event-${term}-${daysAgo}`,
+      type,
+      normalizedTerm: term,
+      occurredAt: new Date(nowMs - daysAgo * msPerDay).toISOString(),
+      track: "vocabulary",
+    });
+
+    // Skipped today → excluded
+    const skippedTodayEvent = makeEvent("skiptest_today", "study-one-more-skipped", 0);
+    const exclusionsTodaySkip = app.studyOneMore.buildExclusionSets({
+      vocabulary: [], spelling: [], events: [skippedTodayEvent], known: [],
+    });
+    const skippedTodayExcluded = exclusionsTodaySkip.skippedRecently.has("skiptest_today");
+
+    // Skipped 7 days ago (within cooldown) → excluded
+    const skippedMidCooldownEvent = makeEvent("skiptest_mid", "study-one-more-skipped", 7);
+    const exclusionsMidCooldown = app.studyOneMore.buildExclusionSets({
+      vocabulary: [], spelling: [], events: [skippedMidCooldownEvent], known: [],
+    });
+    const skippedMidCooldownExcluded = exclusionsMidCooldown.skippedRecently.has("skiptest_mid");
+
+    // Skipped cooldown+1 days ago (after cooldown) → included
+    const skippedAfterCooldownEvent = makeEvent("skiptest_old", "study-one-more-skipped", cooldownDays + 1);
+    const exclusionsAfterCooldown = app.studyOneMore.buildExclusionSets({
+      vocabulary: [], spelling: [], events: [skippedAfterCooldownEvent], known: [],
+    });
+    const skippedAfterCooldownIncluded = !exclusionsAfterCooldown.skippedRecently.has("skiptest_old");
+
+    // Permanently ignored via ignoredAt on vocabulary item → in archivedIgnoredOrMastered
+    const ignoredItem = { normalizedTerm: "ignoretest_word", ignoredAt: new Date().toISOString(), archivedAt: new Date().toISOString() };
+    const exclusionsIgnored = app.studyOneMore.buildExclusionSets({
+      vocabulary: [ignoredItem], spelling: [], events: [], known: [],
+    });
+    const ignoredWordExcluded = exclusionsIgnored.archivedIgnoredOrMastered.has("ignoretest_word");
+
+    return {
+      passed: skippedTodayExcluded && skippedMidCooldownExcluded && skippedAfterCooldownIncluded && ignoredWordExcluded,
+      cooldownDays,
+      skippedTodayExcluded,
+      skippedMidCooldownExcluded,
+      skippedAfterCooldownIncluded,
+      ignoredWordExcluded,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
 async function collectDeviceDiagnostics() {
   const storageEstimate = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
   const persistedBefore = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
@@ -2233,6 +2396,12 @@ async function runAllPocs() {
 
   addProgress("Running checkpoint rollback smoke.");
   const checkpointRollback = await runCheckpointRollbackSmoke();
+
+  addProgress("Running early-practice persistence test.");
+  const earlyPracticePersistence = await runEarlyPracticePersistenceTest();
+
+  addProgress("Running Study One More skip cooldown and ignore test.");
+  const studyOneMoreSkipCooldown = await runStudyOneMoreSkipCooldownTest();
 
   addProgress("Fetching current SQLite dictionary.");
   let dictionary = await fetchDictionary();
@@ -2288,6 +2457,8 @@ async function runAllPocs() {
       mainAppStudyFlow: mainAppStudyFlow.passed ? "pass" : "fail",
       upgradeVocabularyMerge: upgradeVocabularyMerge.passed ? "pass" : "fail",
       checkpointRollback: checkpointRollback.passed ? "pass" : "fail",
+      earlyPracticePersistence: earlyPracticePersistence.passed ? "pass" : "fail",
+      studyOneMoreSkipCooldown: studyOneMoreSkipCooldown.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
@@ -2301,6 +2472,8 @@ async function runAllPocs() {
     mainAppStudyFlow,
     upgradeVocabularyMerge,
     checkpointRollback,
+    earlyPracticePersistence,
+    studyOneMoreSkipCooldown,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,
     benchmark,

@@ -32,6 +32,7 @@ ASSET_VERSION_RE = re.compile(r'\?v=([0-9]{8}-[0-9]+)')
 APP_VERSION_RE = re.compile(r'^\s*const\s+APP_VERSION\s*=\s*"([^"]+)"', re.MULTILINE)
 APP_RELEASE_RE = re.compile(r'-v([0-9]+)$')
 CACHE_RELEASE_RE = re.compile(r'-v([0-9]+)$')
+FSRS_IMPORT_RE = re.compile(r'fsrs-scheduler\.js\?v=([0-9]{8}-[0-9]+)')
 
 
 def read(path: Path) -> str:
@@ -91,16 +92,38 @@ def main() -> int:
                 f"APP_VERSION release v{app_release.group(1)} does not match shell cache release v{cache_release.group(1)}"
             )
 
+    # 5. fsrs-scheduler import version must match in both app.js and automated-tests.js.
+    fsrs_import_versions: dict[str, set[str]] = {}
+    for path in (APP_JS, TESTS_JS):
+        matches = set(FSRS_IMPORT_RE.findall(read(path)))
+        if matches:
+            fsrs_import_versions[path.name] = matches
+        else:
+            failures.append(f"{path.name}: fsrs-scheduler.js import with ?v= not found")
+    all_fsrs_import_versions = {v for vs in fsrs_import_versions.values() for v in vs}
+    if len(all_fsrs_import_versions) > 1:
+        failures.append(
+            "fsrs-scheduler.js import ?v= disagrees: "
+            + ", ".join(f"{f}={sorted(v)}" for f, v in fsrs_import_versions.items())
+        )
+    elif len(all_asset_versions) == 1 and len(all_fsrs_import_versions) == 1:
+        fsrs_v = next(iter(all_fsrs_import_versions))
+        asset_v = next(iter(all_asset_versions))
+        if fsrs_v != asset_v:
+            failures.append(f"fsrs-scheduler.js import ?v={fsrs_v} does not match shell asset ?v= {asset_v}")
+
     if failures:
         print("Version lockstep check FAILED:")
         for f in failures:
             print(f"  - {f}")
         return 1
 
+    fsrs_v_display = sorted(all_fsrs_import_versions)[0] if all_fsrs_import_versions else "not found"
     print("Version lockstep check PASSED")
-    print(f"  shell cache name : {sorted(all_cache_names)[0]}")
-    print(f"  asset ?v= version: {sorted(all_asset_versions)[0]}")
-    print(f"  APP_VERSION      : {app_versions[0]}")
+    print(f"  shell cache name        : {sorted(all_cache_names)[0]}")
+    print(f"  asset ?v= version       : {sorted(all_asset_versions)[0]}")
+    print(f"  fsrs-scheduler ?v=      : {fsrs_v_display}")
+    print(f"  APP_VERSION             : {app_versions[0]}")
     return 0
 
 
