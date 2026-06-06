@@ -2289,6 +2289,9 @@ async function runEarlyPracticePersistenceTest() {
     const originalDueAt = item.review.dueAt;
     const originalIntervalDays = item.review.intervalDays;
     const originalFsrsReps = item.review.fsrsCard?.reps ?? 0;
+    // Capture the encrypted blob now; since AES-GCM uses a random IV each write,
+    // an identical blob after practice means the record was never re-written.
+    const blobAfterSetup = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
 
     // Practice pass/hard → early-practice-record-only → event type "practice", item unchanged
     await app.recordReviewRating(item, "hard", "pass", 12000, "practice", "early-practice-persist-test");
@@ -2299,9 +2302,10 @@ async function runEarlyPracticePersistenceTest() {
     const practiceItemIntervalUnchanged = item.review.intervalDays === originalIntervalDays;
     const practiceItemFsrsUnchanged = (item.review.fsrsCard?.reps ?? 0) === originalFsrsReps;
 
-    // Verify IndexedDB still has the original future dueAt after practice
-    const persistedAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
-    const practiceNotUpdatedInDb = persistedAfterPractice?.review?.dueAt === futureIso;
+    // Verify IndexedDB blob is unchanged after practice (data is AES-GCM encrypted;
+    // a re-write produces a new random IV, so an identical blob = no write occurred).
+    const blobAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
+    const practiceNotUpdatedInDb = JSON.stringify(blobAfterPractice) === JSON.stringify(blobAfterSetup);
 
     // Practice again/miss → early-practice-full-failure → event type "review", item updated
     await app.recordReviewRating(item, "again", "miss", 5000, "practice", "early-practice-fail-test");
@@ -2310,9 +2314,9 @@ async function runEarlyPracticePersistenceTest() {
     const failEventType = failEvent?.type;
     const failItemDueChanged = item.review.dueAt !== originalDueAt;
 
-    // Verify IndexedDB was updated after full review
-    const persistedAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
-    const failUpdatedInDb = persistedAfterFail?.review?.dueAt !== null && persistedAfterFail?.review?.dueAt !== futureIso;
+    // Verify IndexedDB blob changed after full review (new encrypted write = different blob).
+    const blobAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
+    const failUpdatedInDb = JSON.stringify(blobAfterFail) !== JSON.stringify(blobAfterSetup);
 
     return {
       passed: practiceEventType === "practice" && practiceItemDueUnchanged && practiceItemIntervalUnchanged && practiceItemFsrsUnchanged && practiceNotUpdatedInDb && failEventType === "review" && failItemDueChanged && failUpdatedInDb,
