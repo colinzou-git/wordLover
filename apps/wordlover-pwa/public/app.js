@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260605-4";
+} from "./fsrs-scheduler.js?v=20260605-5";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -109,9 +109,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260605-v107";
+const APP_VERSION = "0.6.2-product.20260605-v108";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v107";
+const SHELL_CACHE_VERSION = "wordlover-shell-v108";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -394,7 +394,7 @@ function requestToPromise(request) {
   });
 }
 
-function showModal({ title, body = "", fields = [], submitText = "OK", cancelText = "Cancel", allowCancel = true, danger = false, helpLink = null }) {
+function showModal({ title, body = "", fields = [], submitText = "OK", cancelText = "Cancel", allowCancel = true, danger = false, helpLink = null, validate = null }) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -441,7 +441,7 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
         ${body ? `<p class="muted">${escapeHtml(body)}</p>` : ""}
         ${helpLinkHtml}
         ${fieldHtml}
-        <p class="error" data-modal-error hidden></p>
+        <p class="error" aria-live="polite" data-modal-error hidden></p>
         <div class="modal-actions">
           ${allowCancel ? `<button class="secondary-button" type="button" data-modal-cancel>${escapeHtml(cancelText)}</button>` : ""}
           <button type="button" data-modal-submit${danger ? ' class="danger-button"' : ""}>${escapeHtml(submitText)}</button>
@@ -465,6 +465,15 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
         error.textContent = `${missingRequired.label} is required.`;
         error.hidden = false;
         return;
+      }
+      if (validate) {
+        const validationError = validate(values);
+        if (validationError) {
+          const error = overlay.querySelector("[data-modal-error]");
+          error.textContent = validationError;
+          error.hidden = false;
+          return;
+        }
       }
       overlay.remove();
       resolve(fields.length ? values : true);
@@ -730,19 +739,37 @@ async function clearBackupPassphraseForTest() {
   await saveValue("backupPassphraseVerifier", null);
 }
 
+function validateBackupPassphrase(passphrase, confirm, { create = false } = {}) {
+  const POLICY_MSG = "Backup passphrase is too simple. Use at least 12 characters and include uppercase letters, lowercase letters, numbers, and symbols, or use a longer 20+ character passphrase made of several words.";
+  if (passphrase.length < 12) return POLICY_MSG;
+  const lower = passphrase.toLowerCase();
+  if (["password", "wordfan", "wordlover", "12345678"].some((b) => lower === b)) return POLICY_MSG;
+  if (/^(.)\1+$/.test(passphrase)) return POLICY_MSG;
+  const chars = [...passphrase];
+  if (chars.length >= 2 && chars.every((c, i) => i === 0 || c.charCodeAt(0) - chars[i - 1].charCodeAt(0) === 1)) return POLICY_MSG;
+  if (passphrase.length < 20) {
+    const categories = [/[A-Z]/.test(passphrase), /[a-z]/.test(passphrase), /[0-9]/.test(passphrase), /[^A-Za-z0-9]/.test(passphrase)].filter(Boolean).length;
+    if (categories < 3) return POLICY_MSG;
+  }
+  if (create && passphrase !== confirm) return "Backup passphrases do not match.";
+  return null;
+}
+
 async function promptForBackupPassphrase({ create = false, reason = "Google Drive backup" } = {}) {
   if (backupPassphrasePromptForTest) {
     const response = await backupPassphrasePromptForTest({ create, reason });
     const passphrase = String(typeof response === "object" && response !== null ? response.passphrase ?? "" : response ?? "");
     const confirm = String(typeof response === "object" && response !== null ? response.confirm ?? passphrase : passphrase);
-    if (passphrase.length < 8) throw new Error("Backup passphrase must be at least 8 characters.");
-    if (create && passphrase !== confirm) throw new Error("Backup passphrases do not match.");
+    if (create) {
+      const err = validateBackupPassphrase(passphrase, confirm, { create: true });
+      if (err) throw new Error(err);
+    }
     return passphrase;
   }
   const values = await showModal({
     title: create ? "Create backup passphrase" : "Enter backup passphrase",
     body: create
-      ? `${reason} needs a backup passphrase. WordFan will not store the passphrase, so keep it somewhere safe.`
+      ? `${reason} needs a backup passphrase. Use at least 12 characters. Include at least 3 of: uppercase letters, lowercase letters, numbers, symbols. Or use a 20+ character phrase with several words. WordFan cannot recover it if lost.`
       : `${reason} needs your backup passphrase to decrypt or encrypt the Drive backup.`,
     submitText: create ? "Save passphrase" : "Continue",
     cancelText: "Cancel",
@@ -750,12 +777,10 @@ async function promptForBackupPassphrase({ create = false, reason = "Google Driv
       { id: "passphrase", label: "Backup passphrase", type: "password", autocomplete: "new-password", required: true },
       ...(create ? [{ id: "confirm", label: "Confirm passphrase", type: "password", autocomplete: "new-password", required: true }] : []),
     ],
+    ...(create ? { validate: (vals) => validateBackupPassphrase(String(vals.passphrase ?? ""), String(vals.confirm ?? ""), { create: true }) } : {}),
   });
   if (!values) throw new Error("Google Drive sync canceled because no backup passphrase was entered.");
-  const passphrase = String(values.passphrase ?? "");
-  if (passphrase.length < 8) throw new Error("Backup passphrase must be at least 8 characters.");
-  if (create && passphrase !== String(values.confirm ?? "")) throw new Error("Backup passphrases do not match.");
-  return passphrase;
+  return String(values.passphrase ?? "");
 }
 
 async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowCreate = true } = {}) {
@@ -8513,6 +8538,7 @@ window.WordLoverApp = {
       setPromptForTest: (handler) => {
         backupPassphrasePromptForTest = typeof handler === "function" ? handler : null;
       },
+      validatePassphraseForTest: (passphrase, confirm, opts) => validateBackupPassphrase(passphrase, confirm, opts),
       encryptForTest: (snapshot) => encryptSnapshotPayload(snapshot, { purpose: "cloud" }),
       decryptForTest: (envelope) => decryptSnapshotPayload(envelope, { purpose: "cloud", allowLegacyDefault: true }),
       decryptWithPassphraseForTest: (envelope, passphrase) => decryptJsonWithPassphrase(envelope, passphrase),
