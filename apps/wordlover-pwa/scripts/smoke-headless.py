@@ -11,12 +11,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
 
 RATING_BUTTONS = ("again", "hard", "good", "easy")
+SMOKE_REPORT_CONTEXT: dict = {}
+
+
+def update_report_context(**values: object) -> None:
+    SMOKE_REPORT_CONTEXT.update(values)
 
 
 def wait_for_app_ready(page: Page, timeout: int = 15_000) -> None:
@@ -153,6 +159,23 @@ def run_rating_button_pointer_check(page: Page) -> dict:
     return {"passed": len(results) == len(RATING_BUTTONS), "ratings": results}
 
 
+def write_report(path: str | None, report: dict) -> None:
+    if not path:
+        return
+    report_path = Path(path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def report_path_from_argv(argv: list[str]) -> str | None:
+    for index, value in enumerate(argv):
+        if value == "--report" and index + 1 < len(argv):
+            return argv[index + 1]
+        if value.startswith("--report="):
+            return value.split("=", 1)[1]
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:4173")
@@ -161,6 +184,7 @@ def main() -> int:
 
     errors: list[str] = []
     console_messages: list[dict] = []
+    update_report_context(errors=errors, console_warnings_and_errors=console_messages)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -194,6 +218,7 @@ def main() -> int:
                 };
             }"""
         )
+        update_report_context(api_surface=api_surface)
 
         # New UI elements from this session.
         ui_elements = page.evaluate(
@@ -207,6 +232,7 @@ def main() -> int:
                 quizPanel: Boolean(document.querySelector('#quizPanel')),
             })"""
         )
+        update_report_context(ui_elements=ui_elements)
 
         # Render a not_found result and verify the new save-anyway button shows up.
         not_found_check = page.evaluate(
@@ -229,6 +255,7 @@ def main() -> int:
                 return { skipped: true, reason: 'renderResult not directly exposed without dictionary' };
             }"""
         )
+        update_report_context(not_found_check=not_found_check)
 
         # Verify the unknown-term dialog opens when invoked directly.
         try:
@@ -248,12 +275,15 @@ def main() -> int:
             page.evaluate("() => document.querySelector('.modal-overlay [data-modal-cancel]')?.click()")
         except Exception as exc:  # noqa: BLE001
             dialog_check = {"error": str(exc)}
+        update_report_context(dialog_check=dialog_check)
 
         # Verify vocabulary search input renders once at least one item exists in the all view.
         # (Skip — depends on having items in memory; covered manually.)
 
         rating_button_pointer_check = run_rating_button_pointer_check(page)
+        update_report_context(rating_button_pointer_check=rating_button_pointer_check)
         state = page.evaluate("() => window.WordLoverApp.getState()")
+        update_report_context(state=state)
 
         browser.close()
 
@@ -272,9 +302,6 @@ def main() -> int:
             "loaded": state.get("loaded"),
         },
     }
-
-    if args.report:
-        Path(args.report).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
@@ -303,10 +330,44 @@ def main() -> int:
         print("\nFAILED:")
         for failure in failures:
             print(f"  - {failure}")
+        report["failures"] = failures
+        write_report(args.report, report)
         return 1
+    report["failures"] = []
+    write_report(args.report, report)
     print("\nPASS")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:  # noqa: BLE001
+        report_path = report_path_from_argv(sys.argv)
+        errors = list(SMOKE_REPORT_CONTEXT.get("errors") or [])
+        errors.append(f"{type(exc).__name__}: {exc}")
+        report = {
+            "errors": errors,
+            "console_warnings_and_errors": [
+                message
+                for message in (SMOKE_REPORT_CONTEXT.get("console_warnings_and_errors") or [])
+                if message.get("type") in ("error", "warning")
+            ][:50],
+            "exception": f"{type(exc).__name__}: {exc}",
+            "exception_traceback": traceback.format_exc(),
+            "api_surface": SMOKE_REPORT_CONTEXT.get("api_surface", {}),
+            "ui_elements": SMOKE_REPORT_CONTEXT.get("ui_elements", {}),
+            "not_found_check": SMOKE_REPORT_CONTEXT.get("not_found_check", {}),
+            "dialog_check": SMOKE_REPORT_CONTEXT.get("dialog_check", {}),
+            "rating_button_pointer_check": SMOKE_REPORT_CONTEXT.get("rating_button_pointer_check", {}),
+            "state_summary": {
+                "appVersion": (SMOKE_REPORT_CONTEXT.get("state") or {}).get("appVersion"),
+                "shellCacheVersion": (SMOKE_REPORT_CONTEXT.get("state") or {}).get("shellCacheVersion"),
+                "vocabularyCount": len((SMOKE_REPORT_CONTEXT.get("state") or {}).get("vocabularyItems") or []),
+                "loaded": (SMOKE_REPORT_CONTEXT.get("state") or {}).get("loaded"),
+            },
+            "failures": [f"Unhandled smoke exception: {type(exc).__name__}: {exc}"],
+        }
+        write_report(report_path, report)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        sys.exit(1)
