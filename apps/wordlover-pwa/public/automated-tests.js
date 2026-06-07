@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-5";
+} from "./fsrs-scheduler.js?v=20260607-6";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-5";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-5";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-6";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-6";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-5";
+} from "./ui-preferences.js?v=20260607-6";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-5";
+} from "./sync.js?v=20260607-6";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-5";
+} from "./study-one-more.js?v=20260607-6";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260607-5";
+} from "./goal-forecast.js?v=20260607-6";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-5";
+} from "./tracks.js?v=20260607-6";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v118";
+const SHELL_CACHE_NAME = "wordlover-shell-v119";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-5",
-  "/persistence.js?v=20260607-5",
-  "/spelling.js?v=20260607-5",
-  "/ui-preferences.js?v=20260607-5",
-  "/review-state.js?v=20260607-5",
-  "/study-one-more.js?v=20260607-5",
-  "/sync.js?v=20260607-5",
-  "/fsrs-scheduler.js?v=20260607-5",
-  "/goal-forecast.js?v=20260607-5",
-  "/tracks.js?v=20260607-5",
-  "/styles.css?v=20260607-5",
-  "/wordlover-config.js?v=20260607-5",
+  "/app.js?v=20260607-6",
+  "/persistence.js?v=20260607-6",
+  "/spelling.js?v=20260607-6",
+  "/ui-preferences.js?v=20260607-6",
+  "/review-state.js?v=20260607-6",
+  "/study-one-more.js?v=20260607-6",
+  "/sync.js?v=20260607-6",
+  "/fsrs-scheduler.js?v=20260607-6",
+  "/goal-forecast.js?v=20260607-6",
+  "/tracks.js?v=20260607-6",
+  "/styles.css?v=20260607-6",
+  "/wordlover-config.js?v=20260607-6",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-5",
+  "/automated-tests.js?v=20260607-6",
 ];
 
 let lastResults = null;

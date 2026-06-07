@@ -2166,6 +2166,17 @@ li button {
   ry: 2;
 }
 
+.history-chart .h-bar-clickable {
+  cursor: pointer;
+}
+
+.history-chart .h-bar-clickable:focus,
+.history-chart .h-bar-clickable:hover {
+  filter: brightness(0.92);
+  outline: 2px solid color-mix(in srgb, var(--accent), transparent 20%);
+  outline-offset: 2px;
+}
+
 .history-chart .h-bar-new {
   fill: #0072b2;
 }
@@ -2229,6 +2240,46 @@ li button {
 
 .history-legend i.dot-down {
   background: repeating-linear-gradient(45deg, #d55e00 0 2px, #7a3500 2px 4px);
+}
+
+.history-drilldown {
+  margin-top: 12px;
+}
+
+.history-drilldown:empty {
+  display: none;
+}
+
+.history-drilldown-head {
+  align-items: flex-start;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
+.history-drilldown h3 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
+.history-word-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0;
+}
+
+.history-word-list button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  justify-content: flex-start;
+  width: 100%;
 }
 
 @media (max-width: 900px) {

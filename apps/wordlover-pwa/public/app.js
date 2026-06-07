@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-5";
+} from "./fsrs-scheduler.js?v=20260607-6";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-5";
+} from "./persistence.js?v=20260607-6";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-5";
+} from "./spelling.js?v=20260607-6";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-5";
+} from "./ui-preferences.js?v=20260607-6";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-5";
+} from "./review-state.js?v=20260607-6";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-5";
+} from "./study-one-more.js?v=20260607-6";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-5";
+} from "./sync.js?v=20260607-6";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-5";
+} from "./goal-forecast.js?v=20260607-6";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-5";
+} from "./tracks.js?v=20260607-6";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -178,6 +178,7 @@ const vocabularyTrackTabs = document.querySelectorAll("[data-vocab-track]");
 const historyChart = document.querySelector("#historyChart");
 const historyChartSummary = document.querySelector("#historyChartSummary");
 const historyRangeLabel = document.querySelector("#historyRangeLabel");
+const historyDrilldown = document.querySelector("#historyDrilldown");
 const historyPrevButton = document.querySelector("#historyPrev");
 const historyNextButton = document.querySelector("#historyNext");
 const historyTodayButton = document.querySelector("#historyToday");
@@ -220,9 +221,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-5-v118";
+const APP_VERSION = "0.6.2-product.20260607-6-v119";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v118";
+const SHELL_CACHE_VERSION = "wordlover-shell-v119";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -337,6 +338,7 @@ let historyView = {
   anchorMs: null,
   track: "vocabulary",
 };
+let historySelection = null;
 let debugMode = {
   enabled: false,
   sessionId: null,
@@ -3382,6 +3384,13 @@ function refreshReviewScheduleViews() {
 }
 
 const HISTORY_RATING_LEVEL = { again: 1, hard: 2, good: 3, easy: 4 };
+const HISTORY_SERIES = [
+  { key: "newWords", type: "new", label: "New", cls: "h-bar-new" },
+  { key: "reviewed", type: "reviewed", label: "Reviewed", cls: "h-bar-reviewed" },
+  { key: "known", type: "known", label: "Known", cls: "h-bar-known" },
+  { key: "leveledUp", type: "level-up", label: "Level up", cls: "h-bar-up" },
+  { key: "leveledDown", type: "level-down", label: "Level down", cls: "h-bar-down" },
+];
 
 function startOfDay(date) {
   const d = new Date(date);
@@ -3458,51 +3467,120 @@ function computeHistoryBuckets(granularity, anchorDate) {
 }
 
 function summarizeHistoryBuckets(buckets) {
-  const isSpelling = historyView.track === "spelling";
-  const events = isSpelling ? spellingEvents : studyEvents;
-  const items = isSpelling ? spellingItems : vocabularyItems;
-  const knownAt = isSpelling ? [] : knownWords.map((record) => Date.parse(record.knownAt)).filter(Number.isFinite);
-  const previousRatingByTerm = new Map();
-  const sortedReviews = events
-    .filter((event) => event?.type === "review" && event.normalizedTerm && event.rating)
-    .slice()
-    .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
-  const newWordSavedAt = items.map((item) => Date.parse(item.savedAt)).filter(Number.isFinite);
   return buckets.map((bucket) => {
-    const startMs = bucket.start.getTime();
-    const endMs = bucket.end.getTime();
-    let reviewed = 0;
-    let leveledUp = 0;
-    let leveledDown = 0;
-    for (const event of sortedReviews) {
-      const eventMs = Date.parse(event.occurredAt);
-      if (!Number.isFinite(eventMs)) continue;
-      const prev = previousRatingByTerm.get(event.normalizedTerm);
-      if (eventMs >= startMs && eventMs < endMs) {
-        reviewed += 1;
-        if (prev != null) {
-          const before = HISTORY_RATING_LEVEL[prev] ?? 0;
-          const after = HISTORY_RATING_LEVEL[event.rating] ?? 0;
-          if (after > before) leveledUp += 1;
-          if (after < before) leveledDown += 1;
-        }
-      }
-      previousRatingByTerm.set(event.normalizedTerm, event.rating);
-    }
-    const newWords = newWordSavedAt.filter((ms) => ms >= startMs && ms < endMs).length;
-    const known = knownAt.filter((ms) => ms >= startMs && ms < endMs).length;
+    // Keep chart bar counts and click drill-down rows in lockstep. Review
+    // events can repeat for the same term inside a bucket, but the UI shows
+    // corresponding words, so these are unique word counts.
+    const newWords = getHistoryDrilldownRecords(bucket, "new").length;
+    const reviewed = getHistoryDrilldownRecords(bucket, "reviewed").length;
+    const known = getHistoryDrilldownRecords(bucket, "known").length;
+    const leveledUp = getHistoryDrilldownRecords(bucket, "level-up").length;
+    const leveledDown = getHistoryDrilldownRecords(bucket, "level-down").length;
     return { ...bucket, newWords, reviewed, known, leveledUp, leveledDown };
   });
 }
 
+function historyBucketByIndex(index) {
+  const buckets = computeHistoryBuckets(historyView.granularity, getHistoryAnchorDate());
+  return buckets[index] ?? null;
+}
+
+function historyRecordLabel(record) {
+  return record?.term ?? record?.normalizedTerm ?? "";
+}
+
+function historyUniqueTerms(records) {
+  const seen = new Set();
+  const out = [];
+  for (const record of records) {
+    const normalized = normalizeTerm(record.normalizedTerm ?? record.term ?? "");
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push({ ...record, normalizedTerm: normalized, term: historyRecordLabel(record) || normalized });
+  }
+  return out;
+}
+
+function getHistoryDrilldownRecords(bucket, type) {
+  if (!bucket) return [];
+  const isSpelling = historyView.track === "spelling";
+  const events = isSpelling ? spellingEvents : studyEvents;
+  const items = isSpelling ? spellingItems : vocabularyItems;
+  const startMs = bucket.start.getTime();
+  const endMs = bucket.end.getTime();
+  const inBucket = (value) => {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) && ms >= startMs && ms < endMs;
+  };
+  if (type === "new") {
+    return historyUniqueTerms(items.filter((item) => inBucket(item.savedAt)));
+  }
+  if (type === "known") {
+    if (isSpelling) return [];
+    return historyUniqueTerms(knownWords.filter((record) => inBucket(record.knownAt)));
+  }
+  const previousRatingByTerm = new Map();
+  const matches = [];
+  const sortedReviews = events
+    .filter((event) => event?.type === "review" && event.normalizedTerm && event.rating)
+    .slice()
+    .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
+  for (const event of sortedReviews) {
+    const prev = previousRatingByTerm.get(event.normalizedTerm);
+    const eventMs = Date.parse(event.occurredAt);
+    if (Number.isFinite(eventMs) && eventMs >= startMs && eventMs < endMs) {
+      const before = HISTORY_RATING_LEVEL[prev] ?? 0;
+      const after = HISTORY_RATING_LEVEL[event.rating] ?? 0;
+      if (
+        type === "reviewed"
+        || (type === "level-up" && prev != null && after > before)
+        || (type === "level-down" && prev != null && after < before)
+      ) {
+        matches.push(event);
+      }
+    }
+    previousRatingByTerm.set(event.normalizedTerm, event.rating);
+  }
+  return historyUniqueTerms(matches);
+}
+
+function renderHistoryDrilldown() {
+  if (!historyDrilldown) return;
+  if (!historySelection) {
+    historyDrilldown.innerHTML = "";
+    return;
+  }
+  const bucket = historyBucketByIndex(historySelection.bucketIndex);
+  const series = HISTORY_SERIES.find((item) => item.type === historySelection.type);
+  if (!bucket || !series) {
+    historyDrilldown.innerHTML = "";
+    return;
+  }
+  const records = getHistoryDrilldownRecords(bucket, series.type);
+  const range = describeHistoryRange(historyView.granularity, [bucket], false);
+  const title = `${series.label} words - ${range}`;
+  historyDrilldown.innerHTML = `
+    <div class="history-drilldown-head">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        <p class="muted">${records.length} word${records.length === 1 ? "" : "s"}</p>
+      </div>
+      <button class="secondary-button" type="button" data-history-drilldown-close="1">Close</button>
+    </div>
+    ${records.length
+      ? `<ol class="history-word-list">
+          ${records.map((record) => `
+            <li>
+              <button type="button" data-history-open-term="${escapeHtml(record.term)}">${escapeHtml(record.term)}</button>
+            </li>
+          `).join("")}
+        </ol>`
+      : `<p class="muted">No words in this group.</p>`}
+  `;
+}
+
 function renderHistoryChartSvg(rows) {
-  const series = [
-    { key: "newWords", cls: "h-bar-new" },
-    { key: "reviewed", cls: "h-bar-reviewed" },
-    { key: "known", cls: "h-bar-known" },
-    { key: "leveledUp", cls: "h-bar-up" },
-    { key: "leveledDown", cls: "h-bar-down" },
-  ];
+  const series = HISTORY_SERIES;
   const maxValue = Math.max(
     1,
     ...rows.flatMap((row) => series.map((s) => row[s.key] ?? 0)),
@@ -3536,7 +3614,10 @@ function renderHistoryChartSvg(rows) {
           const barHeight = (value / maxValue) * plotHeight;
           const x = groupX + sIdx * (barWidth + seriesGap);
           const y = margin.top + plotHeight - barHeight;
-          return `<rect class="h-bar ${s.cls}" x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, barHeight)}"><title>${escapeHtml(`${row.label} - ${s.key}: ${value}`)}</title></rect>`;
+          const clickableClass = value > 0 ? " h-bar-clickable" : "";
+          const tabIndex = value > 0 ? "0" : "-1";
+          const ariaLabel = `${s.label}, ${row.label}: ${value} word${value === 1 ? "" : "s"}`;
+          return `<rect class="h-bar${clickableClass} ${s.cls}" role="button" tabindex="${tabIndex}" data-history-bucket="${groupIndex}" data-history-type="${escapeHtml(s.type)}" aria-label="${escapeHtml(ariaLabel)}" x="${x}" y="${y}" width="${barWidth}" height="${Math.max(0, barHeight)}"><title>${escapeHtml(ariaLabel)}</title></rect>`;
         })
         .join("");
       const labelX = groupX + groupWidth / 2;
@@ -3588,6 +3669,7 @@ function renderHistoryChart() {
   } else {
     historyChart.innerHTML = renderHistoryChartSvg(rows);
   }
+  renderHistoryDrilldown();
   const todayMs = startOfDay(new Date(realNowMs())).getTime();
   const isToday = isAnchorToday();
   historyRangeLabel.textContent = describeHistoryRange(historyView.granularity, buckets, isToday);
@@ -7543,6 +7625,49 @@ historyList.addEventListener("click", (event) => {
   void runLookup({ commit: true });
 });
 
+function openHistoryTerm(term) {
+  termInput.value = term;
+  void runLookup({ commit: true });
+  termInput.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function selectHistoryBar(target) {
+  const bar = target.closest?.("[data-history-bucket][data-history-type]");
+  if (!(bar instanceof SVGElement)) return false;
+  const bucketIndex = Number(bar.dataset.historyBucket);
+  const type = bar.dataset.historyType;
+  if (!Number.isInteger(bucketIndex) || !type) return false;
+  historySelection = { bucketIndex, type };
+  renderHistoryDrilldown();
+  return true;
+}
+
+if (historyChart) {
+  historyChart.addEventListener("click", (event) => {
+    selectHistoryBar(event.target);
+  });
+  historyChart.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (selectHistoryBar(event.target)) event.preventDefault();
+  });
+}
+
+if (historyDrilldown) {
+  historyDrilldown.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("[data-history-drilldown-close]")) {
+      historySelection = null;
+      renderHistoryDrilldown();
+      return;
+    }
+    const wordButton = target.closest("[data-history-open-term]");
+    if (wordButton instanceof HTMLButtonElement) {
+      openHistoryTerm(wordButton.dataset.historyOpenTerm ?? "");
+    }
+  });
+}
+
 suggestions.addEventListener("click", (event) => {
   if (!(event.target instanceof HTMLButtonElement)) return;
   termInput.value = event.target.dataset.term ?? "";
@@ -8183,6 +8308,7 @@ for (const button of historyGranularityButtons) {
   button.addEventListener("click", () => {
     const next = button.dataset.historyGranularity;
     if (!next || next === historyView.granularity) return;
+    historySelection = null;
     historyView = { ...historyView, granularity: normalizeHistoryGranularity(next) };
     renderHistoryChart();
     void persistUiPreferences();
@@ -8193,6 +8319,7 @@ for (const tab of historyTrackTabs) {
   tab.addEventListener("click", () => {
     const next = tab.dataset.historyTrack;
     if (!next || next === historyView.track) return;
+    historySelection = null;
     historyView = { ...historyView, track: next };
     renderHistoryChart();
     void persistUiPreferences();
@@ -8200,19 +8327,23 @@ for (const tab of historyTrackTabs) {
 }
 
 historyPrevButton.addEventListener("click", () => {
+  historySelection = null;
   shiftHistoryAnchor(-1);
 });
 
 historyNextButton.addEventListener("click", () => {
+  historySelection = null;
   shiftHistoryAnchor(1);
 });
 
 historyTodayButton.addEventListener("click", () => {
+  historySelection = null;
   historyView = { ...historyView, anchorMs: null };
   renderHistoryChart();
 });
 
 historyAnchorInput.addEventListener("change", () => {
+  historySelection = null;
   const value = historyAnchorInput.value;
   if (!value) {
     historyView = { ...historyView, anchorMs: null };
