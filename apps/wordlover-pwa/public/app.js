@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-3";
+} from "./fsrs-scheduler.js?v=20260607-4";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-3";
+} from "./persistence.js?v=20260607-4";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-3";
+} from "./spelling.js?v=20260607-4";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-3";
+} from "./ui-preferences.js?v=20260607-4";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-3";
+} from "./review-state.js?v=20260607-4";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-3";
+} from "./study-one-more.js?v=20260607-4";
 
 import {
   studyEventTrack,
@@ -70,7 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-3";
+} from "./sync.js?v=20260607-4";
+
+import {
+  forecastGoalWorkload,
+} from "./goal-forecast.js?v=20260607-4";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -183,9 +187,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-3-v116";
+const APP_VERSION = "0.6.2-product.20260607-4-v117";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v116";
+const SHELL_CACHE_VERSION = "wordlover-shell-v117";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -7853,7 +7857,7 @@ document.addEventListener("keydown", (event) => {
 // snapshot); all progress and suggestions are computed at render time from
 // vocabularyItems + studyEvents, so there is no extra state to keep consistent.
 const GOALS_PERIODS = ["day", "week", "month"];
-const STARTER_GOALS = { newPerDay: 5, reviewsPerDay: 15, masteredPerWeek: 5, masteredPerMonth: 20 };
+const STARTER_GOALS = { newPerDay: 5, reviewsPerDay: 15, masteredPerWeek: 5, masteredPerMonth: 20, desiredRetention: 0.9, forecastDays: 30 };
 let studyGoals = null;
 let goalsPeriod = "day";
 
@@ -7862,6 +7866,7 @@ const goalsSummary = document.querySelector("#goalsSummary");
 const goalsPeriodTabsWrap = document.querySelector("#goalsPeriodTabs");
 const goalsPeriodTabs = document.querySelectorAll("[data-goals-period]");
 const goalsProgressEl = document.querySelector("#goalsProgress");
+const goalsForecastEl = document.querySelector("#goalsForecast");
 const goalsSuggestionsEl = document.querySelector("#goalsSuggestions");
 const setGoalsButton = document.querySelector("#setGoalsButton");
 
@@ -7871,15 +7876,30 @@ function clampInt(value, min, max, fallback) {
   return Math.min(max, Math.max(min, n));
 }
 
+function normalizeDesiredRetention(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n > 1) return STARTER_GOALS.desiredRetention;
+  return Math.min(0.99, Math.max(0.7, Math.round(n * 100) / 100));
+}
+
 function normalizeStudyGoals(raw) {
   if (!raw || typeof raw !== "object") return null;
+  // The user only sets `newPerDay` (plus optional advanced settings); reviews
+  // are forecast from FSRS, not a manually fixed target. The legacy review/
+  // mastery targets are kept for back-compat, sync merge, and the progress
+  // bars, but are no longer collected in the wizard.
+  const maxStudyRaw = Number(raw.maxStudyMinutesPerDay);
   return {
     version: 1,
     track: "vocabulary",
-    newPerDay: clampInt(raw.newPerDay, 1, 100, STARTER_GOALS.newPerDay),
+    newPerDay: clampInt(raw.newPerDay, 0, 100, STARTER_GOALS.newPerDay),
     reviewsPerDay: clampInt(raw.reviewsPerDay, 1, 300, STARTER_GOALS.reviewsPerDay),
     masteredPerWeek: clampInt(raw.masteredPerWeek, 1, 200, STARTER_GOALS.masteredPerWeek),
     masteredPerMonth: clampInt(raw.masteredPerMonth, 1, 800, STARTER_GOALS.masteredPerMonth),
+    desiredRetention: normalizeDesiredRetention(raw.desiredRetention),
+    forecastDays: clampInt(raw.forecastDays, 7, 90, STARTER_GOALS.forecastDays),
+    maxStudyMinutesPerDay: Number.isFinite(maxStudyRaw) && maxStudyRaw > 0 ? clampInt(maxStudyRaw, 1, 600, 0) : null,
+    goalMode: raw.goalMode === "time_first" ? "time_first" : "new_words_first",
     createdAt: raw.createdAt ?? nowIso(),
     updatedAt: raw.updatedAt ?? nowIso(),
     source: raw.source ?? "wizard",
@@ -8025,6 +8045,172 @@ function computeGoalSuggestions() {
   return out;
 }
 
+// --- FSRS review-workload forecast -------------------------------------------
+// Reviews are forecast from the learner's real FSRS cards, never a fixed target.
+// The simulation runs on clones (see goal-forecast.js), so it cannot change any
+// real due date. We memoize on a cheap signature so frequent re-renders (focus,
+// visibility, review refresh) don't re-run the simulation needlessly.
+
+let goalForecastMemo = { signature: null, value: null };
+
+// Active vocabulary cards as read-only review-state snapshots for the forecast.
+function buildForecastCards() {
+  return vocabularyItems
+    .filter((item) => !item.archivedAt)
+    .map((item) => ({
+      fsrsCard: item.review?.fsrsCard ?? null,
+      dueAt: item.review?.dueAt ?? item.savedAt ?? null,
+      reviewCount: item.review?.reviewCount ?? 0,
+    }));
+}
+
+// Habit stats over the last 30 days, used to predict ratings and craft
+// encouraging insights. Pure read of vocabularyItems + studyEvents.
+function computeForecastUserStats() {
+  const now = appNowMs();
+  const windowStart = now - 30 * NORMAL_DAY_MS;
+  const reviewEvents = studyEvents.filter((event) => event.type === "review" && Number.isFinite(Date.parse(event.occurredAt ?? "")));
+  const recentReviews = reviewEvents.filter((event) => Date.parse(event.occurredAt) >= windowStart);
+  const ratingCounts = { again: 0, hard: 0, good: 0, easy: 0 };
+  const reviewDays = new Set();
+  for (const event of recentReviews) {
+    const rating = String(event.rating ?? "").toLowerCase();
+    if (rating in ratingCounts) ratingCounts[rating] += 1;
+    reviewDays.add(localDateKey(Date.parse(event.occurredAt)));
+  }
+  const totalRecentRatings = ratingCounts.again + ratingCounts.hard + ratingCounts.good + ratingCounts.easy;
+  const lapseRate = totalRecentRatings > 0 ? ratingCounts.again / totalRecentRatings : 0;
+  const newLast30 = vocabularyItems.filter((item) => {
+    const t = Date.parse(item.savedAt ?? "");
+    return Number.isFinite(t) && t >= windowStart;
+  }).length;
+
+  // Current review streak: consecutive days (ending today or yesterday) that had
+  // at least one review.
+  let streak = 0;
+  for (let offset = 0; offset < 60; offset += 1) {
+    const key = localDateKey(now - offset * NORMAL_DAY_MS);
+    if (reviewDays.has(key)) {
+      streak += 1;
+    } else if (offset === 0) {
+      // today not done yet — keep counting from yesterday
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    lapseRate,
+    ratingCounts,
+    totalRecentRatings,
+    newLast30,
+    reviewsLast30: recentReviews.length,
+    daysStudiedLast30: reviewDays.size,
+    avgReviewsPerActiveDay: reviewDays.size ? Math.round(recentReviews.length / reviewDays.size) : 0,
+    streak,
+  };
+}
+
+function currentGoalForecast() {
+  if (!studyGoals) return null;
+  const signature = [
+    studyGoals.updatedAt,
+    studyGoals.newPerDay,
+    studyGoals.desiredRetention,
+    studyGoals.forecastDays,
+    studyGoals.maxStudyMinutesPerDay ?? "",
+    vocabularyItems.length,
+    studyEvents.length,
+    localDateKey(appNowMs()),
+  ].join("|");
+  if (goalForecastMemo.signature === signature) return goalForecastMemo.value;
+  const userStats = computeForecastUserStats();
+  const value = {
+    forecast: forecastGoalWorkload({
+      dailyNewWords: studyGoals.newPerDay,
+      desiredRetention: studyGoals.desiredRetention,
+      forecastDays: studyGoals.forecastDays,
+      maxStudyMinutesPerDay: studyGoals.maxStudyMinutesPerDay || undefined,
+      goalMode: studyGoals.goalMode,
+      startMs: appNowMs(),
+    }, buildForecastCards(), userStats),
+    userStats,
+  };
+  goalForecastMemo = { signature, value };
+  return value;
+}
+
+const SUSTAINABILITY_COPY = {
+  easy: { label: "Comfortable", message: "This goal looks very sustainable." },
+  good: { label: "Sustainable", message: "This goal looks sustainable." },
+  heavy: { label: "Heavy", message: "This goal may create a heavy review load." },
+  too_heavy: { label: "Too heavy", message: "This goal is likely too much to keep up with." },
+};
+
+function formatMinutesRange(range) {
+  const low = Math.max(0, Math.round(range.low));
+  const high = Math.max(low, Math.round(range.high));
+  return low === high ? `${high} min` : `${low}–${high} min`;
+}
+
+// Positive, numeric insights from the last 30 days of habits.
+function forecastInsights(forecast, userStats) {
+  const out = [];
+  if (userStats.streak >= 2) {
+    out.push(`You're on a ${userStats.streak}-day review streak — consistency like this is what makes new words stick.`);
+  }
+  if (userStats.daysStudiedLast30 >= 3) {
+    out.push(`Over the last 30 days you reviewed on ${userStats.daysStudiedLast30} day${userStats.daysStudiedLast30 === 1 ? "" : "s"} and added ${userStats.newLast30} new word${userStats.newLast30 === 1 ? "" : "s"}.`);
+  }
+  if (forecast.headroomDailyNewWords && forecast.headroomDailyNewWords > forecast.dailyNewWords) {
+    out.push(`Your recent pace suggests you could handle about ${forecast.headroomDailyNewWords} new words/day and still keep the review load comfortable.`);
+  }
+  return out;
+}
+
+function renderForecastPanel() {
+  if (!goalsForecastEl) return;
+  if (!studyGoals) {
+    goalsForecastEl.innerHTML = "";
+    return;
+  }
+  const computed = currentGoalForecast();
+  if (!computed) {
+    goalsForecastEl.innerHTML = "";
+    return;
+  }
+  const { forecast, userStats } = computed;
+  const copy = SUSTAINABILITY_COPY[forecast.sustainability] ?? SUSTAINABILITY_COPY.good;
+  const backlog = forecast.todayDueReviews;
+  const overdueWarning = backlog > Math.max(20, studyGoals.newPerDay * 4)
+    ? `<p class="goals-forecast-warning">You have ${backlog} reviews due. Finish reviews first before adding more new words.</p>`
+    : "";
+  const heavyGuidance = (forecast.sustainability === "heavy" || forecast.sustainability === "too_heavy")
+    ? `<p class="goals-forecast-warning">${escapeHtml(copy.message)}${forecast.suggestedDailyNewWords != null ? ` Try about ${forecast.suggestedDailyNewWords} new words/day, and keep up with all due reviews first — consider pausing new words until the backlog is under control.` : ""}</p>`
+    : `<p class="goals-forecast-note">${escapeHtml(copy.message)}</p>`;
+  const insights = forecastInsights(forecast, userStats);
+  const retentionPct = Math.round(forecast.desiredRetention * 100);
+
+  goalsForecastEl.innerHTML = `
+    <div class="goals-forecast-head">
+      <h3 class="goals-tips-title">Review forecast</h3>
+      <span class="goals-forecast-badge goals-forecast-${forecast.sustainability}">${escapeHtml(copy.label)}</span>
+    </div>
+    <div class="forecast-grid">
+      <div><span>Due today</span><strong>${forecast.todayDueReviews}</strong></div>
+      <div><span>Avg / day (7d)</span><strong>${forecast.avgReviews7Days}</strong></div>
+      <div><span>Avg / day (30d)</span><strong>${forecast.avgReviews30Days}</strong></div>
+      <div><span>Peak day (30d)</span><strong>${forecast.peakReviews30Days}</strong></div>
+      <div><span>Study time / day</span><strong>${escapeHtml(formatMinutesRange(forecast.estimatedMinutesPerDay))}</strong></div>
+    </div>
+    ${overdueWarning}
+    ${heavyGuidance}
+    ${insights.length ? `<ul class="goals-forecast-insights">${insights.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>` : ""}
+    <p class="goals-forecast-explainer">Reviews are forecast by FSRS from your memory state, word difficulty, due dates, and target retention (${retentionPct}%). The expected number updates after each session as you answer Again, Hard, Good, or Easy.</p>
+  `;
+}
+
 function renderGoalBar(label, done, target) {
   const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
   const met = target > 0 && done >= target;
@@ -8045,6 +8231,7 @@ function renderGoalsPanel() {
     if (setGoalsButton) setGoalsButton.textContent = "Set goals";
     goalsSummary.textContent = "Set a daily goal and get tips to reach it.";
     goalsProgressEl.innerHTML = `<p class="muted goals-cta">No goals yet — tap “Set goals”. Takes about 20 seconds.</p>`;
+    if (goalsForecastEl) goalsForecastEl.innerHTML = "";
     goalsSuggestionsEl.innerHTML = "";
     return;
   }
@@ -8058,6 +8245,7 @@ function renderGoalsPanel() {
     renderGoalBar("New words", stats.newSaved, targets.new) +
     renderGoalBar("Reviews", stats.reviewed, targets.reviews) +
     renderGoalBar("Mastered", stats.mastered, targets.mastered);
+  renderForecastPanel();
   const suggestions = computeGoalSuggestions();
   goalsSuggestionsEl.innerHTML = `<h3 class="goals-tips-title">Suggestions</h3><ul>${suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`;
 }
@@ -8065,28 +8253,61 @@ function renderGoalsPanel() {
 async function saveStudyGoals(next, source = "wizard") {
   const now = nowIso();
   const created = studyGoals?.createdAt ?? now;
-  studyGoals = normalizeStudyGoals({ ...next, createdAt: created, updatedAt: now, source });
+  // Merge onto the existing goals so legacy/derived fields (reviewsPerDay,
+  // mastery targets) survive a wizard save that only sets new-word + advanced.
+  studyGoals = normalizeStudyGoals({ ...(studyGoals ?? {}), ...next, createdAt: created, updatedAt: now, source });
   await saveValue("studyGoals", studyGoals);
   renderGoalsPanel();
   return studyGoals;
 }
 
 async function openGoalsWizard() {
-  const base = studyGoals ?? goalDefaults();
+  const base = studyGoals ?? normalizeStudyGoals(goalDefaults());
   const suggested = goalDefaults();
+  const retentionPct = Math.round((base.desiredRetention ?? 0.9) * 100);
   const values = await showModal({
-    title: studyGoals ? "Edit your goals" : "Set your study goals",
-    body: `Pick targets you can keep. Based on your recent activity we suggest about ${suggested.newPerDay} new words and ${suggested.reviewsPerDay} reviews per day.`,
-    submitText: "Save goals",
+    title: studyGoals ? "Edit your goal" : "Set your daily goal",
+    body: `Choose how many new words you want to learn each day. WordFan forecasts your review load with FSRS — you don't set a review target.`,
+    submitText: "Save goal",
     fields: [
-      { id: "newPerDay", label: "New words per day", type: "number", value: String(base.newPerDay), hint: `Suggested: ${suggested.newPerDay}` },
-      { id: "reviewsPerDay", label: "Reviews per day", type: "number", value: String(base.reviewsPerDay), hint: `Suggested: ${suggested.reviewsPerDay}` },
-      { id: "masteredPerWeek", label: "Words mastered per week", type: "number", value: String(base.masteredPerWeek), hint: `Suggested: ${suggested.masteredPerWeek}` },
-      { id: "masteredPerMonth", label: "Words mastered per month", type: "number", value: String(base.masteredPerMonth), hint: `Suggested: ${suggested.masteredPerMonth}` },
+      { id: "newPerDay", label: "New words per day", type: "number", value: String(base.newPerDay), hint: `Suggested: ${suggested.newPerDay} based on your recent pace` },
+      {
+        id: "desiredRetention",
+        label: "Target memory strength (advanced)",
+        type: "select",
+        value: String(retentionPct),
+        hint: "Higher means you review sooner and more often.",
+        options: [
+          { value: "80", label: "80% — fewer reviews, more forgetting" },
+          { value: "85", label: "85%" },
+          { value: "90", label: "90% — recommended" },
+          { value: "95", label: "95% — more reviews, less forgetting" },
+        ],
+      },
+      { id: "maxStudyMinutesPerDay", label: "Max study minutes/day (advanced, optional)", type: "number", value: base.maxStudyMinutesPerDay ? String(base.maxStudyMinutesPerDay) : "", placeholder: "e.g. 15", hint: "Leave blank to use default guidance." },
+      {
+        id: "forecastDays",
+        label: "Forecast range (advanced)",
+        type: "select",
+        value: String(base.forecastDays ?? 30),
+        options: [
+          { value: "14", label: "14 days" },
+          { value: "30", label: "30 days" },
+          { value: "60", label: "60 days" },
+          { value: "90", label: "90 days" },
+        ],
+      },
     ],
   });
   if (!values) return null;
-  return saveStudyGoals(values, "wizard");
+  const desiredRetention = (Number(values.desiredRetention) || 90) / 100;
+  const maxStudyMinutesPerDay = values.maxStudyMinutesPerDay?.trim() ? Number(values.maxStudyMinutesPerDay) : null;
+  return saveStudyGoals({
+    newPerDay: values.newPerDay,
+    desiredRetention,
+    forecastDays: Number(values.forecastDays) || 30,
+    maxStudyMinutesPerDay,
+  }, "wizard");
 }
 
 setGoalsButton?.addEventListener("click", () => { void openGoalsWizard(); });
@@ -8326,6 +8547,9 @@ window.WordLoverApp = {
   },
   goalDefaults,
   goalSuggestions: () => computeGoalSuggestions(),
+  goalForecast: () => currentGoalForecast(),
+  forecastGoalWorkload,
+  buildForecastCardsForTest: buildForecastCards,
   openGoalsWizard,
   setGoalsPeriod: (period) => {
     goalsPeriod = GOALS_PERIODS.includes(period) ? period : "day";

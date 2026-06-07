@@ -103,6 +103,55 @@ export function serializeFsrsCard(card) {
   return serialized;
 }
 
+// --- Forecast helpers (read-only, never mutate caller state) ----------------
+// The Goals forecast simulates many hypothetical reviews. These helpers reuse
+// the production card revive/serialize logic but operate on fresh copies, so a
+// forecast can never change a real card's scheduling.
+
+const forecastSchedulerCache = new Map();
+
+function schedulerForRetention(requestRetention) {
+  const value = Number(requestRetention);
+  const key = Number.isFinite(value) && value > 0 && value <= 1 ? Number(value.toFixed(4)) : 0.9;
+  let scheduler = forecastSchedulerCache.get(key);
+  if (!scheduler) {
+    scheduler = fsrs({ enable_fuzz: false, request_retention: key });
+    forecastSchedulerCache.set(key, scheduler);
+  }
+  return scheduler;
+}
+
+// Probability the card is still remembered at `atIso`, in [0,1]. New cards
+// (never reviewed) have no meaningful retrievability and return null.
+export function getCardRetrievability(reviewState = {}, atIso = new Date().toISOString()) {
+  const at = validDate(atIso);
+  const card = reviveFsrsCard(reviewState?.fsrsCard, reviewState?.dueAt ?? at.toISOString());
+  if (card.state === State.New || numeric(card.reps, 0) <= 0) return null;
+  return fsrsScheduler.get_retrievability(card, at, false);
+}
+
+// Like scheduleFromFsrsRating but with an explicit target retention and no
+// mastery bookkeeping — purely "given this rating now, when is it next due?".
+// Returns a serialized clone; the passed reviewState is left untouched.
+export function scheduleForecastReview(
+  reviewState = {},
+  rating = "good",
+  reviewedAtIso = new Date().toISOString(),
+  requestRetention = 0.9,
+) {
+  const reviewedAt = validDate(reviewedAtIso);
+  const card = reviveFsrsCard(reviewState?.fsrsCard, reviewState?.dueAt ?? reviewedAt.toISOString());
+  const scheduler = schedulerForRetention(requestRetention);
+  const result = scheduler.next(card, reviewedAt, ratingToFsrs(rating));
+  const fsrsCard = serializeFsrsCard(result.card);
+  return {
+    fsrsCard,
+    dueAt: fsrsCard.due,
+    intervalDays: numeric(result.card.scheduled_days, 0),
+    state: result.card.state,
+  };
+}
+
 export function serializeFsrsLog(log) {
   if (!log) return null;
   return {

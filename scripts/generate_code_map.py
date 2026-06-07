@@ -83,6 +83,11 @@ FEATURE_HINTS = {
         "review-state.js: review session state management",
         "automated-tests.js: review and quiz smoke coverage",
     ],
+    "Goals / review forecast": [
+        "app.js: renderGoalsPanel, renderForecastPanel, currentGoalForecast, openGoalsWizard, saveStudyGoals",
+        "goal-forecast.js: pure FSRS review-workload forecast (forecastGoalWorkload, predictRating)",
+        "fsrs-scheduler.js: getCardRetrievability, scheduleForecastReview (forecast-only helpers)",
+    ],
     "Persistence": [
         "persistence.js: IndexedDB access layer (separated from app.js)",
     ],

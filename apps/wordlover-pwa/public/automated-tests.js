@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-3";
+} from "./fsrs-scheduler.js?v=20260607-4";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-3";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-3";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-4";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-4";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-3";
+} from "./ui-preferences.js?v=20260607-4";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,12 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-3";
+} from "./sync.js?v=20260607-4";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-3";
+} from "./study-one-more.js?v=20260607-4";
+import {
+  forecastGoalWorkload,
+  predictRating,
+  normalizeForecastInput,
+} from "./goal-forecast.js?v=20260607-4";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -45,7 +50,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v116";
+const SHELL_CACHE_NAME = "wordlover-shell-v117";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -62,16 +67,17 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-3",
-  "/persistence.js?v=20260607-3",
-  "/spelling.js?v=20260607-3",
-  "/ui-preferences.js?v=20260607-3",
-  "/review-state.js?v=20260607-3",
-  "/study-one-more.js?v=20260607-3",
-  "/sync.js?v=20260607-3",
-  "/fsrs-scheduler.js?v=20260607-3",
-  "/styles.css?v=20260607-3",
-  "/wordlover-config.js?v=20260607-3",
+  "/app.js?v=20260607-4",
+  "/persistence.js?v=20260607-4",
+  "/spelling.js?v=20260607-4",
+  "/ui-preferences.js?v=20260607-4",
+  "/review-state.js?v=20260607-4",
+  "/study-one-more.js?v=20260607-4",
+  "/sync.js?v=20260607-4",
+  "/fsrs-scheduler.js?v=20260607-4",
+  "/goal-forecast.js?v=20260607-4",
+  "/styles.css?v=20260607-4",
+  "/wordlover-config.js?v=20260607-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -87,7 +93,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-3",
+  "/automated-tests.js?v=20260607-4",
 ];
 
 let lastResults = null;
@@ -1076,8 +1082,24 @@ async function runMainAppStudySmoke() {
       throw new Error(`Recent history timestamps should write and merge both fields: ${JSON.stringify({ savedHistoryEntry, mergedHistoryEntry })}`);
     }
 
-    const restoredGoalTargets = { newPerDay: 7, reviewsPerDay: 22, masteredPerWeek: 9, masteredPerMonth: 36 };
+    const restoredGoalTargets = { newPerDay: 7, reviewsPerDay: 22, masteredPerWeek: 9, masteredPerMonth: 36, desiredRetention: 0.95, forecastDays: 60, maxStudyMinutesPerDay: 18 };
     await frameWindow.WordLoverApp.setGoals(restoredGoalTargets);
+    const goalsAfterSet = frameWindow.WordLoverApp.getGoals();
+    const goalSettingsPersistNewFields =
+      goalsAfterSet?.desiredRetention === 0.95
+      && goalsAfterSet?.forecastDays === 60
+      && goalsAfterSet?.maxStudyMinutesPerDay === 18
+      && goalsAfterSet?.goalMode === "new_words_first";
+    const goalForecastComputed = frameWindow.WordLoverApp.goalForecast();
+    const goalForecastUsesFsrs =
+      goalForecastComputed != null
+      && Array.isArray(goalForecastComputed.forecast?.dailyBreakdown)
+      && goalForecastComputed.forecast.dailyBreakdown.length === 60
+      && typeof goalForecastComputed.forecast.avgReviews30Days === "number"
+      && ["easy", "good", "heavy", "too_heavy"].includes(goalForecastComputed.forecast.sustainability);
+    if (!goalSettingsPersistNewFields || !goalForecastUsesFsrs) {
+      throw new Error(`Goal forecast settings should persist and produce an FSRS forecast: ${JSON.stringify({ goalsAfterSet, sustainability: goalForecastComputed?.forecast?.sustainability, breakdown: goalForecastComputed?.forecast?.dailyBreakdown?.length })}`);
+    }
     const goalsSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
     const goalPanelText = () => frameDocument.querySelector("#goalsPanel")?.textContent ?? "";
     const localOlderGoalsSnapshot = {
@@ -1147,7 +1169,11 @@ async function runMainAppStudySmoke() {
     });
     frameWindow = frame.contentWindow;
     frameDocument = frame.contentDocument;
-    const goalsRestoreSurvivesReload = frameWindow.WordLoverApp.getGoals()?.newPerDay === restoredGoalTargets.newPerDay;
+    const reloadedGoalsState = frameWindow.WordLoverApp.getGoals();
+    const goalsRestoreSurvivesReload =
+      reloadedGoalsState?.newPerDay === restoredGoalTargets.newPerDay
+      && reloadedGoalsState?.desiredRetention === restoredGoalTargets.desiredRetention
+      && reloadedGoalsState?.forecastDays === restoredGoalTargets.forecastDays;
 
     await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
     const noBackupPassphraseStatus = await frameWindow.WordLoverApp.sync.backupEncryption.status();
@@ -2044,8 +2070,8 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d+)?-v110/i.test(updateStatusText) && !/v110/.test(updateCheckResult?.deviceVersion ?? "")) {
-      throw new Error(`App update check did not expose the current v110 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d+)?-v117/i.test(updateStatusText) && !/v117/.test(updateCheckResult?.deviceVersion ?? "")) {
+      throw new Error(`App update check did not expose the current v117 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
@@ -2074,6 +2100,8 @@ async function runMainAppStudySmoke() {
       goalsMergeFallsBackToNewerSnapshot,
       goalsRestoredImmediately,
       goalsRestoreSurvivesReload,
+      goalSettingsPersistNewFields,
+      goalForecastUsesFsrs,
       olderSnapshotWithoutGoalsStable,
       productionBackupPassphraseBlocksSync,
       backupPassphraseRoundTrips,
@@ -2574,10 +2602,54 @@ function runModuleSmokeTests() {
   assert("mergeUserDictionarySources deduped", userDict.length, 1);
   assert("mergeUserDictionarySources prefers newer", userDict[0].updatedAt, "2025-01-02T00:00:00.000Z");
 
+  // goal-forecast.js — predictRating thresholds (deterministic, no userStats).
+  assert("predictRating null retrievability => good", predictRating({}, null, {}), "good");
+  assert("predictRating 0.95 => easy", predictRating({}, 0.95, {}), "easy");
+  assert("predictRating 0.85 => good", predictRating({}, 0.85, {}), "good");
+  assert("predictRating 0.70 => hard", predictRating({}, 0.7, {}), "hard");
+  assert("predictRating 0.50 => again", predictRating({}, 0.5, {}), "again");
+
+  // normalizeForecastInput clamps and defaults.
+  const normInput = normalizeForecastInput({ dailyNewWords: 5, desiredRetention: 2, forecastDays: 1000 });
+  assert("normalizeForecastInput defaults retention", normInput.desiredRetention, 0.9);
+  assert("normalizeForecastInput clamps forecastDays", normInput.forecastDays, 90);
+  assert("normalizeForecastInput goalMode default", normInput.goalMode, "new_words_first");
+
+  // forecastGoalWorkload — shape, determinism, no card mutation, monotonicity.
+  const forecastNow = Date.parse("2026-06-07T08:00:00.000Z");
+  const seededCard = scheduleFromFsrsRating({}, "good", "2026-05-20T08:00:00.000Z");
+  const reviewedCard = { fsrsCard: seededCard.fsrsCard, dueAt: seededCard.dueAt, reviewCount: 1 };
+  const dueNewCard = { fsrsCard: null, dueAt: "2026-06-01T08:00:00.000Z", reviewCount: 0 };
+  const sampleCards = [reviewedCard, dueNewCard];
+  const cardsBefore = JSON.stringify(sampleCards);
+
+  const baseForecast = forecastGoalWorkload(
+    { dailyNewWords: 5, desiredRetention: 0.9, forecastDays: 30, startMs: forecastNow },
+    sampleCards,
+    {},
+  );
+  assert("forecast does not mutate input cards", JSON.stringify(sampleCards), cardsBefore);
+  assert("forecast has dailyBreakdown length 30", baseForecast.dailyBreakdown.length, 30);
+  assert("forecast exposes today due reviews number", typeof baseForecast.todayDueReviews, "number");
+  assert("forecast minutes range has low and high", typeof baseForecast.estimatedMinutesPerDay.low === "number" && typeof baseForecast.estimatedMinutesPerDay.high === "number", true);
+  assert("forecast is deterministic", JSON.stringify(forecastGoalWorkload({ dailyNewWords: 5, desiredRetention: 0.9, forecastDays: 30, startMs: forecastNow }, sampleCards, {})), JSON.stringify(baseForecast));
+
+  const lowNewWords = forecastGoalWorkload({ dailyNewWords: 2, desiredRetention: 0.9, forecastDays: 30, startMs: forecastNow }, sampleCards, {});
+  const highNewWords = forecastGoalWorkload({ dailyNewWords: 20, desiredRetention: 0.9, forecastDays: 30, startMs: forecastNow }, sampleCards, {});
+  assert("more daily new words => higher avg review load", highNewWords.avgReviews30Days > lowNewWords.avgReviews30Days, true);
+
+  const lowRetention = forecastGoalWorkload({ dailyNewWords: 10, desiredRetention: 0.8, forecastDays: 30, startMs: forecastNow }, sampleCards, {});
+  const highRetention = forecastGoalWorkload({ dailyNewWords: 10, desiredRetention: 0.95, forecastDays: 30, startMs: forecastNow }, sampleCards, {});
+  assert("higher desired retention => at least as many reviews", highRetention.avgReviews30Days >= lowRetention.avgReviews30Days, true);
+
+  const heavyForecast = forecastGoalWorkload({ dailyNewWords: 50, desiredRetention: 0.95, forecastDays: 30, maxStudyMinutesPerDay: 5, startMs: forecastNow }, sampleCards, {});
+  assert("heavy goal is flagged heavy or too_heavy", heavyForecast.sustainability === "heavy" || heavyForecast.sustainability === "too_heavy", true);
+  assert("heavy goal yields a lower suggested new-word count", typeof heavyForecast.suggestedDailyNewWords === "number" && heavyForecast.suggestedDailyNewWords < 50, true);
+
   return {
     passed: failures.length === 0,
     failures,
-    assertionCount: 38,
+    assertionCount: 55,
   };
 }
 

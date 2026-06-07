@@ -1,16 +1,17 @@
-const CACHE_NAME = "wordlover-shell-v116";
+const CACHE_NAME = "wordlover-shell-v117";
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-3",
-  "/persistence.js?v=20260607-3",
-  "/spelling.js?v=20260607-3",
-  "/ui-preferences.js?v=20260607-3",
-  "/review-state.js?v=20260607-3",
-  "/study-one-more.js?v=20260607-3",
-  "/sync.js?v=20260607-3",
-  "/fsrs-scheduler.js?v=20260607-3",
-  "/styles.css?v=20260607-3",
-  "/wordlover-config.js?v=20260607-3",
+  "/app.js?v=20260607-4",
+  "/persistence.js?v=20260607-4",
+  "/spelling.js?v=20260607-4",
+  "/ui-preferences.js?v=20260607-4",
+  "/review-state.js?v=20260607-4",
+  "/study-one-more.js?v=20260607-4",
+  "/sync.js?v=20260607-4",
+  "/fsrs-scheduler.js?v=20260607-4",
+  "/goal-forecast.js?v=20260607-4",
+  "/styles.css?v=20260607-4",
+  "/wordlover-config.js?v=20260607-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -29,7 +30,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-3",
+  "/automated-tests.js?v=20260607-4",
 ];
 
 self.addEventListener("install", (event) => {
