@@ -1277,14 +1277,79 @@ h1 {
   gap: 8px;
 }
 
-.study-one-more-control select {
-  min-height: 38px;
-  min-width: 132px;
-  width: auto;
+.study-one-more-hint {
+  margin: -4px 0 4px;
 }
 
-.study-one-more-hint {
-  margin: -4px 0 12px;
+.study-one-more-filter-popup {
+  background: var(--panel);
+  border-top: 1px solid var(--line-strong);
+  bottom: 0;
+  box-shadow: 0 -2px 16px var(--shadow);
+  left: 0;
+  max-height: 75dvh;
+  overflow-y: auto;
+  padding: 16px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  position: fixed;
+  right: 0;
+  z-index: 100;
+}
+
+.filter-popup-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.filter-row {
+  margin-bottom: 14px;
+}
+
+.filter-row-actions {
+  margin-top: 4px;
+}
+
+.filter-section-label {
+  display: block;
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.filter-range-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.filter-number-input {
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 96px;
+}
+
+.filter-range-sep {
+  flex-shrink: 0;
+}
+
+.filter-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.filter-tag-label {
+  align-items: center;
+  display: flex;
+  font-weight: 400;
+  gap: 6px;
+  margin-bottom: 0;
+  white-space: nowrap;
 }
 
 label {

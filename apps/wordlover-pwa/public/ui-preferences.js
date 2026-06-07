@@ -9,6 +9,35 @@ export const STUDY_ONE_MORE_LEVELS = [
   { id: "toefl", label: "TOEFL tagged words" },
 ];
 
+export const STUDY_ONE_MORE_TAGS = ["gk", "cet4", "cet6", "ky", "ielts", "toefl", "gre"];
+
+export const DEFAULT_STUDY_ONE_MORE_FILTER = {
+  includeFreqMin: null,
+  includeFreqMax: null,
+  excludeFreqMin: null,
+  excludeFreqMax: null,
+  includeTags: [],
+  excludeTags: [],
+  includePhrase: false,
+};
+
+export function normalizeStudyOneMoreFilter(raw = {}) {
+  const toIntOrNull = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const toTags = (v) => (Array.isArray(v) ? v.filter((t) => STUDY_ONE_MORE_TAGS.includes(t)) : []);
+  return {
+    includeFreqMin: toIntOrNull(raw?.includeFreqMin),
+    includeFreqMax: toIntOrNull(raw?.includeFreqMax),
+    excludeFreqMin: toIntOrNull(raw?.excludeFreqMin),
+    excludeFreqMax: toIntOrNull(raw?.excludeFreqMax),
+    includeTags: toTags(raw?.includeTags),
+    excludeTags: toTags(raw?.excludeTags),
+    includePhrase: Boolean(raw?.includePhrase),
+  };
+}
+
 export const DEFAULT_FONT_SCALE = 1;
 export const FONT_SCALE_MIN = 0.9;
 export const FONT_SCALE_MAX = 2;
@@ -44,6 +73,6 @@ export function normalizeUiPreferences(preferences = {}, fallback = {}) {
     historyGranularity: normalizeHistoryGranularity(preferences.historyGranularity ?? fallback.historyGranularity),
     fontScale: normalizeFontScale(preferences.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE),
     goalsPeriod: normalizeGoalsPeriod(preferences.goalsPeriod ?? fallback.goalsPeriod ?? "day"),
-    studyOneMoreLevel: normalizeStudyOneMoreLevel(preferences.studyOneMoreLevel ?? fallback.studyOneMoreLevel ?? "very_easy"),
+    studyOneMoreFilter: normalizeStudyOneMoreFilter(preferences.studyOneMoreFilter ?? fallback.studyOneMoreFilter ?? {}),
   };
 }

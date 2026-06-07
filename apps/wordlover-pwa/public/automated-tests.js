@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260606-5";
+} from "./fsrs-scheduler.js?v=20260607-2";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260606-5";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260606-5";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-2";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-2";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260606-5";
+} from "./ui-preferences.js?v=20260607-2";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,12 +26,12 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260606-5";
+} from "./sync.js?v=20260607-2";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260606-5";
+} from "./study-one-more.js?v=20260607-2";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -45,7 +45,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v113";
+const SHELL_CACHE_NAME = "wordlover-shell-v115";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -62,16 +62,16 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260606-5",
-  "/persistence.js?v=20260606-5",
-  "/spelling.js?v=20260606-5",
-  "/ui-preferences.js?v=20260606-5",
-  "/review-state.js?v=20260606-5",
-  "/study-one-more.js?v=20260606-5",
-  "/sync.js?v=20260606-5",
-  "/fsrs-scheduler.js?v=20260606-5",
-  "/styles.css?v=20260606-5",
-  "/wordlover-config.js?v=20260606-5",
+  "/app.js?v=20260607-2",
+  "/persistence.js?v=20260607-2",
+  "/spelling.js?v=20260607-2",
+  "/ui-preferences.js?v=20260607-2",
+  "/review-state.js?v=20260607-2",
+  "/study-one-more.js?v=20260607-2",
+  "/sync.js?v=20260607-2",
+  "/fsrs-scheduler.js?v=20260607-2",
+  "/styles.css?v=20260607-2",
+  "/wordlover-config.js?v=20260607-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -87,7 +87,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260606-5",
+  "/automated-tests.js?v=20260607-2",
 ];
 
 let lastResults = null;
@@ -913,7 +913,7 @@ async function runMainAppStudySmoke() {
       && /NOT/.test(frameWindow.WordLoverApp.studyOneMore.levelSql("easy"))
       && /is_toefl|tag/i.test(frameWindow.WordLoverApp.studyOneMore.levelSql("toefl"));
     studyOneMoreTests.dictionaryCandidateQueryIsLimited =
-      frameWindow.WordLoverApp.studyOneMore.queryCandidates("very_easy", 7).length <= 7;
+      frameWindow.WordLoverApp.studyOneMore.queryCandidates({}, 7).length <= 7;
     const manyCandidates = Array.from({ length: 300 }, (_, index) => ({
       word: `bulkword${index + 1}`,
       normalized_word: `bulkword${index + 1}`,
@@ -1360,7 +1360,7 @@ async function runMainAppStudySmoke() {
       historyGranularity: "weeks",
       fontScale: 1.3,
       goalsPeriod: "week",
-      studyOneMoreLevel: "hard",
+      studyOneMoreFilter: { includeFreqMin: 20001, includeFreqMax: 50000 },
     });
     const uiPreferenceSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
     const uiPreferencesIncludedInSnapshot =
@@ -1370,7 +1370,8 @@ async function runMainAppStudySmoke() {
       && uiPreferenceSnapshot.uiPreferences?.historyGranularity === "weeks"
       && uiPreferenceSnapshot.uiPreferences?.fontScale === 1.3
       && uiPreferenceSnapshot.uiPreferences?.goalsPeriod === "week"
-      && uiPreferenceSnapshot.uiPreferences?.studyOneMoreLevel === "hard";
+      && uiPreferenceSnapshot.uiPreferences?.studyOneMoreFilter?.includeFreqMin === 20001
+      && uiPreferenceSnapshot.uiPreferences?.studyOneMoreFilter?.includeFreqMax === 50000;
     frame.src = `/?suite-study-smoke=${Date.now()}&prefs-reload=1`;
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -1393,7 +1394,6 @@ async function runMainAppStudySmoke() {
     frameWindow = frame.contentWindow;
     frameDocument = frame.contentDocument;
     const reloadedUiPreferences = frameWindow.WordLoverApp.uiPreferences.state();
-    const reloadedStudyOneMoreLevelSelect = frameDocument.querySelector("#studyOneMoreLevel");
     const uiPreferencesSurviveReload =
       reloadedUiPreferences.todayTrack === "spelling"
       && reloadedUiPreferences.vocabularyTrack === "spelling"
@@ -1401,33 +1401,16 @@ async function runMainAppStudySmoke() {
       && reloadedUiPreferences.historyGranularity === "weeks"
       && reloadedUiPreferences.fontScale === 1.3
       && reloadedUiPreferences.goalsPeriod === "week"
-      && reloadedUiPreferences.studyOneMoreLevel === "hard"
-      && reloadedStudyOneMoreLevelSelect?.value === "hard"
+      && reloadedUiPreferences.studyOneMoreFilter?.includeFreqMin === 20001
+      && reloadedUiPreferences.studyOneMoreFilter?.includeFreqMax === 50000
       && uiPreferencesIncludedInSnapshot;
     if (!uiPreferencesSurviveReload) {
-      throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, reloadedStudyOneMoreLevelSelectValue: reloadedStudyOneMoreLevelSelect?.value, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
+      throw new Error(`UI preferences should survive app reload/update: ${JSON.stringify({ reloadedUiPreferences, uiPreferenceSnapshot: uiPreferenceSnapshot.uiPreferences })}`);
     }
 
-    // Verify selector change event persists studyOneMoreLevel
-    const studyOneMoreLevelSelectEl = frameDocument.querySelector("#studyOneMoreLevel");
-    if (studyOneMoreLevelSelectEl) {
-      studyOneMoreLevelSelectEl.value = "medium";
-      studyOneMoreLevelSelectEl.dispatchEvent(new frameWindow.Event("change", { bubbles: true }));
-      await new Promise((resolve) => frameWindow.setTimeout(resolve, 100));
-      const afterChangeSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
-      const selectorChangePersists = afterChangeSnapshot.uiPreferences?.studyOneMoreLevel === "medium";
-      if (!selectorChangePersists) {
-        throw new Error(`studyOneMoreLevel selector change should persist: got ${afterChangeSnapshot.uiPreferences?.studyOneMoreLevel}`);
-      }
-    }
-
-    // Regression: level set via selector change must survive a full page reload (not reset to very_easy)
-    const regressionSelectorEl = frameDocument.querySelector("#studyOneMoreLevel");
-    if (!regressionSelectorEl) throw new Error("Regression setup: #studyOneMoreLevel missing from frame DOM");
-    frameWindow.WordLoverApp.studyOneMore.setLevel("hard");
-    regressionSelectorEl.dispatchEvent(new frameWindow.Event("change", { bubbles: true }));
-    await new Promise((resolve) => frameWindow.setTimeout(resolve, 200));
-    frame.src = `/?suite-study-smoke=${Date.now()}&level-persist-reload=1`;
+    // Regression: filter set via API must survive a full page reload
+    await frameWindow.WordLoverApp.studyOneMore.setFilter({ includeFreqMin: 5000, includeFreqMax: 30000 });
+    frame.src = `/?suite-study-smoke=${Date.now()}&filter-persist-reload=1`;
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
@@ -1437,35 +1420,34 @@ async function runMainAppStudySmoke() {
         if (loaded) { window.clearInterval(timer); resolve(); return; }
         if (performance.now() - startedAt > 30000) {
           window.clearInterval(timer);
-          reject(new Error("Timed out waiting for level-persist-reload."));
+          reject(new Error("Timed out waiting for filter-persist-reload."));
         }
       }, 250);
     });
     frameWindow = frame.contentWindow;
     frameDocument = frame.contentDocument;
-    const levelAfterReload = frameWindow.WordLoverApp.uiPreferences.state().studyOneMoreLevel;
-    const selectValAfterReload = frameDocument.querySelector("#studyOneMoreLevel")?.value;
-    if (levelAfterReload !== "hard" || selectValAfterReload !== "hard") {
-      throw new Error(`studyOneMoreLevel set via selector change must survive reload: state=${levelAfterReload}, select=${selectValAfterReload}`);
+    const filterAfterReload = frameWindow.WordLoverApp.uiPreferences.state().studyOneMoreFilter;
+    if (filterAfterReload?.includeFreqMin !== 5000 || filterAfterReload?.includeFreqMax !== 30000) {
+      throw new Error(`studyOneMoreFilter must survive reload: ${JSON.stringify(filterAfterReload)}`);
     }
-    let selectorLevelCapturedByPick = null;
-    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(({ level }) => { selectorLevelCapturedByPick = level; });
+    let filterCapturedByPick = null;
+    frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(({ filter }) => { filterCapturedByPick = filter; });
     frameDocument.querySelector("#studyNewWord")?.click();
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
       const timer = window.setInterval(() => {
-        if (selectorLevelCapturedByPick !== null) { window.clearInterval(timer); resolve(); return; }
+        if (filterCapturedByPick !== null) { window.clearInterval(timer); resolve(); return; }
         if (performance.now() - startedAt > 5000) {
           window.clearInterval(timer);
-          reject(new Error("Timed out waiting for startNewWordStudy hook after level-persist reload."));
+          reject(new Error("Timed out waiting for startNewWordStudy hook after filter-persist reload."));
         }
       }, 50);
     });
     frameWindow.WordLoverApp.studyOneMore.setBeforePickHookForTest(null);
-    if (selectorLevelCapturedByPick !== "hard") {
-      throw new Error(`startNewWordStudy must use persisted "hard" level after reload, got "${selectorLevelCapturedByPick}"`);
+    if (filterCapturedByPick?.includeFreqMin !== 5000 || filterCapturedByPick?.includeFreqMax !== 30000) {
+      throw new Error(`startNewWordStudy must use persisted filter after reload, got ${JSON.stringify(filterCapturedByPick)}`);
     }
-    frameWindow.WordLoverApp.studyOneMore.setLevel("very_easy");
+    await frameWindow.WordLoverApp.studyOneMore.setFilter({});
 
     await frameWindow.WordLoverApp.auth.setGrantForTest(true);
     frameWindow.WordLoverApp.auth.clearTokenForTest();
@@ -2095,7 +2077,7 @@ async function runMainAppStudySmoke() {
       applyAfterCheckStatus: applyAfterCheck?.status,
       updateCheckStatus: updateCheckResult?.status,
       studyOneMoreMissCreatesAgainReview,
-      studyOneMoreLevelPersistsViaSelector: true,
+      studyOneMoreFilterPersists: true,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,
@@ -2464,7 +2446,7 @@ async function runManualExportFieldsTest() {
 
     const snapshot = frame.contentWindow.WordLoverApp.buildUserDataSnapshot();
     const hasKnownWords = "knownWords" in snapshot && Array.isArray(snapshot.knownWords);
-    const hasUiPreferencesStudyOneMoreLevel = typeof snapshot.uiPreferences?.studyOneMoreLevel === "string";
+    const hasUiPreferencesStudyOneMoreLevel = snapshot.uiPreferences != null && "studyOneMoreFilter" in snapshot.uiPreferences;
     const hasStudyGoals = "studyGoals" in snapshot;
     const hasTheme = "theme" in snapshot;
     const hasVocabularyItems = "vocabularyItems" in snapshot && Array.isArray(snapshot.vocabularyItems);

@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260606-5";
+} from "./fsrs-scheduler.js?v=20260607-2";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260606-5";
+} from "./persistence.js?v=20260607-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260606-5";
+} from "./spelling.js?v=20260607-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -30,16 +30,17 @@ import {
   normalizeHistoryGranularity,
   normalizeGoalsPeriod,
   normalizeStudyOneMoreLevel,
+  normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260606-5";
+} from "./ui-preferences.js?v=20260607-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260606-5";
+} from "./review-state.js?v=20260607-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -54,9 +55,11 @@ import {
   studyOneMoreCandidateAllowed,
   pickStudyOneMoreCandidateFromRows,
   pickStudyOneMoreCandidateFromOrderedRows,
+  pickStudyOneMoreCandidateFromFilteredRows,
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260606-5";
+  studyOneMoreFilterSql,
+} from "./study-one-more.js?v=20260607-2";
 
 import {
   studyEventTrack,
@@ -67,7 +70,7 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260606-5";
+} from "./sync.js?v=20260607-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -133,7 +136,13 @@ const statMastered = document.querySelector("#statMastered");
 const statKnown = document.querySelector("#statKnown");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
-const studyOneMoreLevelSelect = document.querySelector("#studyOneMoreLevel");
+const studyOneMoreFilterButton = document.querySelector("#studyOneMoreFilterButton");
+const studyOneMoreFilterPopup = document.querySelector("#studyOneMoreFilterPopup");
+const filterIncludeFreqMin = document.querySelector("#filterIncludeFreqMin");
+const filterIncludeFreqMax = document.querySelector("#filterIncludeFreqMax");
+const filterExcludeFreqMin = document.querySelector("#filterExcludeFreqMin");
+const filterExcludeFreqMax = document.querySelector("#filterExcludeFreqMax");
+const filterIncludePhrase = document.querySelector("#filterIncludePhrase");
 const studyOneMoreHint = document.querySelector("#studyOneMoreHint");
 const startSpellingReviewButton = document.querySelector("#startSpellingReview");
 const startSpellingPracticeMoreButton = document.querySelector("#startSpellingPracticeMore");
@@ -174,9 +183,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260606-5-v113";
+const APP_VERSION = "0.6.2-product.20260607-2-v115";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v113";
+const SHELL_CACHE_VERSION = "wordlover-shell-v115";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -278,7 +287,7 @@ let vocabularyView = {
   reviewCountMax: "",
 };
 let todayTrack = "vocabulary";
-let studyOneMoreLevel = "very_easy";
+let studyOneMoreFilter = normalizeStudyOneMoreFilter({});
 let activeStudyOneMoreEntry = null;
 let studyOneMoreBeforePickForTest = null;
 let lastStudyOneMoreDiagnostics = null;
@@ -342,7 +351,7 @@ function currentUiPreferences() {
     historyGranularity: normalizeHistoryGranularity(historyView.granularity),
     fontScale: normalizeFontScale(fontScale),
     goalsPeriod: normalizeGoalsPeriod(goalsPeriod),
-    studyOneMoreLevel: normalizeStudyOneMoreLevel(studyOneMoreLevel),
+    studyOneMoreFilter: normalizeStudyOneMoreFilter(studyOneMoreFilter),
   };
 }
 
@@ -359,8 +368,8 @@ function applyUiPreferences(preferences = {}) {
   };
   if (preferences.fontScale !== undefined) applyFontScale(preferences.fontScale);
   goalsPeriod = normalizeGoalsPeriod(preferences.goalsPeriod ?? goalsPeriod);
-  studyOneMoreLevel = normalizeStudyOneMoreLevel(preferences.studyOneMoreLevel ?? studyOneMoreLevel);
-  if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.value = studyOneMoreLevel;
+  studyOneMoreFilter = normalizeStudyOneMoreFilter(preferences.studyOneMoreFilter ?? studyOneMoreFilter);
+  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
   return currentUiPreferences();
 }
 
@@ -370,6 +379,37 @@ function normalizeUiPreferences(preferences = {}, fallback = currentUiPreference
 
 async function persistUiPreferences() {
   await saveValue("uiPreferences", currentUiPreferences());
+}
+
+function applyStudyOneMoreFilterToPopup(filter) {
+  if (!studyOneMoreFilterPopup) return;
+  if (filterIncludeFreqMin) filterIncludeFreqMin.value = filter.includeFreqMin ?? "";
+  if (filterIncludeFreqMax) filterIncludeFreqMax.value = filter.includeFreqMax ?? "";
+  if (filterExcludeFreqMin) filterExcludeFreqMin.value = filter.excludeFreqMin ?? "";
+  if (filterExcludeFreqMax) filterExcludeFreqMax.value = filter.excludeFreqMax ?? "";
+  for (const cb of studyOneMoreFilterPopup.querySelectorAll('[name="includeTag"]')) {
+    cb.checked = filter.includeTags.includes(cb.value);
+  }
+  for (const cb of studyOneMoreFilterPopup.querySelectorAll('[name="excludeTag"]')) {
+    cb.checked = filter.excludeTags.includes(cb.value);
+  }
+  if (filterIncludePhrase) filterIncludePhrase.checked = Boolean(filter.includePhrase);
+}
+
+function readStudyOneMoreFilterFromPopup() {
+  const toIntOrNull = (el) => {
+    const n = parseInt(el?.value ?? "", 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  return normalizeStudyOneMoreFilter({
+    includeFreqMin: toIntOrNull(filterIncludeFreqMin),
+    includeFreqMax: toIntOrNull(filterIncludeFreqMax),
+    excludeFreqMin: toIntOrNull(filterExcludeFreqMin),
+    excludeFreqMax: toIntOrNull(filterExcludeFreqMax),
+    includeTags: [...(studyOneMoreFilterPopup?.querySelectorAll('[name="includeTag"]:checked') ?? [])].map((cb) => cb.value),
+    excludeTags: [...(studyOneMoreFilterPopup?.querySelectorAll('[name="excludeTag"]:checked') ?? [])].map((cb) => cb.value),
+    includePhrase: filterIncludePhrase?.checked ?? false,
+  });
 }
 
 function escapeHtml(value) {
@@ -3099,7 +3139,7 @@ function renderStudyStats() {
 
   startReviewButton.hidden = isSpelling;
   studyNewWordButton.hidden = isSpelling;
-  if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.hidden = isSpelling;
+  if (studyOneMoreFilterButton) studyOneMoreFilterButton.hidden = isSpelling;
   if (studyOneMoreHint) studyOneMoreHint.hidden = isSpelling;
   if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
   if (startSpellingPracticeMoreButton) {
@@ -3979,17 +4019,18 @@ function buildStudyOneMoreExclusionSets({
   return _buildStudyOneMoreExclusionSets({ vocabulary, spelling, events, known, nowMs: appNowMs() });
 }
 
-function queryStudyOneMoreCandidates(level, limit = 240, offset = 0) {
+function queryStudyOneMoreCandidates(filter, limit = 240, offset = 0) {
   if (!dictionaryDb) return [];
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
+  const normalizedFilter = normalizeStudyOneMoreFilter(filter);
   const rank = studyOneMoreRankSql();
+  const conditions = ["translation IS NOT NULL", "definition IS NOT NULL"];
+  if (!normalizedFilter.includePhrase) conditions.push("instr(normalized_word, ' ') = 0");
+  const filterSql = studyOneMoreFilterSql(normalizedFilter);
+  if (filterSql !== "1=1") conditions.push(`(${filterSql})`);
   const statement = dictionaryDb.prepare(`
     SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, is_toefl, frq, bnc, detail
     FROM dictionary_entries
-    WHERE translation IS NOT NULL
-      AND definition IS NOT NULL
-      AND instr(normalized_word, ' ') = 0
-      AND ${studyOneMoreLevelSql(normalizedLevel)}
+    WHERE ${conditions.join(" AND ")}
     ORDER BY ${rank} IS NULL, ${rank}, length(word), word
     LIMIT :limit
     OFFSET :offset
@@ -4100,7 +4141,7 @@ function renderStudyOneMoreLoading() {
 
 function setStudyOneMoreLoading(loading) {
   if (studyNewWordButton) studyNewWordButton.disabled = Boolean(loading);
-  if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.disabled = Boolean(loading);
+  if (studyOneMoreFilterButton) studyOneMoreFilterButton.disabled = Boolean(loading);
 }
 
 async function recordStudyOneMoreEvent(entry, type) {
@@ -4320,13 +4361,13 @@ async function startDueReview(options = {}) {
   renderQuiz(quizEntryFromVocabulary(reviewItem), session.mode);
 }
 
-function pickNewStudyEntry(level = studyOneMoreLevel) {
+function pickNewStudyEntry(filter = studyOneMoreFilter) {
   if (!dictionaryDb) return null;
-  const normalizedLevel = normalizeStudyOneMoreLevel(level);
+  const normalizedFilter = normalizeStudyOneMoreFilter(filter);
   const pageSize = 240;
   const maxRows = 5000;
   const diagnostics = {
-    level: normalizedLevel,
+    filter: { ...normalizedFilter },
     rowsScanned: 0,
     selectedRank: null,
     selectedTerm: null,
@@ -4335,30 +4376,29 @@ function pickNewStudyEntry(level = studyOneMoreLevel) {
   const exclusions = buildStudyOneMoreExclusionSets();
   let candidate = null;
   for (let offset = 0; offset < maxRows; offset += pageSize) {
-    const rows = queryStudyOneMoreCandidates(normalizedLevel, Math.min(pageSize, maxRows - offset), offset);
+    const rows = queryStudyOneMoreCandidates(normalizedFilter, Math.min(pageSize, maxRows - offset), offset);
     if (!rows.length) break;
-    candidate = pickStudyOneMoreCandidateFromOrderedRows(rows, normalizedLevel, exclusions, diagnostics);
+    candidate = pickStudyOneMoreCandidateFromFilteredRows(rows, exclusions, diagnostics);
     if (candidate) break;
     if (rows.length < pageSize) break;
   }
   lastStudyOneMoreDiagnostics = diagnostics;
-  return candidate ? studyOneMoreEntryFromRow(candidate, normalizedLevel) : null;
+  return candidate ? studyOneMoreEntryFromRow(candidate, fallbackStudyOneMoreLevel(candidate)) : null;
 }
 
 async function startNewWordStudy() {
   activeVocabularyReviewSession = null;
-  const level = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect?.value ?? studyOneMoreLevel);
-  studyOneMoreLevel = level;
+  studyOneMoreFilter = readStudyOneMoreFilterFromPopup();
+  void persistUiPreferences();
   renderStudyOneMoreLoading();
   setStudyOneMoreLoading(true);
   try {
     if (!(await ensureDictionaryLoaded())) return;
-    if (studyOneMoreBeforePickForTest) await studyOneMoreBeforePickForTest({ level });
-    const entry = pickNewStudyEntry(level);
+    if (studyOneMoreBeforePickForTest) await studyOneMoreBeforePickForTest({ filter: studyOneMoreFilter });
+    const entry = pickNewStudyEntry(studyOneMoreFilter);
     if (!entry) {
       quizPanel.hidden = false;
-      const label = STUDY_ONE_MORE_LEVELS.find((item) => item.id === level)?.label ?? "Top 3k common words";
-      quizPanel.innerHTML = `<p class="muted">No ${escapeHtml(label)} candidate found right now.</p>`;
+      quizPanel.innerHTML = `<p class="muted">No candidate found matching the current filter.</p>`;
       return;
     }
     renderStudyOneMoreEntry(entry);
@@ -7261,8 +7301,26 @@ studyNewWordButton.addEventListener("click", () => {
   void startNewWordStudy();
 });
 
-studyOneMoreLevelSelect?.addEventListener("change", () => {
-  studyOneMoreLevel = normalizeStudyOneMoreLevel(studyOneMoreLevelSelect.value);
+studyOneMoreFilterButton?.addEventListener("click", () => {
+  if (!studyOneMoreFilterPopup) return;
+  const open = studyOneMoreFilterPopup.hidden;
+  studyOneMoreFilterPopup.hidden = !open;
+  studyOneMoreFilterButton.setAttribute("aria-expanded", String(open));
+});
+
+studyOneMoreFilterPopup?.addEventListener("change", () => {
+  studyOneMoreFilter = readStudyOneMoreFilterFromPopup();
+  void persistUiPreferences();
+});
+
+document.querySelector("#studyOneMoreFilterClose")?.addEventListener("click", () => {
+  if (studyOneMoreFilterPopup) studyOneMoreFilterPopup.hidden = true;
+  studyOneMoreFilterButton?.setAttribute("aria-expanded", "false");
+});
+
+document.querySelector("#filterReset")?.addEventListener("click", () => {
+  studyOneMoreFilter = normalizeStudyOneMoreFilter({});
+  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
   void persistUiPreferences();
 });
 
@@ -8009,6 +8067,7 @@ window.WordLoverApp = {
     pickFromOrderedCandidates: pickStudyOneMoreCandidateFromOrderedRows,
     queryCandidates: queryStudyOneMoreCandidates,
     levelSql: studyOneMoreLevelSql,
+    filterSql: studyOneMoreFilterSql,
     current: () => activeStudyOneMoreEntry,
     diagnostics: () => lastStudyOneMoreDiagnostics,
     buildExclusionSets: buildStudyOneMoreExclusionSets,
@@ -8016,11 +8075,13 @@ window.WordLoverApp = {
     setBeforePickHookForTest: (hook) => {
       studyOneMoreBeforePickForTest = typeof hook === "function" ? hook : null;
     },
-    setLevel: (level) => {
-      studyOneMoreLevel = normalizeStudyOneMoreLevel(level);
-      if (studyOneMoreLevelSelect) studyOneMoreLevelSelect.value = studyOneMoreLevel;
-      return studyOneMoreLevel;
+    setFilter: async (filter) => {
+      studyOneMoreFilter = normalizeStudyOneMoreFilter(filter);
+      applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+      await persistUiPreferences();
+      return studyOneMoreFilter;
     },
+    getFilter: () => ({ ...studyOneMoreFilter }),
   },
   recordReviewRating,
   persistVocabularyItemForTest: (item) => persistVocabularyItem(item),

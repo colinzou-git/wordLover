@@ -3,8 +3,9 @@
 
 import {
   STUDY_ONE_MORE_LEVELS,
+  STUDY_ONE_MORE_TAGS,
   normalizeStudyOneMoreLevel,
-} from "./ui-preferences.js?v=20260606-2";
+} from "./ui-preferences.js?v=20260607-2";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
@@ -24,10 +25,16 @@ function isSameDay(ts, nowMs) {
 }
 
 export function frequencyRankOf(candidate) {
-  const frq = Number(candidate?.frq ?? candidate?.frequencyRank);
-  if (Number.isFinite(frq) && frq > 0) return frq;
+  if (candidate != null && "frequencyRank" in candidate) {
+    const r = Number(candidate.frequencyRank);
+    return Number.isFinite(r) ? r : Number.POSITIVE_INFINITY;
+  }
+  const frq = Number(candidate?.frq);
   const bnc = Number(candidate?.bnc);
-  return Number.isFinite(bnc) && bnc > 0 ? bnc : Number.POSITIVE_INFINITY;
+  const validFrq = Number.isFinite(frq) && frq > 0 ? frq : null;
+  const validBnc = Number.isFinite(bnc) && bnc > 0 ? bnc : null;
+  if (validFrq !== null && validBnc !== null) return Math.min(validFrq, validBnc);
+  return validFrq ?? validBnc ?? Number.POSITIVE_INFINITY;
 }
 
 export function hasToeflTag(candidate) {
@@ -177,7 +184,60 @@ export function pickStudyOneMoreCandidateFromOrderedRows(rows, level, exclusions
 }
 
 export function studyOneMoreRankSql() {
-  return "CASE WHEN frq IS NOT NULL AND frq > 0 THEN frq WHEN bnc IS NOT NULL AND bnc > 0 THEN bnc ELSE NULL END";
+  return "CASE WHEN (frq IS NULL OR frq <= 0) AND (bnc IS NULL OR bnc <= 0) THEN NULL WHEN (frq IS NULL OR frq <= 0) THEN bnc WHEN (bnc IS NULL OR bnc <= 0) THEN frq ELSE min(frq, bnc) END";
+}
+
+function studyOneMoreTagConditionSql(tag) {
+  if (!STUDY_ONE_MORE_TAGS.includes(tag)) return "0";
+  if (tag === "toefl") return `(is_toefl = 1 OR tag LIKE '%toefl%')`;
+  return `tag LIKE '%${tag}%'`;
+}
+
+export function studyOneMoreFilterSql(filter = {}) {
+  const rank = studyOneMoreRankSql();
+  const parts = [];
+  const includeMin = filter.includeFreqMin != null ? Number(filter.includeFreqMin) : null;
+  const includeMax = filter.includeFreqMax != null ? Number(filter.includeFreqMax) : null;
+  const excludeMin = filter.excludeFreqMin != null ? Number(filter.excludeFreqMin) : null;
+  const excludeMax = filter.excludeFreqMax != null ? Number(filter.excludeFreqMax) : null;
+  if (includeMin != null) parts.push(`${rank} >= ${includeMin}`);
+  if (includeMax != null) parts.push(`(${rank} IS NOT NULL AND ${rank} <= ${includeMax})`);
+  if (excludeMin != null || excludeMax != null) {
+    const lo = excludeMin ?? 0;
+    const hi = excludeMax ?? 999999;
+    parts.push(`(${rank} IS NULL OR ${rank} < ${lo} OR ${rank} > ${hi})`);
+  }
+  if (filter.includeTags?.length > 0) {
+    parts.push(`(${filter.includeTags.map(studyOneMoreTagConditionSql).join(" OR ")})`);
+  }
+  for (const tag of filter.excludeTags ?? []) {
+    parts.push(`NOT (${studyOneMoreTagConditionSql(tag)})`);
+  }
+  return parts.length > 0 ? parts.join(" AND ") : "1=1";
+}
+
+export function pickStudyOneMoreCandidateFromFilteredRows(rows, exclusions = buildStudyOneMoreExclusionSets(), stats = null) {
+  for (const row of rows ?? []) {
+    if (stats) {
+      stats.rowsScanned = (stats.rowsScanned ?? 0) + 1;
+      stats.rowsVisited = stats.rowsScanned;
+    }
+    const candidate = normalizeStudyOneMoreCandidateRow(row, "very_easy");
+    if (!candidate.normalizedTerm) continue;
+    const reason = studyOneMoreExclusionReason(candidate, exclusions);
+    if (!reason) {
+      if (stats) {
+        stats.selectedRank = Number.isFinite(candidate.frequencyRank) ? candidate.frequencyRank : null;
+        stats.selectedTerm = candidate.normalizedTerm;
+      }
+      return candidate;
+    }
+    if (stats) {
+      stats.exclusionCounts = stats.exclusionCounts ?? {};
+      stats.exclusionCounts[reason] = (stats.exclusionCounts[reason] ?? 0) + 1;
+    }
+  }
+  return null;
 }
 
 export function studyOneMoreLevelSql(level) {

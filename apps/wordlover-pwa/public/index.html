@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260606-5" />
+    <link rel="stylesheet" href="/styles.css?v=20260607-2" />
     <title>WordFan</title>
   </head>
   <body>
@@ -196,20 +196,65 @@
             <button id="startReview" type="button" disabled>Review due</button>
             <div class="study-one-more-control">
               <button id="studyNewWord" class="secondary-button" type="button">Study one more</button>
-              <select id="studyOneMoreLevel" aria-label="Study One More frequency band">
-                <option value="very_easy" selected>Top 3k common words</option>
-                <option value="easy">Top 8k common words</option>
-                <option value="medium">Top 20k words</option>
-                <option value="hard">20k–50k less frequent words</option>
-                <option value="advanced">50k+ rare/advanced words</option>
-                <option value="toefl">TOEFL tagged words</option>
-              </select>
+              <button id="studyOneMoreFilterButton" class="secondary-button" type="button" aria-label="Word filter" aria-expanded="false" aria-controls="studyOneMoreFilterPopup">Filter</button>
             </div>
             <button id="startSpellingReview" type="button" hidden disabled>Spelling Review</button>
             <button id="startSpellingPracticeMore" class="secondary-button" type="button" hidden disabled>Spelling Practice More</button>
           </div>
         </div>
-        <p id="studyOneMoreHint" class="small muted study-one-more-hint">Study One More chooses new words by frequency rank. Pick a frequency band: common words first, or less frequent/advanced words later.</p>
+        <p id="studyOneMoreHint" class="small muted study-one-more-hint">Study One More picks words from the dictionary. Use Filter to narrow by frequency rank or tags.</p>
+        <div id="studyOneMoreFilterPopup" class="study-one-more-filter-popup" hidden role="dialog" aria-label="Word filter">
+          <div class="filter-popup-header">
+            <strong>Word Filter</strong>
+            <button id="studyOneMoreFilterClose" class="secondary-button" type="button">Done</button>
+          </div>
+          <div class="filter-row">
+            <span class="filter-section-label">Include frequency rank</span>
+            <div class="filter-range-row">
+              <input type="number" id="filterIncludeFreqMin" min="0" max="50000" placeholder="min" class="filter-number-input" inputmode="numeric">
+              <span class="filter-range-sep">to</span>
+              <input type="number" id="filterIncludeFreqMax" min="1" max="100000" placeholder="max" class="filter-number-input" inputmode="numeric">
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-section-label">Exclude frequency rank</span>
+            <div class="filter-range-row">
+              <input type="number" id="filterExcludeFreqMin" min="0" max="50000" placeholder="min" class="filter-number-input" inputmode="numeric">
+              <span class="filter-range-sep">to</span>
+              <input type="number" id="filterExcludeFreqMax" min="1" max="100000" placeholder="max" class="filter-number-input" inputmode="numeric">
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-section-label">Include tags</span>
+            <div class="filter-tags-row">
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="gk"> Gaokao</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="cet4"> CET-4</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="cet6"> CET-6</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="ky"> Kaoyan</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="ielts"> IELTS</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="toefl"> TOEFL</label>
+              <label class="filter-tag-label"><input type="checkbox" name="includeTag" value="gre"> GRE</label>
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-section-label">Exclude tags</span>
+            <div class="filter-tags-row">
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="gk"> Gaokao</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="cet4"> CET-4</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="cet6"> CET-6</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="ky"> Kaoyan</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="ielts"> IELTS</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="toefl"> TOEFL</label>
+              <label class="filter-tag-label"><input type="checkbox" name="excludeTag" value="gre"> GRE</label>
+            </div>
+          </div>
+          <div class="filter-row">
+            <label class="filter-tag-label"><input type="checkbox" id="filterIncludePhrase"> Include phrases (multi-word entries)</label>
+          </div>
+          <div class="filter-row filter-row-actions">
+            <button id="filterReset" class="secondary-button" type="button">Reset filter</button>
+          </div>
+        </div>
         <div class="track-tabs" id="todayTrackTabs" role="tablist" aria-label="Memorize or spelling">
           <button type="button" data-today-track="vocabulary" aria-selected="true">Memorize</button>
           <button type="button" data-today-track="spelling" aria-selected="false">Spelling</button>
@@ -320,7 +365,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260606-5"></script>
-    <script type="module" src="/app.js?v=20260606-5"></script>
+    <script src="/wordlover-config.js?v=20260607-2"></script>
+    <script type="module" src="/app.js?v=20260607-2"></script>
   </body>
 </html>
