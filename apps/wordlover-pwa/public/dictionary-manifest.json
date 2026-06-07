@@ -2,17 +2,17 @@
   "app": "wordlover",
   "dictionaryDataVersion": "ci.fixture.1",
   "variant": "ci-fixture",
-  "generatedAt": "2026-06-06T22:52:30Z",
+  "generatedAt": "2026-06-06T22:59:55Z",
   "rowCount": 17,
   "sqlite": {
     "path": "dictionary.sqlite",
     "bytes": 49152,
-    "sha256": "1e5f68f152ff23f9d91b1713d341589fad9cc3c8a855960d15124d0e63e262dd"
+    "sha256": "33cccd3ccd4d7ba733f286041078968642b4eb83118d3c5b1433f70ec14d4456"
   },
   "zstd": {
     "path": "dictionary.sqlite.zst",
     "bytes": 4836,
-    "sha256": "5fad0121eae4f733f5189c0a945731f928a3ecad9e75d0bfde76c2ed948dd914",
+    "sha256": "b4a463aace535dbca0acdf627d0b81743654a2afacf2c9f524482f3cc4645bbc",
     "level": 3
   },
   "sources": [

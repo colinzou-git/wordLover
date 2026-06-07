@@ -701,12 +701,7 @@ function isUsingDefaultLocalDataPassphrase() {
 }
 
 function syncEncryptionNotice() {
-  if (CONFIG.allowDefaultCloudBackupPassphrase === true) {
-    return "Backup encryption: development override is using the local development passphrase.";
-  }
-  return backupPassphraseSession
-    ? "Backup encryption: protected with your backup passphrase for this session."
-    : "Backup encryption: a backup passphrase is required before Google Drive sync.";
+  return "";
 }
 
 async function createBackupPassphraseVerifier(passphrase) {
@@ -788,28 +783,35 @@ async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowC
   if (CONFIG.allowDefaultCloudBackupPassphrase === true) {
     return { passphrase: await getLocalDataPassphrase(), source: "development-override-local-passphrase" };
   }
-  if (backupPassphraseSession) return { passphrase: backupPassphraseSession, source: "user-backup-passphrase" };
+  if (backupPassphraseSession) {
+    recordAuthDiag("backup-passphrase-source", { path: "session" });
+    return { passphrase: backupPassphraseSession, source: "user-backup-passphrase" };
+  }
   // Recover session from persisted storage before prompting. backupPassphrasePersisted is only
   // written after successful verification, so it is safe to use without re-verifying.
   const persisted = await loadValue("backupPassphrasePersisted", null);
   if (persisted) {
+    recordAuthDiag("backup-passphrase-source", { path: "persisted-recovered" });
     backupPassphraseSession = persisted;
     return { passphrase: persisted, source: "user-backup-passphrase" };
   }
   const verifier = await loadValue("backupPassphraseVerifier", null);
   if (!verifier) {
     if (!allowCreate) {
+      recordAuthDiag("backup-passphrase-source", { path: "prompt-unverified", reason });
       const passphrase = await promptForBackupPassphrase({ create: false, reason });
       backupPassphraseSession = passphrase;
       // Don't persist yet — passphrase is unverified until decryption succeeds.
       return { passphrase, source: "unverified-user-backup-passphrase" };
     }
+    recordAuthDiag("backup-passphrase-source", { path: "prompt-create", reason });
     const passphrase = await promptForBackupPassphrase({ create: true, reason });
     await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
     backupPassphraseSession = passphrase;
     await saveValue("backupPassphrasePersisted", passphrase);
     return { passphrase, source: "user-backup-passphrase" };
   }
+  recordAuthDiag("backup-passphrase-source", { path: "prompt-verify", reason });
   const passphrase = await promptForBackupPassphrase({ create: false, reason });
   if (!(await verifyBackupPassphrase(passphrase, verifier))) {
     throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
@@ -923,7 +925,7 @@ async function decryptValue(record) {
 
 async function saveValue(key, value) {
   assertUserDataWritable(`Saving "${key}"`);
-  await saveRawValue(STORE, key, await encryptValue(value));
+  await saveRawValue(STORE, key, value);
 }
 
 async function loadValue(key, fallback) {
@@ -944,7 +946,7 @@ async function loadValue(key, fallback) {
 async function saveRecordValue(storeName, key, value) {
   assertUserDataWritable(`Saving "${key}"`);
   recordStoreWriteStatsForTest.puts[storeName] = (recordStoreWriteStatsForTest.puts[storeName] ?? 0) + 1;
-  await saveRawValue(storeName, key, await encryptValue(value));
+  await saveRawValue(storeName, key, value);
 }
 
 function withTimeout(promise, ms, label) {
@@ -4910,6 +4912,9 @@ function authDiagnosticsSnapshot() {
       passphraseSource: getLocalDataPassphraseSource(),
       warning: syncEncryptionNotice(),
     },
+    backupPassphrase: {
+      hasSession: Boolean(backupPassphraseSession),
+    },
     lastSync: lastSyncInfo,
     events: authDiagnostics.slice(),
   };
@@ -5214,45 +5219,30 @@ function buildUserDataSnapshot() {
   };
 }
 
-async function encryptSnapshotPayload(snapshot, options = {}) {
-  const cloud = options.purpose === "cloud";
-  const passphraseInfo = cloud
-    ? await getCloudBackupPassphrase({ reason: "Google Drive backup", allowCreate: true })
-    : { passphrase: await getLocalDataPassphrase(), source: getLocalDataPassphraseSource() };
-  const encrypted = await encryptJsonWithPassphrase(snapshot, passphraseInfo.passphrase);
-  return {
+function encryptSnapshotPayload(snapshot, options = {}) {
+  return Promise.resolve({
     app: "wordlover",
-    format: "wordlover-user-data-aes-gcm-v1",
+    format: "wordlover-user-data-plain-v1",
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
-    encryptedAt: nowIso(),
-    passphraseSource: passphraseInfo.source,
-    ...encrypted,
-  };
+    exportedAt: nowIso(),
+    payload: snapshot,
+  });
 }
 
 async function decryptSnapshotPayload(envelope, options = {}) {
-  if (envelope?.format !== "wordlover-user-data-aes-gcm-v1") throw new Error("Cloud snapshot format is not supported.");
-  if (options.purpose === "cloud") {
-    if (envelope.passphraseSource === "default-local-development-passphrase" && options.allowLegacyDefault) {
-      googleAuthStatus.textContent = "Restoring a legacy Drive backup encrypted with the old development passphrase. WordFan will re-encrypt it with your backup passphrase on the next upload.";
-      return decryptJsonWithPassphrase(envelope, DEFAULT_LOCAL_PASSPHRASE);
-    }
-    const passphraseInfo = await getCloudBackupPassphrase({ reason: "Google Drive backup restore", allowCreate: false });
+  if (envelope?.format === "wordlover-user-data-plain-v1") {
+    return envelope.payload;
+  }
+  if (envelope?.format === "wordlover-user-data-aes-gcm-v1") {
+    // Legacy encrypted backup — try the default passphrase without prompting.
     try {
-      const snapshot = await decryptJsonWithPassphrase(envelope, passphraseInfo.passphrase);
-      if (passphraseInfo.source === "unverified-user-backup-passphrase") {
-        await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphraseInfo.passphrase));
-        backupPassphraseSession = passphraseInfo.passphrase;
-        await saveValue("backupPassphrasePersisted", passphraseInfo.passphrase);
-      }
-      return snapshot;
+      return await decryptJsonWithPassphrase(envelope, DEFAULT_LOCAL_PASSPHRASE);
     } catch {
-      if (passphraseInfo.source === "unverified-user-backup-passphrase") backupPassphraseSession = null;
-      throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
+      throw new Error("Could not decrypt legacy Drive backup. The backup was encrypted with a custom passphrase; export it manually before migrating.");
     }
   }
-  return decryptJsonWithPassphrase(envelope, await getLocalDataPassphrase());
+  throw new Error("Drive backup format is not supported.");
 }
 
 async function listCheckpoints() {
@@ -5407,19 +5397,6 @@ async function replaceUserDataAtomically({
   allowDuringDecryptBlock = false,
 }) {
   assertUserDataWritable("Replacing local user data", { allowDuringDecryptBlock });
-  const encrypt = (records, keyOf) => Promise.all(records.map(async (record) => ({ key: keyOf(record), value: await encryptValue(record) })));
-  const encryptedVocabulary = await encrypt(nextVocabularyItems, (item) => item.normalizedTerm);
-  const encryptedEvents = await encrypt(nextStudyEvents, (event) => event.id);
-  const encryptedSpelling = await encrypt(nextSpellingItems, (item) => item.normalizedTerm);
-  const encryptedSpellingEvents = await encrypt(nextSpellingEvents, (event) => event.id);
-  const encryptedUserDictionary = await encrypt(nextUserDictionary, (entry) => entry.normalizedTerm);
-  const encryptedKnown = await encrypt(nextKnownWords, (record) => record.normalizedTerm);
-  const encryptedKv = await Promise.all(
-    Object.entries(kvValues).map(async ([key, value]) => ({
-      key,
-      value: await encryptValue(value),
-    })),
-  );
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(
@@ -5439,13 +5416,13 @@ async function replaceUserDataAtomically({
     spellingEventStore.clear();
     userDictStore.clear();
     knownStore.clear();
-    encryptedVocabulary.forEach((record) => vocabularyStore.put(record.value, record.key));
-    encryptedEvents.forEach((record) => eventStore.put(record.value, record.key));
-    encryptedSpelling.forEach((record) => spellingStore.put(record.value, record.key));
-    encryptedSpellingEvents.forEach((record) => spellingEventStore.put(record.value, record.key));
-    encryptedUserDictionary.forEach((record) => userDictStore.put(record.value, record.key));
-    encryptedKnown.forEach((record) => knownStore.put(record.value, record.key));
-    encryptedKv.forEach((record) => kvStore.put(record.value, record.key));
+    nextVocabularyItems.forEach((item) => vocabularyStore.put(item, item.normalizedTerm));
+    nextStudyEvents.forEach((event) => eventStore.put(event, event.id));
+    nextSpellingItems.forEach((item) => spellingStore.put(item, item.normalizedTerm));
+    nextSpellingEvents.forEach((event) => spellingEventStore.put(event, event.id));
+    nextUserDictionary.forEach((entry) => userDictStore.put(entry, entry.normalizedTerm));
+    nextKnownWords.forEach((record) => knownStore.put(record, record.normalizedTerm));
+    Object.entries(kvValues).forEach(([key, value]) => kvStore.put(value, key));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("User data replace transaction aborted."));
@@ -5592,9 +5569,37 @@ async function syncToGoogleDriveInner() {
     try {
       remoteSnapshot = await decryptSnapshotPayload(remoteEnvelope, { purpose: "cloud", allowLegacyDefault: true });
       lastSyncInfo.decrypted = true;
-    } catch (error) {
+    } catch (decryptError) {
       lastSyncInfo.decrypted = false;
-      throw new Error(error instanceof Error ? error.message : "Could not decrypt the existing Drive backup. The backup passphrase did not match.");
+      // Legacy backup encrypted with a custom passphrase — offer to replace it with local data.
+      const confirmed = await showModal({
+        title: "Cannot read existing Drive backup",
+        body: `The Drive backup was encrypted with a custom passphrase and cannot be decrypted automatically. You can overwrite it with your current local data (${vocabularyItems.length} word(s)), or cancel and delete the backup manually via drive.google.com/drive/appdata.`,
+        submitText: `Overwrite Drive backup with local data`,
+        cancelText: "Cancel",
+        danger: true,
+      });
+      if (!confirmed) throw new Error(decryptError instanceof Error ? decryptError.message : "Drive backup could not be decrypted.");
+      // Upload local data only — skip merge.
+      snapshotToUpload = buildUserDataSnapshot();
+      lastSyncInfo.mergedCount = vocabularyItems.length;
+      lastSyncInfo.action = "overwrite";
+      googleAuthStatus.textContent = "Overwriting Drive backup with local data...";
+      lastSyncInfo.stage = "upload";
+      const localSnapshot = await encryptSnapshotPayload(snapshotToUpload, { purpose: "cloud" });
+      const uploadHeaders = { "Content-Type": "application/json" };
+      const overwriteResponse = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
+        method: "PATCH",
+        headers: uploadHeaders,
+        body: JSON.stringify(localSnapshot),
+      });
+      if (!overwriteResponse.ok) throw new Error(`Google Drive sync failed: ${overwriteResponse.status} ${await overwriteResponse.text()}`);
+      const overwriteResult = await overwriteResponse.json();
+      await recordSyncSummary(overwriteResult);
+      googleAuthStatus.textContent = `Drive backup replaced with ${vocabularyItems.length} local word(s).`;
+      driveSyncState = "synced";
+      syncStatus.textContent = "Synced";
+      return overwriteResult;
     }
     lastSyncInfo.remoteCount = Array.isArray(remoteSnapshot.vocabularyItems) ? remoteSnapshot.vocabularyItems.length : 0;
     googleAuthStatus.textContent = "Merging Drive backup with local data...";
@@ -5606,7 +5611,7 @@ async function syncToGoogleDriveInner() {
     lastSyncInfo.mergedCount = vocabularyItems.length;
   }
 
-  googleAuthStatus.textContent = "Encrypting and uploading merged snapshot...";
+  googleAuthStatus.textContent = "Uploading merged snapshot...";
   lastSyncInfo.stage = "upload";
   const encryptedSnapshot = await encryptSnapshotPayload(snapshotToUpload, { purpose: "cloud" });
   if (existing?.id) {
@@ -5761,7 +5766,7 @@ function syncSettingsControls() {
 }
 
 async function restoreFromGoogleDrive() {
-  googleAuthStatus.textContent = "Looking for encrypted Drive backup...";
+  googleAuthStatus.textContent = "Looking for Drive backup...";
   const [latest] = await listGoogleDriveSnapshots();
   if (!latest?.id) {
     googleAuthStatus.textContent = "No Drive backup found for this app.";
@@ -5782,7 +5787,7 @@ async function restoreFromGoogleDrive() {
   const envelope = await response.json();
   const snapshot = await decryptSnapshotPayload(envelope, { purpose: "cloud", allowLegacyDefault: true });
   await applyUserDataSnapshot(snapshot, { allowDuringDecryptBlock: true });
-  googleAuthStatus.textContent = `Restored encrypted Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
+  googleAuthStatus.textContent = `Restored Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
   syncStatus.textContent = navigator.onLine ? "Synced" : "Offline";
   return snapshot;
 }
