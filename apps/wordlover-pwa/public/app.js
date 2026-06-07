@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260606-2";
+} from "./fsrs-scheduler.js?v=20260606-5";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260606-2";
+} from "./persistence.js?v=20260606-5";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260606-2";
+} from "./spelling.js?v=20260606-5";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -32,14 +32,14 @@ import {
   normalizeStudyOneMoreLevel,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260606-2";
+} from "./ui-preferences.js?v=20260606-5";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260606-2";
+} from "./review-state.js?v=20260606-5";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -56,7 +56,7 @@ import {
   pickStudyOneMoreCandidateFromOrderedRows,
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260606-2";
+} from "./study-one-more.js?v=20260606-5";
 
 import {
   studyEventTrack,
@@ -67,7 +67,7 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260606-2";
+} from "./sync.js?v=20260606-5";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -174,9 +174,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260606-2-v110";
+const APP_VERSION = "0.6.2-product.20260606-5-v113";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v110";
+const SHELL_CACHE_VERSION = "wordlover-shell-v113";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
