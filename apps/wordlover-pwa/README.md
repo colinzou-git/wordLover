@@ -78,7 +78,7 @@ the real app dictionary path.
 CI prepares a tiny valid SQLite package before serving `public/`:
 
 ```powershell
-python apps\wordlover-pwa\scripts\create-ci-dictionary.py
+python apps\wordlover-pwa\scripts\create-ci-dictionary.py --force
 ```
 
 That script reuses the slim dictionary schema and FTS population helper, writes
@@ -86,6 +86,12 @@ That script reuses the slim dictionary schema and FTS population helper, writes
 and includes only the terms required by browser smoke coverage such as
 `abandon`, `take off`, `in terms of`, `abundant`, and `accurate`. It is a CI
 fixture only; do not commit generated dictionary packages from this path.
+
+Because it overwrites the same `public/` files the app serves, the script
+**refuses to clobber a production manifest** (`variant != "ci-fixture"`) unless
+`--force` is given. Run the local browser suite via `npm run test:browser:ci`
+(`run-browser-tests-ci.py`) — it passes `--force` but snapshots and restores the
+production dictionary around the run, so it never leaves the fixture in place.
 
 ## Run On iPhone
 

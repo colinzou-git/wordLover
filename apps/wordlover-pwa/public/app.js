@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-2";
+} from "./fsrs-scheduler.js?v=20260607-3";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-2";
+} from "./persistence.js?v=20260607-3";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-2";
+} from "./spelling.js?v=20260607-3";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-2";
+} from "./ui-preferences.js?v=20260607-3";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-2";
+} from "./review-state.js?v=20260607-3";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-2";
+} from "./study-one-more.js?v=20260607-3";
 
 import {
   studyEventTrack,
@@ -70,7 +70,7 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-2";
+} from "./sync.js?v=20260607-3";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -183,9 +183,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-2-v115";
+const APP_VERSION = "0.6.2-product.20260607-3-v116";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v115";
+const SHELL_CACHE_VERSION = "wordlover-shell-v116";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -2736,14 +2736,22 @@ function speakTerm(term) {
 
 // The vocabulary browser is shared by the vocabulary and spelling tracks.
 function activeBrowserItems() {
-  return vocabularyView.track === "spelling" ? spellingItems : vocabularyItems;
+  if (vocabularyView.track === "spelling") return spellingItems;
+  if (vocabularyView.track === "known") return knownWords;
+  return vocabularyItems;
 }
 
 function getBrowserItem(term) {
-  return vocabularyView.track === "spelling" ? getSpellingItem(term) : getVocabularyItem(term);
+  const normalizedTerm = normalizeTerm(term);
+  if (vocabularyView.track === "spelling") return getSpellingItem(term);
+  if (vocabularyView.track === "known") return knownWords.find((record) => record.normalizedTerm === normalizedTerm) ?? null;
+  return getVocabularyItem(term);
 }
 
 function getVocabularyStats(items = activeBrowserItems()) {
+  if (vocabularyView.track === "known") {
+    return { active: items, archived: [], counts: { known: items.length } };
+  }
   const active = items.filter((item) => !item.archivedAt);
   const archived = items.filter((item) => item.archivedAt);
   const counts = Object.fromEntries(FSRS_RATINGS.map((rating) => [rating, 0]));
@@ -2754,6 +2762,7 @@ function getVocabularyStats(items = activeBrowserItems()) {
 }
 
 function getVocabularyViewTitle(filter) {
+  if (vocabularyView.track === "known") return "Known words";
   const label = vocabularyView.track === "spelling" ? "spelling words" : "memorize words";
   if (filter === "all") return `All ${label}`;
   if (FSRS_RATING_LABELS[filter]) return `${FSRS_RATING_LABELS[filter]} words`;
@@ -2767,6 +2776,8 @@ function vocabularyItemMatchesQuery(item, query) {
   const haystackParts = [
     item.term,
     item.normalizedTerm,
+    item.level,
+    item.source,
     ...(item.user?.englishMeanings ?? []),
     ...(item.user?.chineseMeanings ?? []),
     ...(item.original?.englishMeanings ?? []),
@@ -2813,7 +2824,9 @@ function hasVocabularyAdvancedFilters(view = vocabularyView) {
 }
 
 function vocabularyItemMatchesAdvancedFilters(item, view = vocabularyView) {
-  if (!isDateInRange(item.savedAt, view.addedFrom, view.addedTo)) return false;
+  const addedAt = view.track === "known" ? item.knownAt : item.savedAt;
+  if (!isDateInRange(addedAt, view.addedFrom, view.addedTo)) return false;
+  if (view.track === "known") return true;
   if (!isDateInRange(item.review?.lastReviewedAt, view.reviewedFrom, view.reviewedTo)) return false;
   let min = parseOptionalCount(view.reviewCountMin);
   let max = parseOptionalCount(view.reviewCountMax);
@@ -2825,22 +2838,37 @@ function vocabularyItemMatchesAdvancedFilters(item, view = vocabularyView) {
 }
 
 function getVocabularyViewItems(filter, active, query = "", view = vocabularyView) {
-  const filteredByStatus = filter === "all" ? active : active.filter((item) => getVocabularyRating(item) === filter);
+  const filteredByStatus = view.track === "known"
+    ? active
+    : filter === "all" ? active : active.filter((item) => getVocabularyRating(item) === filter);
   const filteredByQuery = query ? filteredByStatus.filter((item) => vocabularyItemMatchesQuery(item, query)) : filteredByStatus;
   const filteredByAdvanced = filteredByQuery.filter((item) => vocabularyItemMatchesAdvancedFilters(item, view));
   return [...filteredByAdvanced].sort((left, right) => {
-    if (filter !== "all") {
+    if (view.track !== "known" && filter !== "all") {
       const rightChanged = getVocabularyRatingChangedAt(right);
       const leftChanged = getVocabularyRatingChangedAt(left);
       if (rightChanged !== leftChanged) return rightChanged.localeCompare(leftChanged);
     }
-    return (right.savedAt ?? "").localeCompare(left.savedAt ?? "");
+    const rightAdded = view.track === "known" ? right.knownAt : right.savedAt;
+    const leftAdded = view.track === "known" ? left.knownAt : left.savedAt;
+    return (rightAdded ?? "").localeCompare(leftAdded ?? "");
   });
 }
 
 function renderVocabularyStats(stats) {
   const total = stats.active.length;
   const archivedText = stats.archived.length ? `, ${stats.archived.length} archived` : "";
+  if (vocabularyView.track === "known") {
+    vocabularySummary.textContent = `${total} known`;
+    return `
+      <div class="vocab-stats" aria-label="Known word count">
+        <button class="vocab-stat total" type="button" data-action="vocab-filter" data-filter="all">
+          <span>Known</span>
+          <strong>${total}</strong>
+        </button>
+      </div>
+    `;
+  }
   vocabularySummary.textContent = `${total} saved${archivedText}`;
   return `
     <div class="vocab-stats" aria-label="Memorize status counts">
@@ -2861,6 +2889,7 @@ function renderVocabularyStats(stats) {
 function renderVocabularyFilter(query, mode = "summary") {
   const hasAdvanced = hasVocabularyAdvancedFilters();
   const hasText = Boolean(query.trim());
+  const isKnown = vocabularyView.track === "known";
   return `
     <div class="vocab-filter-panel" data-vocab-filter-mode="${escapeHtml(mode)}">
       <label class="vocab-filter-field vocab-filter-search">
@@ -2879,7 +2908,7 @@ function renderVocabularyFilter(query, mode = "summary") {
       </label>
       <div class="vocab-filter-grid" aria-label="Word list filters">
         <fieldset class="vocab-filter-group">
-          <legend>Added date</legend>
+          <legend>${isKnown ? "Known date" : "Added date"}</legend>
           <label>
             <span>From</span>
             <input id="vocabAddedFrom" type="date" value="${escapeHtml(vocabularyView.addedFrom)}" data-vocab-filter-key="addedFrom" />
@@ -2889,7 +2918,7 @@ function renderVocabularyFilter(query, mode = "summary") {
             <input id="vocabAddedTo" type="date" value="${escapeHtml(vocabularyView.addedTo)}" data-vocab-filter-key="addedTo" />
           </label>
         </fieldset>
-        <fieldset class="vocab-filter-group">
+        ${isKnown ? "" : `<fieldset class="vocab-filter-group">
           <legend>Last review/practice</legend>
           <label>
             <span>From</span>
@@ -2910,7 +2939,7 @@ function renderVocabularyFilter(query, mode = "summary") {
             <span>Max</span>
             <input id="vocabReviewCountMax" type="number" min="0" inputmode="numeric" value="${escapeHtml(vocabularyView.reviewCountMax)}" data-vocab-filter-key="reviewCountMax" />
           </label>
-        </fieldset>
+        </fieldset>`}
       </div>
       ${hasAdvanced ? `<button class="secondary-button vocab-clear-filters" type="button" data-action="vocab-clear-advanced-filters">Clear date/count filters</button>` : ""}
     </div>
@@ -2918,6 +2947,20 @@ function renderVocabularyFilter(query, mode = "summary") {
 }
 
 function renderVocabularyDetail(item) {
+  if (vocabularyView.track === "known") {
+    const knownDate = item.knownAt ? new Date(item.knownAt).toLocaleDateString() : "unknown date";
+    const level = item.level ? ` - level ${item.level}` : "";
+    const rank = Number.isFinite(item.frequencyRank) ? ` - rank ${item.frequencyRank}` : "";
+    return `
+      <div class="vocab-detail">
+        <p>Known = correctly recognized on first try from Study One More.</p>
+        <p class="vocab-meta">Known ${escapeHtml(knownDate)}${escapeHtml(level)}${escapeHtml(rank)}</p>
+        <div class="vocab-actions">
+          <button class="secondary-button" type="button" data-action="open" data-term="${escapeHtml(item.term)}">Search</button>
+        </div>
+      </div>
+    `;
+  }
   const english = summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings);
   const chinese = summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings);
   const aiAssist = Array.isArray(item.aiAssist) ? item.aiAssist : [];
@@ -3030,13 +3073,16 @@ function renderVocabulary() {
     tab.setAttribute("aria-selected", String(tab.dataset.vocabTrack === vocabularyView.track));
   }
   const isSpelling = vocabularyView.track === "spelling";
+  const isKnown = vocabularyView.track === "known";
   const stats = getVocabularyStats();
   const query = vocabularyView.query ?? "";
   if (!stats.active.length && !stats.archived.length) {
-    vocabularySummary.textContent = isSpelling ? "No spelling words yet." : "No saved terms yet.";
-    vocabularyList.innerHTML = isSpelling
-      ? `${renderVocabularyFilter(query)}<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
-      : `${renderVocabularyFilter(query)}<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
+    vocabularySummary.textContent = isKnown ? "No known words yet." : isSpelling ? "No spelling words yet." : "No saved terms yet.";
+    vocabularyList.innerHTML = isKnown
+      ? `${renderVocabularyFilter(query)}<p class="muted">Use Study One More and tap "Add to Known" after a correct first try.</p>`
+      : isSpelling
+        ? `${renderVocabularyFilter(query)}<p class="muted">Search a dictionary word and tap "Add to spelling list", or set On Return to "Save to spelling list".</p>`
+        : `${renderVocabularyFilter(query)}<p class="muted">Search a word and save it here, or set On Return to "Save to vocabulary".</p>`;
     return;
   }
   if (vocabularyView.filter !== "summary" && vocabularyView.selectedTerm) {
@@ -4084,13 +4130,14 @@ function renderStudyOneMoreMeaning(entry) {
 
 function renderStudyOneMoreActions(passed) {
   const message = passed
-    ? "Correct. Marked as Known, so WordFan will not suggest it again."
+    ? "Correct. You can mark this word as Known if you want WordFan to avoid suggesting it again."
     : "Not quite. You can add it for review or skip it for today.";
   return `
     <div class="study-one-more-result">
       <p class="muted">${escapeHtml(message)}</p>
       <div class="quiz-actions">
         <button class="secondary-button" type="button" data-study-one-more-show="1">Show</button>
+        ${passed ? `<button type="button" data-study-one-more-known="1">Add to Known</button>` : ""}
         <button type="button" data-study-one-more-add="memorize">Add to Memorize</button>
         <button class="secondary-button" type="button" data-study-one-more-add="spelling">Add to Spelling</button>
         ${passed
@@ -4436,6 +4483,25 @@ async function addStudyOneMoreCandidate(target) {
   `;
 }
 
+async function addStudyOneMoreKnown() {
+  if (!activeStudyOneMoreEntry) return;
+  const entry = activeStudyOneMoreEntry;
+  const responseMs = activeQuiz?.pendingResult?.responseMs ?? null;
+  await recordKnownWord(entry, responseMs);
+  activeStudyOneMoreEntry = null;
+  activeQuiz = null;
+  quizPanel.hidden = false;
+  quizPanel.innerHTML = `
+    <p class="muted">Added "${escapeHtml(entry.term)}" to Known. WordFan will not suggest it again.</p>
+    <div class="quiz-actions">
+      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
+      <button type="button" data-study-next="1">Study another</button>
+    </div>
+  `;
+  renderStudyStats();
+  renderVocabulary();
+}
+
 async function skipStudyOneMoreCandidate() {
   if (activeStudyOneMoreEntry) {
     await recordStudyOneMoreEvent(activeStudyOneMoreEntry, "study-one-more-skipped");
@@ -4597,7 +4663,6 @@ async function handleQuizAnswer(index) {
   }
   if (activeQuiz.mode === "study-one-more") {
     activeQuiz.pendingResult = { passed, responseMs, quizResult: passed ? "pass" : "miss" };
-    if (passed) await recordKnownWord(activeQuiz.entry, responseMs);
     quizPanel.querySelector(".study-one-more-card")?.insertAdjacentHTML("beforeend", renderStudyOneMoreActions(passed));
     return;
   }
@@ -7434,6 +7499,10 @@ quizPanel.addEventListener("click", (event) => {
   const optionButton = target.closest("[data-quiz-option]");
   if (optionButton instanceof HTMLButtonElement) {
     void handleQuizAnswer(Number(optionButton.dataset.quizOption));
+    return;
+  }
+  if (target.closest("[data-study-one-more-known]")) {
+    void addStudyOneMoreKnown();
     return;
   }
   const studyOneMoreAdd = target.closest("[data-study-one-more-add]");

@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-2";
+} from "./fsrs-scheduler.js?v=20260607-3";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-2";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-2";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-3";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-3";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-2";
+} from "./ui-preferences.js?v=20260607-3";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,12 +26,12 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-2";
+} from "./sync.js?v=20260607-3";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-2";
+} from "./study-one-more.js?v=20260607-3";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -45,7 +45,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v115";
+const SHELL_CACHE_NAME = "wordlover-shell-v116";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -62,16 +62,16 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-2",
-  "/persistence.js?v=20260607-2",
-  "/spelling.js?v=20260607-2",
-  "/ui-preferences.js?v=20260607-2",
-  "/review-state.js?v=20260607-2",
-  "/study-one-more.js?v=20260607-2",
-  "/sync.js?v=20260607-2",
-  "/fsrs-scheduler.js?v=20260607-2",
-  "/styles.css?v=20260607-2",
-  "/wordlover-config.js?v=20260607-2",
+  "/app.js?v=20260607-3",
+  "/persistence.js?v=20260607-3",
+  "/spelling.js?v=20260607-3",
+  "/ui-preferences.js?v=20260607-3",
+  "/review-state.js?v=20260607-3",
+  "/study-one-more.js?v=20260607-3",
+  "/sync.js?v=20260607-3",
+  "/fsrs-scheduler.js?v=20260607-3",
+  "/styles.css?v=20260607-3",
+  "/wordlover-config.js?v=20260607-3",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -87,7 +87,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-2",
+  "/automated-tests.js?v=20260607-3",
 ];
 
 let lastResults = null;
@@ -1518,14 +1518,41 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
-    const knownAfterCorrect = frameWindow.WordLoverApp
+    const knownBeforeUserChoice = frameWindow.WordLoverApp
       .getKnownWords()
-      .find((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
-    if (!knownAfterCorrect) throw new Error("Correct first-try Study One More did not create a Known record.");
-    if (knownAfterCorrect.review || knownAfterCorrect.fsrsCard) throw new Error("Known record should not include FSRS review state.");
+      .some((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
+    if (knownBeforeUserChoice) throw new Error("Correct first-try Study One More should wait for Add to Known before creating a Known record.");
+    if (!frameDocument.querySelector("[data-study-one-more-known]")) throw new Error("Study One More did not offer Add to Known after a correct first try.");
     if ((frameDocument.querySelector("#quizPanel")?.textContent ?? "").includes("Mastered")) {
       throw new Error("Study One More Known result should not be labeled Mastered.");
     }
+    const masteredBeforeManualAdd = frameWindow.WordLoverApp
+      .getVocabulary()
+      .filter((item) => item.review?.masteredAt).length;
+    if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before tapping Show.");
+    click("[data-study-one-more-show]");
+    if (!frameDocument.querySelector("[data-study-one-more-meaning]") || !/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) {
+      throw new Error("Study One More did not show the full meaning after tapping Show.");
+    }
+    click("[data-study-one-more-known]");
+    const knownAfterCorrect = await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const record = frameWindow.WordLoverApp
+          .getKnownWords()
+          .find((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
+        if (record && frameDocument.querySelector("[data-study-next]")) {
+          window.clearInterval(timer);
+          resolve(record);
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Add to Known did not create a Known record."));
+        }
+      }, 100);
+    });
+    if (knownAfterCorrect.review || knownAfterCorrect.fsrsCard) throw new Error("Known record should not include FSRS review state.");
     const snapshotWithKnown = frameWindow.WordLoverApp.buildUserDataSnapshot();
     if (!snapshotWithKnown.knownWords?.some((record) => record.normalizedTerm === firstCandidate.normalizedTerm)) {
       throw new Error("Sync snapshot did not include Known records.");
@@ -1538,35 +1565,24 @@ async function runMainAppStudySmoke() {
     );
     const mergedKnown = mergedKnownSnapshot.knownWords.find((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
     if (mergedKnown?.knownAt !== newerKnownAt) throw new Error("Known merge should keep the newest knownAt/updatedAt record.");
-    const masteredBeforeManualAdd = frameWindow.WordLoverApp
-      .getVocabulary()
-      .filter((item) => item.review?.masteredAt).length;
-    if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before tapping Show.");
-    click("[data-study-one-more-show]");
-    if (!frameDocument.querySelector("[data-study-one-more-meaning]") || !/English/i.test(frameDocument.querySelector("#quizPanel")?.textContent ?? "")) {
-      throw new Error("Study One More did not show the full meaning after tapping Show.");
+    click('[data-vocab-track="known"]');
+    click('[data-action="vocab-filter"][data-filter="all"]');
+    const knownListText = frameDocument.querySelector("#vocabularyList")?.textContent ?? "";
+    if (!knownListText.toLowerCase().includes(firstCandidate.term.toLowerCase())) {
+      throw new Error("Known tab did not show the word added from Study One More.");
     }
-    click('[data-study-one-more-add="memorize"]');
-    await new Promise((resolve, reject) => {
-      const startedAt = performance.now();
-      const timer = window.setInterval(() => {
-        const saved = frameWindow.WordLoverApp
-          .getVocabulary()
-          .some((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
-        const knownCleared = !frameWindow.WordLoverApp
-          .getKnownWords()
-          .some((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
-        if (saved && knownCleared && frameDocument.querySelector("[data-study-next]")) {
-          window.clearInterval(timer);
-          resolve();
-          return;
-        }
-        if (performance.now() - startedAt > 10000) {
-          window.clearInterval(timer);
-          reject(new Error("Main app study smoke did not save the Study One More word to Memorize."));
-        }
-      }, 100);
-    });
+    if (!knownListText.includes("Known")) throw new Error("Known tab did not render the Known count/card.");
+    click('[data-vocab-track="vocabulary"]');
+    const firstLookup = await frameWindow.WordLoverApp.lookupTerm(firstCandidate.term);
+    if (!firstLookup) throw new Error("Could not look up first Study One More candidate for manual Memorize add.");
+    await frameWindow.WordLoverApp.saveVocabularyItem(firstLookup, "known-manual-test");
+    const savedAfterKnown = frameWindow.WordLoverApp
+      .getVocabulary()
+      .some((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
+    const knownClearedAfterManualAdd = !frameWindow.WordLoverApp
+      .getKnownWords()
+      .some((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
+    if (!savedAfterKnown || !knownClearedAfterManualAdd) throw new Error("Manual Memorize add should save the Known word and clear its Known blocker.");
     const masteredAfterManualAdd = frameWindow.WordLoverApp
       .getVocabulary()
       .filter((item) => item.review?.masteredAt).length;

@@ -51,7 +51,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Prepare lightweight CI dictionary
-        run: python apps/wordlover-pwa/scripts/create-ci-dictionary.py
+        run: python apps/wordlover-pwa/scripts/create-ci-dictionary.py --force
 
       - name: Serve the PWA over HTTP
         working-directory: apps/wordlover-pwa/public

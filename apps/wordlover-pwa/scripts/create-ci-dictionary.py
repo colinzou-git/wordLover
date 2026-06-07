@@ -237,7 +237,44 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR)
     parser.add_argument("--version", default=DEFAULT_VERSION)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing production dictionary in the output dir. "
+        "Required outside throwaway CI checkouts (the default refuses to clobber "
+        "the shipped dictionary).",
+    )
     return parser.parse_args()
+
+
+def guard_production_dictionary(output_dir: Path, force: bool) -> None:
+    """Refuse to replace a shipped dictionary with the CI fixture unless forced.
+
+    Running this script writes into the same files the app serves. If the output
+    dir already holds a production manifest (variant != "ci-fixture"), overwriting
+    it silently swaps the real ~100k-entry dictionary for the 17-row fixture and
+    dirties the tracked manifest. CI runs in a throwaway checkout and opts in with
+    --force; a developer machine should not clobber its served dictionary.
+    """
+    manifest_path = output_dir / "dictionary-manifest.json"
+    if force or not manifest_path.exists():
+        return
+    try:
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    if existing.get("variant") == "ci-fixture":
+        return
+    raise SystemExit(
+        f"Refusing to overwrite the production dictionary manifest at {manifest_path}\n"
+        f"  (variant={existing.get('variant')!r}, "
+        f"dictionaryDataVersion={existing.get('dictionaryDataVersion')!r}).\n"
+        "This would replace the shipped dictionary with the 17-row CI fixture.\n"
+        "  - In CI / a throwaway checkout, pass --force.\n"
+        "  - On a dev machine, this is almost certainly a mistake. If you really want\n"
+        "    the fixture, pass --force, then restore production with:\n"
+        "      python scripts/package_dictionary_web.py --copy-sqlite"
+    )
 
 
 def normalized_word(word: str) -> str:
@@ -319,6 +356,7 @@ def write_manifest(output_dir: Path, sqlite_path: Path, zst_path: Path, row_coun
 
 def main() -> None:
     args = parse_args()
+    guard_production_dictionary(args.output_dir, args.force)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.work_dir.mkdir(parents=True, exist_ok=True)
 

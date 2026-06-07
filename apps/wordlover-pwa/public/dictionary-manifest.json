@@ -1,21 +1,23 @@
 {
   "app": "wordlover",
-  "dictionaryDataVersion": "ci.fixture.1",
-  "variant": "ci-fixture",
-  "generatedAt": "2026-06-06T22:59:55Z",
-  "rowCount": 17,
+  "dictionaryDataVersion": "2026.06.07.slim",
+  "variant": "slim",
+  "generatedAt": "2026-06-07T08:50:28Z",
+  "rowCount": 100000,
   "sqlite": {
     "path": "dictionary.sqlite",
-    "bytes": 49152,
-    "sha256": "33cccd3ccd4d7ba733f286041078968642b4eb83118d3c5b1433f70ec14d4456"
+    "bytes": 32239616,
+    "sha256": "6d27d9410421ac3161bc9f28c410f5cc3b81fd9539c6f0ffedc6f7114b556f13"
   },
   "zstd": {
     "path": "dictionary.sqlite.zst",
-    "bytes": 4836,
-    "sha256": "b4a463aace535dbca0acdf627d0b81743654a2afacf2c9f524482f3cc4645bbc",
+    "bytes": 14770323,
+    "sha256": "fcc912e7439dec0e0e6796e0aee672d77ebbe8170229f9050935c8ff40605257",
     "level": 3
   },
   "sources": [
-    "CI fixture"
+    "ECDICT",
+    "WordNet 3.0",
+    "OPTED/Webster 1913"
   ]
 }

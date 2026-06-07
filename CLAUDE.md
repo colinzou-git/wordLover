@@ -57,10 +57,12 @@ cd apps/wordlover-pwa && npm run validate:shell-assets
 ### CI dictionary fixture (for headless smoke without production data)
 
 ```powershell
-python apps\wordlover-pwa\scripts\create-ci-dictionary.py
+python apps\wordlover-pwa\scripts\create-ci-dictionary.py --force
 ```
 
 Writes a tiny `dictionary.sqlite` + `.zst` + `dictionary-manifest.json` with only the terms CI needs (`abandon`, `take off`, etc.). Do not commit generated dictionary files.
+
+**The fixture overwrites the same `public/` files the app serves.** To avoid silently replacing the shipped ~100k-entry dictionary (and committing the fixture manifest, as happened once), the script **refuses to overwrite a production manifest** (`variant != "ci-fixture"`) unless `--force` is passed. CI uses `--force` in a throwaway checkout. Locally, prefer `npm run test:browser:ci` (`run-browser-tests-ci.py`), which snapshots and restores the production dictionary around the run. If you ever run with `--force` directly on a dev box, restore production afterward with `python scripts/package_dictionary_web.py --copy-sqlite`.
 
 ## Cache versioning — the easiest thing to break
 
