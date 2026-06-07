@@ -8,12 +8,12 @@ WordLover or WordFan is a local-first vocabulary/dictionary PWA. The runtime app
 
 **npm scripts (from `apps/wordlover-pwa/`):**
 
-| Script | What it does |
-|--------|-------------|
-| `npm run build` | Shell-asset existence check + cache-version lockstep; required before every release |
-| `npm run test` | Alias for `npm run build` |
-| `npm run test:browser` | In-browser automated suite via Playwright — requires a running server and a dictionary |
-| `npm run ci:dictionary` | Creates the minimal CI dictionary fixture (`dictionary.sqlite` + `.zst` + manifest) |
+| Script                    | What it does                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------- |
+| `npm run build`           | Shell-asset existence check + cache-version lockstep; required before every release    |
+| `npm run test`            | Alias for `npm run build`                                                              |
+| `npm run test:browser`    | In-browser automated suite via Playwright — requires a running server and a dictionary |
+| `npm run ci:dictionary`   | Creates the minimal CI dictionary fixture (`dictionary.sqlite` + `.zst` + manifest)    |
 | `npm run test:browser:ci` | Creates CI dictionary, starts a local server, runs the browser suite, stops the server |
 
 Platform priority is deliberate and load-bearing: **iPhone first, Windows second (used as the automation/stress-test fallback for anything that can't be automated on iPhone), Android deferred**. Don't add Android-specific code paths or polish before iPhone and Windows are stable.
@@ -110,7 +110,9 @@ It is not a replacement for the in-browser `automated-tests.html` suite (which e
 
 To create PR or run GitHub actions, use gh installed at: C:\Program Files\GitHub CLI\gh.exe
 
-At the end of a run, do the following:
-Report the new source files introduced. Otherwise, print 'No new source files added.'
-For new source files, update .\scripts\generate_code_map.py. Report updating status in a short sentence.
+At the end of a run, do the following:  
+Report the new source files introduced. Otherwise, print 'No new source files added.'  
+For new source files, update .\scripts\generate_code_map.py. Report updating status in a short sentence.  
 Run 'python .\scripts\generate_code_map.py' to update code map and symbol map. Report running results in one short sentence after run.
+
+Commit code changes and push it.
