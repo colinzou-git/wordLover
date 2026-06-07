@@ -91,6 +91,11 @@ FEATURE_HINTS = {
     "Persistence": [
         "persistence.js: IndexedDB access layer (separated from app.js)",
     ],
+    "Learning tracks / data backup": [
+        "tracks.js: pure backup build/validate + migration + import planning (buildBackup, validateBackup, migrateLegacyToRoot, planImport, dedupeTrackName, canDeleteTrack)",
+        "app.js: exportUserData, importUserData, switchLearningTrack, deleteLearningTrack, renderLearningTracks, recordKey/loadTrackRecordValues track-scoped storage",
+        "index.html: Learning tracks settings card (export/import + switch/rename/delete)",
+    ],
     "Spelling": [
         "spelling.js: spelling review logic",
     ],

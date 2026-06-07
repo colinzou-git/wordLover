@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-4";
+} from "./fsrs-scheduler.js?v=20260607-5";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-4";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-4";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-5";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-5";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-4";
+} from "./ui-preferences.js?v=20260607-5";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,27 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-4";
+} from "./sync.js?v=20260607-5";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-4";
+} from "./study-one-more.js?v=20260607-5";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260607-4";
+} from "./goal-forecast.js?v=20260607-5";
+import {
+  BACKUP_SCHEMA_VERSION,
+  migrateLegacyToRoot,
+  buildBackup,
+  trackRecords,
+  validateBackup,
+  dedupeTrackName,
+  planImport,
+  canDeleteTrack,
+} from "./tracks.js?v=20260607-5";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -50,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v117";
+const SHELL_CACHE_NAME = "wordlover-shell-v118";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -67,17 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-4",
-  "/persistence.js?v=20260607-4",
-  "/spelling.js?v=20260607-4",
-  "/ui-preferences.js?v=20260607-4",
-  "/review-state.js?v=20260607-4",
-  "/study-one-more.js?v=20260607-4",
-  "/sync.js?v=20260607-4",
-  "/fsrs-scheduler.js?v=20260607-4",
-  "/goal-forecast.js?v=20260607-4",
-  "/styles.css?v=20260607-4",
-  "/wordlover-config.js?v=20260607-4",
+  "/app.js?v=20260607-5",
+  "/persistence.js?v=20260607-5",
+  "/spelling.js?v=20260607-5",
+  "/ui-preferences.js?v=20260607-5",
+  "/review-state.js?v=20260607-5",
+  "/study-one-more.js?v=20260607-5",
+  "/sync.js?v=20260607-5",
+  "/fsrs-scheduler.js?v=20260607-5",
+  "/goal-forecast.js?v=20260607-5",
+  "/tracks.js?v=20260607-5",
+  "/styles.css?v=20260607-5",
+  "/wordlover-config.js?v=20260607-5",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -93,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-4",
+  "/automated-tests.js?v=20260607-5",
 ];
 
 let lastResults = null;
@@ -2646,10 +2657,86 @@ function runModuleSmokeTests() {
   assert("heavy goal is flagged heavy or too_heavy", heavyForecast.sustainability === "heavy" || heavyForecast.sustainability === "too_heavy", true);
   assert("heavy goal yields a lower suggested new-word count", typeof heavyForecast.suggestedDailyNewWords === "number" && heavyForecast.suggestedDailyNewWords < 50, true);
 
+  // tracks.js — learning-track backup / migration / import
+  const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+  const trackToday = "2026-06-07";
+
+  // 1) Old single-track data migrates into Default Track.
+  const legacyRoot = migrateLegacyToRoot("2026-06-01T00:00:00.000Z");
+  assert("migrateLegacyToRoot activeTrackId", legacyRoot.activeTrackId, "track_default");
+  assert("migrateLegacyToRoot default track name", legacyRoot.tracks.track_default.name, "Default Track");
+
+  const sampleFsrsCard = { stability: 12.5, difficulty: 6.3, due: "2026-07-01T00:00:00.000Z", state: "Review" };
+  const sampleVocab = [
+    { term: "abandon", normalizedTerm: "abandon", savedAt: "2026-06-01T00:00:00.000Z", archivedAt: null, ignoredAt: null, review: { dueAt: "2026-07-01T00:00:00.000Z", fsrsCard: sampleFsrsCard } },
+    { term: "old word", normalizedTerm: "old word", savedAt: "2026-05-01T00:00:00.000Z", archivedAt: "2026-05-02T00:00:00.000Z", ignoredAt: "2026-05-02T00:00:00.000Z", review: { dueAt: "2026-06-01T00:00:00.000Z", fsrsCard: null } },
+  ];
+  const sampleEvents = [{ id: "e1", eventKey: "k1", type: "review", normalizedTerm: "abandon", rating: "good", occurredAt: "2026-06-02T00:00:00.000Z" }];
+  const exportTracks = { track_default: { id: "track_default", name: "Default Track", createdAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" } };
+  const backup = buildBackup({
+    activeTrackId: "track_default",
+    tracks: exportTracks,
+    globalSettings: { theme: "sunrise", fontScale: 1, onReturnAction: "vocabulary", speakOnReturn: false, uiPreferences: {}, geminiApiKey: "SECRET-KEY", googleAccessToken: "SECRET-TOKEN", backupPassphrase: "SECRET-PASS" },
+    trackData: { track_default: { vocabulary: sampleVocab, studyEvents: sampleEvents, spelling: [], spellingEvents: [], userDictionary: [], known: [], goals: { dailyNewWords: 5 }, studyOneMoreFilter: null } },
+  }, "2026-06-07T00:00:00.000Z");
+
+  // 2) Export creates valid schemaVersion 1 JSON.
+  assert("backup schemaVersion is 1", backup.schemaVersion, BACKUP_SCHEMA_VERSION);
+  assert("backup app is WordFan", backup.app, "WordFan");
+  assert("backup activeTrackId", backup.activeTrackId, "track_default");
+  assert("backup has track_default", typeof backup.tracks.track_default, "object");
+  assert("backup pretty-prints to JSON", typeof JSON.stringify(backup, null, 2), "string");
+
+  // 3) Export excludes secrets / API keys / auth tokens.
+  assert("backup keeps theme", backup.globalSettings.theme, "sunrise");
+  assert("backup drops gemini key field", "geminiApiKey" in backup.globalSettings, false);
+  assert("backup drops google token field", "googleAccessToken" in backup.globalSettings, false);
+  const backupJson = JSON.stringify(backup);
+  assert("backup JSON has no secret key", backupJson.includes("SECRET-KEY"), false);
+  assert("backup JSON has no secret token", backupJson.includes("SECRET-TOKEN"), false);
+  assert("backup JSON has no secret passphrase", backupJson.includes("SECRET-PASS"), false);
+  assert("backup ignoredWords derived", backup.tracks.track_default.ignoredWords.includes("old word"), true);
+  assert("backup fsrsCards projection", backup.tracks.track_default.fsrsCards.abandon.stability, 12.5);
+
+  // 4) Import rejects invalid JSON / unsupported schemaVersion / bad shape.
+  assert("validateBackup rejects null", throws(() => validateBackup(null)), true);
+  assert("validateBackup rejects wrong app", throws(() => validateBackup({ app: "Other", schemaVersion: 1, tracks: { t: {} } })), true);
+  assert("validateBackup rejects unsupported schemaVersion", throws(() => validateBackup({ app: "WordFan", schemaVersion: 99, tracks: { t: {} } })), true);
+  assert("validateBackup rejects empty tracks", throws(() => validateBackup({ app: "WordFan", schemaVersion: 1, tracks: {} })), true);
+  assert("validateBackup accepts a valid backup", validateBackup(backup).app, "WordFan");
+
+  // 5) Duplicate imported track names are renamed safely.
+  assert("dedupeTrackName no collision keeps name", dedupeTrackName(["A"], "B", trackToday), "B");
+  assert("dedupeTrackName collision stamps date", dedupeTrackName(["B"], "B", trackToday), `B (Imported - ${trackToday})`);
+  assert("dedupeTrackName double collision adds counter", dedupeTrackName(["B", `B (Imported - ${trackToday})`], "B", trackToday), `B (Imported - ${trackToday}) (2)`);
+
+  // 6) Import creates a NEW track, keeps existing, switches active, preserves FSRS + logs.
+  const existingRoot = { activeTrackId: "track_default", tracks: { track_default: { id: "track_default", name: "Default Track", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" } } };
+  let importCounter = 0;
+  const fixedId = () => `track_import_${++importCounter}`;
+  const plan = planImport(existingRoot, backup, trackToday, fixedId);
+  assert("planImport keeps existing track", typeof plan.registry.tracks.track_default, "object");
+  assert("planImport adds exactly one track", Object.keys(plan.registry.tracks).length, 2);
+  assert("planImport mints a new id", plan.imported[0].id, "track_import_1");
+  assert("planImport switches active to imported", plan.newActiveTrackId, "track_import_1");
+  assert("planImport registry active matches", plan.registry.activeTrackId, "track_import_1");
+  assert("planImport renames duplicate track name", plan.imported[0].meta.name, `Default Track (Imported - ${trackToday})`);
+  const importedRecords = trackRecords(plan.imported[0].track);
+  assert("import preserves fsrs stability", importedRecords.vocabulary[0].review.fsrsCard.stability, 12.5);
+  assert("import preserves fsrs difficulty", importedRecords.vocabulary[0].review.fsrsCard.difficulty, 6.3);
+  assert("import preserves due date (no recompute)", importedRecords.vocabulary[0].review.dueAt, "2026-07-01T00:00:00.000Z");
+  assert("import preserves review logs", importedRecords.studyEvents[0].eventKey, "k1");
+
+  // 7) Track deletion rules: active cannot be deleted; non-active can (when >1 track).
+  const twoTrackRoot = { activeTrackId: "track_default", tracks: { track_default: { id: "track_default", name: "Default Track" }, track_b: { id: "track_b", name: "B" } } };
+  assert("canDeleteTrack false for active", canDeleteTrack(twoTrackRoot, "track_default", "track_default"), false);
+  assert("canDeleteTrack true for non-active", canDeleteTrack(twoTrackRoot, "track_b", "track_default"), true);
+  assert("canDeleteTrack false for only track", canDeleteTrack(existingRoot, "track_default", "other"), false);
+
   return {
     passed: failures.length === 0,
     failures,
-    assertionCount: 55,
+    assertionCount: 90,
   };
 }
 

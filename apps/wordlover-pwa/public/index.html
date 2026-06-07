@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260607-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260607-5" />
     <title>WordFan</title>
   </head>
   <body>
@@ -128,6 +128,23 @@
                 <button id="googleRestore" class="secondary-button" type="button" disabled>Restore</button>
                 <button id="googleSignOut" class="secondary-button" type="button" disabled>Sign out</button>
               </div>
+            </section>
+            <section class="settings-card">
+              <h3><span class="settings-card-icon" aria-hidden="true">▥</span>Learning tracks</h3>
+              <p class="small">Keep separate study sets and back them up to a plain JSON file. Active track: <strong id="activeTrackName">Default Track</strong></p>
+              <div class="menu-actions">
+                <label class="small" for="learningTrackSelect">Track</label>
+                <select id="learningTrackSelect"></select>
+                <button id="switchTrack" class="secondary-button" type="button" disabled>Switch</button>
+                <button id="renameTrack" class="secondary-button" type="button">Rename</button>
+                <button id="deleteTrack" class="secondary-button" type="button" disabled>Delete</button>
+              </div>
+              <div class="menu-actions">
+                <button id="exportUserData" type="button">Export user data</button>
+                <button id="importUserData" class="secondary-button" type="button">Import user data</button>
+                <input id="importUserDataFile" type="file" accept=".json,application/json" hidden>
+              </div>
+              <p id="learningTracksStatus" class="small" aria-live="polite"></p>
             </section>
           </div>
         </div>
@@ -367,7 +384,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260607-4"></script>
-    <script type="module" src="/app.js?v=20260607-4"></script>
+    <script src="/wordlover-config.js?v=20260607-5"></script>
+    <script type="module" src="/app.js?v=20260607-5"></script>
   </body>
 </html>

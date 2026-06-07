@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-4";
+} from "./fsrs-scheduler.js?v=20260607-5";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-4";
+} from "./persistence.js?v=20260607-5";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-4";
+} from "./spelling.js?v=20260607-5";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-4";
+} from "./ui-preferences.js?v=20260607-5";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-4";
+} from "./review-state.js?v=20260607-5";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-4";
+} from "./study-one-more.js?v=20260607-5";
 
 import {
   studyEventTrack,
@@ -70,11 +70,23 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-4";
+} from "./sync.js?v=20260607-5";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-4";
+} from "./goal-forecast.js?v=20260607-5";
+
+import {
+  DEFAULT_TRACK_ID,
+  DEFAULT_TRACK_NAME,
+  newTrackId,
+  migrateLegacyToRoot,
+  buildBackup,
+  trackRecords,
+  validateBackup,
+  planImport,
+  canDeleteTrack,
+} from "./tracks.js?v=20260607-5";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -109,6 +121,15 @@ const exportStateMenuButton = document.querySelector("#exportStateMenu");
 const createCheckpointButton = document.querySelector("#createCheckpoint");
 const rollbackCheckpointButton = document.querySelector("#rollbackCheckpoint");
 const deleteLocalDataButton = document.querySelector("#deleteLocalData");
+const exportUserDataButton = document.querySelector("#exportUserData");
+const importUserDataButton = document.querySelector("#importUserData");
+const importUserDataFileInput = document.querySelector("#importUserDataFile");
+const learningTrackSelect = document.querySelector("#learningTrackSelect");
+const switchTrackButton = document.querySelector("#switchTrack");
+const renameTrackButton = document.querySelector("#renameTrack");
+const deleteTrackButton = document.querySelector("#deleteTrack");
+const activeTrackName = document.querySelector("#activeTrackName");
+const learningTracksStatus = document.querySelector("#learningTracksStatus");
 const updateStatus = document.querySelector("#updateStatus");
 const checkpointStatus = document.querySelector("#checkpointStatus");
 const aiDetailPanel = document.querySelector("#aiDetailPanel");
@@ -178,6 +199,18 @@ const SPELLING_EVENT_STORE = "spellingEventRecords";
 const USER_DICTIONARY_STORE = "userDictionary";
 const KNOWN_STORE = "knownRecords";
 const CHECKPOINT_STORE = "checkpoints";
+// Learning tracks tag every per-record row with `learningTrackId` and prefix its IndexedDB
+// key as `${trackId}::${baseKey}` so the same term can live in multiple tracks at once.
+const TRACK_KEY_SEP = "::";
+const USER_DATA_ROOT_KEY = "userDataRoot";
+const TRACK_RECORD_STORES = [
+  VOCABULARY_STORE,
+  STUDY_EVENT_STORE,
+  SPELLING_STORE,
+  SPELLING_EVENT_STORE,
+  USER_DICTIONARY_STORE,
+  KNOWN_STORE,
+];
 const DICTIONARY_KEY = "dictionary.sqlite";
 const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
 const DICTIONARY_CHUNK_PREFIX = "dictionary.sqlite.chunk.";
@@ -187,9 +220,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-4-v117";
+const APP_VERSION = "0.6.2-product.20260607-5-v118";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v117";
+const SHELL_CACHE_VERSION = "wordlover-shell-v118";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -263,6 +296,10 @@ let spellingItems = [];
 let spellingEvents = [];
 let userDictionaryEntries = [];
 let knownWords = [];
+// Learning-track registry ({ schemaVersion, activeTrackId, tracks }) and the id whose
+// records currently populate the in-memory arrays above. All per-record writes target it.
+let userDataRoot = null;
+let activeLearningTrackId = DEFAULT_TRACK_ID;
 let autosaveEnabled = true;
 // "vocabulary" | "spelling" | "none" — what pressing Return saves (replaces the autosave toggle).
 let onReturnAction = "vocabulary";
@@ -383,6 +420,8 @@ function normalizeUiPreferences(preferences = {}, fallback = currentUiPreference
 
 async function persistUiPreferences() {
   await saveValue("uiPreferences", currentUiPreferences());
+  // The Study-One-More filter is per-track; capture it (and current goals) into track meta.
+  await saveActiveTrackMeta();
 }
 
 function applyStudyOneMoreFilterToPopup(filter) {
@@ -987,10 +1026,21 @@ async function loadValue(key, fallback) {
   }
 }
 
+// Prefix a per-record store key with the owning learning track so different tracks never
+// collide on the same `normalizedTerm` / event key.
+function recordKey(baseKey, trackId = activeLearningTrackId) {
+  return `${trackId}${TRACK_KEY_SEP}${baseKey}`;
+}
+
+function recordTrackId(value, fallback = DEFAULT_TRACK_ID) {
+  return value && typeof value === "object" && value.learningTrackId ? value.learningTrackId : fallback;
+}
+
 async function saveRecordValue(storeName, key, value) {
   assertUserDataWritable(`Saving "${key}"`);
   recordStoreWriteStatsForTest.puts[storeName] = (recordStoreWriteStatsForTest.puts[storeName] ?? 0) + 1;
-  await saveRawValue(storeName, key, value);
+  if (value && typeof value === "object") value.learningTrackId = activeLearningTrackId;
+  await saveRawValue(storeName, recordKey(key), value);
 }
 
 function withTimeout(promise, ms, label) {
@@ -1003,7 +1053,97 @@ function withTimeout(promise, ms, label) {
 
 async function deleteRecordValue(storeName, key) {
   assertUserDataWritable(`Deleting "${key}"`);
-  await deleteRawValue(storeName, key);
+  await deleteRawValue(storeName, recordKey(key));
+}
+
+// Decrypted values for one track only (used to populate the in-memory arrays on launch and
+// after a track switch). Legacy bare-keyed rows have no learningTrackId and belong to the
+// default track.
+async function loadTrackRecordValues(storeName, trackId = activeLearningTrackId) {
+  const all = await loadAllRecordValues(storeName);
+  return all.filter((value) => recordTrackId(value) === trackId);
+}
+
+// Write a set of records into a specific track's prefixed keys (used by import). Each record
+// is re-tagged with the destination trackId so it groups correctly on the next load.
+async function writeTrackRecords(storeName, trackId, records, keyOf) {
+  for (const record of records ?? []) {
+    if (!record || typeof record !== "object") continue;
+    const baseKey = keyOf(record);
+    if (!baseKey) continue;
+    record.learningTrackId = trackId;
+    await saveRawValue(storeName, recordKey(baseKey, trackId), await encryptValue(record));
+  }
+}
+
+// Remove every row belonging to a track from one store (used by delete-track). Other tracks'
+// rows are left untouched.
+async function deleteTrackRecords(storeName, trackId) {
+  const db = await getUserDb();
+  const prefix = `${trackId}${TRACK_KEY_SEP}`;
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], "readwrite");
+    const store = tx.objectStore(storeName);
+    const keysRequest = store.getAllKeys();
+    keysRequest.onsuccess = () => {
+      for (const key of keysRequest.result ?? []) {
+        if (typeof key === "string" && key.startsWith(prefix)) store.delete(key);
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error(`${storeName} delete-track transaction aborted.`));
+  });
+}
+
+// --- Learning-track registry (`userDataRoot` kv) + per-track metadata (goals, filter) ---
+function trackMetaKey(trackId) {
+  return `track:${trackId}:meta`;
+}
+
+async function loadUserDataRoot() {
+  const root = await loadValue(USER_DATA_ROOT_KEY, null);
+  if (root && root.tracks && root.activeTrackId && root.tracks[root.activeTrackId]) return root;
+  return null;
+}
+
+async function saveUserDataRoot(root) {
+  userDataRoot = root;
+  activeLearningTrackId = root.activeTrackId;
+  await saveValue(USER_DATA_ROOT_KEY, root);
+}
+
+async function loadTrackMeta(trackId) {
+  return await loadValue(trackMetaKey(trackId), null);
+}
+
+// Persist the per-track goals + Study-One-More filter for a track.
+async function saveActiveTrackMeta() {
+  await saveValue(trackMetaKey(activeLearningTrackId), {
+    studyGoals: studyGoals ?? null,
+    studyOneMoreFilter: normalizeStudyOneMoreFilter(studyOneMoreFilter),
+  });
+}
+
+// One-time migration of legacy single-track data into "track_default": checkpoint, re-key
+// every record store to the prefixed scheme, move goals/filter into track meta, and write
+// the registry. Safe and non-destructive — records are tagged and re-keyed, never dropped.
+async function migrateLocalDataToTracks() {
+  activeLearningTrackId = DEFAULT_TRACK_ID;
+  try {
+    await createCheckpoint("tracks-migration");
+  } catch (error) {
+    console.warn("Pre-migration checkpoint failed; continuing.", error);
+  }
+  await replaceRecordStore(VOCABULARY_STORE, vocabularyItems, (item) => item.normalizedTerm);
+  await replaceRecordStore(STUDY_EVENT_STORE, studyEvents, (event) => event.eventKey ?? event.id);
+  await replaceRecordStore(SPELLING_STORE, spellingItems, (item) => item.normalizedTerm);
+  await replaceRecordStore(SPELLING_EVENT_STORE, spellingEvents, (event) => event.eventKey ?? event.id);
+  await replaceRecordStore(USER_DICTIONARY_STORE, userDictionaryEntries, (entry) => entry.normalizedTerm);
+  await replaceRecordStore(KNOWN_STORE, knownWords, (record) => record.normalizedTerm);
+  await saveActiveTrackMeta();
+  const now = nowIso();
+  await saveUserDataRoot(migrateLegacyToRoot(now));
 }
 
 async function loadAllRecordValues(storeName) {
@@ -1167,6 +1307,7 @@ function renderAppMenu() {
   googleSignOutButton.disabled = !(googleAuth.accessToken || hasGoogleGrant());
   themeSelect.value = theme;
   renderFontZoomControls();
+  renderLearningTracks();
   void listCheckpoints().then(([latest]) => {
     rollbackCheckpointButton.disabled = !latest;
     if (latest && !checkpointStatus.textContent) {
@@ -2147,21 +2288,33 @@ function mergeSnapshots(localSnapshot, remoteSnapshot) {
   };
 }
 
+// Atomically replace the ACTIVE track's rows in a store. Only keys with the active-track
+// prefix are removed (plus legacy bare keys when the active track is the default, so the
+// one-time tracks migration re-keys old data); other tracks' rows are never touched.
 async function replaceRecordStore(storeName, records, keyOf) {
   assertUserDataWritable(`Rewriting ${storeName}`);
   recordStoreWriteStatsForTest.rewrites += 1;
-  const encryptedRecords = await Promise.all((records ?? []).map(async (record) => ({
-    key: keyOf(record),
-    value: await encryptValue(record),
-  })));
+  const encryptedRecords = await Promise.all((records ?? []).map(async (record) => {
+    if (record && typeof record === "object") record.learningTrackId = activeLearningTrackId;
+    return { key: recordKey(keyOf(record)), value: await encryptValue(record) };
+  }));
+  const prefix = `${activeLearningTrackId}${TRACK_KEY_SEP}`;
+  const dropLegacyBareKeys = activeLearningTrackId === DEFAULT_TRACK_ID;
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], "readwrite");
     const store = tx.objectStore(storeName);
-    store.clear();
-    encryptedRecords.forEach((record) => {
-      if (record.key) store.put(record.value, record.key);
-    });
+    const keysRequest = store.getAllKeys();
+    keysRequest.onsuccess = () => {
+      for (const key of keysRequest.result ?? []) {
+        if (typeof key !== "string") continue;
+        if (key.startsWith(prefix)) store.delete(key);
+        else if (dropLegacyBareKeys && !key.includes(TRACK_KEY_SEP)) store.delete(key);
+      }
+      encryptedRecords.forEach((record) => {
+        if (record.key) store.put(record.value, record.key);
+      });
+    };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error(`${storeName} rewrite transaction aborted.`));
@@ -2200,13 +2353,15 @@ async function persistStudyEvent(event) {
 
 async function saveReviewItemAndEvent({ itemStore, eventStore, itemKey, item, event }) {
   assertUserDataWritable(`Saving review for "${itemKey}"`);
+  if (item && typeof item === "object") item.learningTrackId = activeLearningTrackId;
+  if (event && typeof event === "object") event.learningTrackId = activeLearningTrackId;
   const encryptedItem = await encryptValue(item);
   const encryptedEvent = await encryptValue(event);
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction([itemStore, eventStore], "readwrite");
-    tx.objectStore(itemStore).put(encryptedItem, itemKey);
-    tx.objectStore(eventStore).put(encryptedEvent, event.eventKey ?? event.id);
+    tx.objectStore(itemStore).put(encryptedItem, recordKey(itemKey));
+    tx.objectStore(eventStore).put(encryptedEvent, recordKey(event.eventKey ?? event.id));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("Review transaction aborted."));
@@ -5506,31 +5661,45 @@ async function replaceUserDataAtomically({
   allowDuringDecryptBlock = false,
 }) {
   assertUserDataWritable("Replacing local user data", { allowDuringDecryptBlock });
+  // Drive restore targets only the ACTIVE learning track: delete that track's rows (plus
+  // legacy bare keys when restoring into the default track) and re-write under prefixed
+  // keys. Other tracks' rows, the registry, and per-track meta are left untouched.
+  const trackId = activeLearningTrackId;
+  const prefix = `${trackId}${TRACK_KEY_SEP}`;
+  const dropLegacyBareKeys = trackId === DEFAULT_TRACK_ID;
+  const tag = (record) => {
+    if (record && typeof record === "object") record.learningTrackId = trackId;
+    return record;
+  };
   const db = await getUserDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(
       [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, KNOWN_STORE, STORE],
       "readwrite",
     );
-    const vocabularyStore = tx.objectStore(VOCABULARY_STORE);
-    const eventStore = tx.objectStore(STUDY_EVENT_STORE);
-    const spellingStore = tx.objectStore(SPELLING_STORE);
-    const spellingEventStore = tx.objectStore(SPELLING_EVENT_STORE);
-    const userDictStore = tx.objectStore(USER_DICTIONARY_STORE);
-    const knownStore = tx.objectStore(KNOWN_STORE);
+    const groups = [
+      { store: tx.objectStore(VOCABULARY_STORE), records: nextVocabularyItems, keyOf: (item) => item.normalizedTerm },
+      { store: tx.objectStore(STUDY_EVENT_STORE), records: nextStudyEvents, keyOf: (event) => event.eventKey ?? event.id },
+      { store: tx.objectStore(SPELLING_STORE), records: nextSpellingItems, keyOf: (item) => item.normalizedTerm },
+      { store: tx.objectStore(SPELLING_EVENT_STORE), records: nextSpellingEvents, keyOf: (event) => event.eventKey ?? event.id },
+      { store: tx.objectStore(USER_DICTIONARY_STORE), records: nextUserDictionary, keyOf: (entry) => entry.normalizedTerm },
+      { store: tx.objectStore(KNOWN_STORE), records: nextKnownWords, keyOf: (record) => record.normalizedTerm },
+    ];
+    for (const { store, records, keyOf } of groups) {
+      const keysRequest = store.getAllKeys();
+      keysRequest.onsuccess = () => {
+        for (const key of keysRequest.result ?? []) {
+          if (typeof key !== "string") continue;
+          if (key.startsWith(prefix)) store.delete(key);
+          else if (dropLegacyBareKeys && !key.includes(TRACK_KEY_SEP)) store.delete(key);
+        }
+        for (const record of records ?? []) {
+          const base = keyOf(record);
+          if (base) store.put(tag(record), `${prefix}${base}`);
+        }
+      };
+    }
     const kvStore = tx.objectStore(STORE);
-    vocabularyStore.clear();
-    eventStore.clear();
-    spellingStore.clear();
-    spellingEventStore.clear();
-    userDictStore.clear();
-    knownStore.clear();
-    nextVocabularyItems.forEach((item) => vocabularyStore.put(item, item.normalizedTerm));
-    nextStudyEvents.forEach((event) => eventStore.put(event, event.id));
-    nextSpellingItems.forEach((item) => spellingStore.put(item, item.normalizedTerm));
-    nextSpellingEvents.forEach((event) => spellingEventStore.put(event, event.id));
-    nextUserDictionary.forEach((entry) => userDictStore.put(entry, entry.normalizedTerm));
-    nextKnownWords.forEach((record) => knownStore.put(record, record.normalizedTerm));
     Object.entries(kvValues).forEach(([key, value]) => kvStore.put(value, key));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -5852,6 +6021,9 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   studyGoals = nextStudyGoals;
   lastMetrics = nextLastMetrics;
   if (allowDuringDecryptBlock) clearDataDecryptBlock();
+  // The restored goals + Study-One-More filter belong to the active track. Persist after
+  // clearing any decrypt block so the kv write is permitted on a fresh new-device restore.
+  await saveActiveTrackMeta();
 
   syncSettingsControls();
   applyTheme(theme);
@@ -5862,6 +6034,173 @@ async function applyUserDataSnapshot(snapshot, options = {}) {
   renderGoalsPanel();
   renderMetrics();
   renderAppMenu();
+}
+
+// ============================================================================
+// Learning tracks: JSON backup export / import + track management
+// ============================================================================
+
+// Group every track's persisted records (all tracks, not just active) by learningTrackId,
+// then attach per-track goals + Study-One-More filter for export.
+async function collectAllTracksData() {
+  const byField = {
+    vocabulary: await loadAllRecordValues(VOCABULARY_STORE),
+    studyEvents: await loadAllRecordValues(STUDY_EVENT_STORE),
+    spelling: await loadAllRecordValues(SPELLING_STORE),
+    spellingEvents: await loadAllRecordValues(SPELLING_EVENT_STORE),
+    userDictionary: await loadAllRecordValues(USER_DICTIONARY_STORE),
+    known: await loadAllRecordValues(KNOWN_STORE),
+  };
+  const trackData = {};
+  const ensure = (id) => {
+    if (!trackData[id]) {
+      trackData[id] = { vocabulary: [], studyEvents: [], spelling: [], spellingEvents: [], userDictionary: [], known: [] };
+    }
+    return trackData[id];
+  };
+  for (const [field, rows] of Object.entries(byField)) {
+    for (const row of rows) ensure(recordTrackId(row))[field].push(row);
+  }
+  for (const id of Object.keys(userDataRoot?.tracks ?? {})) {
+    const meta = id === activeLearningTrackId
+      ? { studyGoals, studyOneMoreFilter }
+      : (await loadTrackMeta(id)) ?? {};
+    const target = ensure(id);
+    target.goals = meta.studyGoals ?? null;
+    target.studyOneMoreFilter = meta.studyOneMoreFilter ?? null;
+  }
+  return trackData;
+}
+
+// Re-render every track-scoped surface after a switch / import.
+function renderAllTrackViews() {
+  syncSettingsControls();
+  renderHistory();
+  renderVocabulary();
+  renderStudyStats();
+  renderHistoryChart();
+  renderGoalsPanel();
+  renderLearningTracks();
+  if (currentResult) renderResult(currentResult);
+}
+
+// Repopulate the in-memory arrays from the active track's persisted records.
+async function loadActiveTrackIntoMemory() {
+  vocabularyItems = mergeVocabularySources(await loadTrackRecordValues(VOCABULARY_STORE), []);
+  studyEvents = mergeStudyEventSources(await loadTrackRecordValues(STUDY_EVENT_STORE), []);
+  vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
+  spellingItems = mergeVocabularySources(await loadTrackRecordValues(SPELLING_STORE), []);
+  spellingEvents = mergeStudyEventSources(await loadTrackRecordValues(SPELLING_EVENT_STORE), []);
+  spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
+  userDictionaryEntries = mergeUserDictionarySources(await loadTrackRecordValues(USER_DICTIONARY_STORE), []);
+  knownWords = mergeKnownSources(await loadTrackRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
+}
+
+async function exportUserData() {
+  const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
+  const trackData = await collectAllTracksData();
+  const backup = buildBackup({
+    activeTrackId: activeLearningTrackId,
+    tracks: root.tracks,
+    globalSettings: { theme, fontScale, onReturnAction, speakOnReturn, uiPreferences: currentUiPreferences() },
+    trackData,
+  }, nowIso());
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `wordfan-backup-${localDateKey()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return backup;
+}
+
+async function importUserData(file) {
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("That file is not valid JSON.");
+  }
+  const backup = validateBackup(parsed);
+  // Non-destructive: snapshot current data before adding the imported tracks.
+  await createCheckpoint("pre-import");
+  const today = localDateKey();
+  const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
+  const { registry, imported, newActiveTrackId } = planImport(root, backup, today, newTrackId);
+  for (const { id, track } of imported) {
+    const records = trackRecords(track);
+    await writeTrackRecords(VOCABULARY_STORE, id, records.vocabulary, (item) => item.normalizedTerm);
+    await writeTrackRecords(STUDY_EVENT_STORE, id, records.studyEvents, (event) => event.eventKey ?? event.id);
+    await writeTrackRecords(SPELLING_STORE, id, records.spelling, (item) => item.normalizedTerm);
+    await writeTrackRecords(SPELLING_EVENT_STORE, id, records.spellingEvents, (event) => event.eventKey ?? event.id);
+    await writeTrackRecords(USER_DICTIONARY_STORE, id, records.userDictionary, (entry) => entry.normalizedTerm);
+    await writeTrackRecords(KNOWN_STORE, id, records.known, (record) => record.normalizedTerm);
+    await saveValue(trackMetaKey(id), {
+      studyGoals: normalizeStudyGoals(records.goals),
+      studyOneMoreFilter: normalizeStudyOneMoreFilter(records.studyOneMoreFilter ?? {}),
+    });
+  }
+  // Switch to the imported active track and load it into memory.
+  await saveUserDataRoot(registry);
+  const meta = (await loadTrackMeta(newActiveTrackId)) ?? {};
+  studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
+  studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
+  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  await loadActiveTrackIntoMemory();
+  renderAllTrackViews();
+  return imported.length;
+}
+
+async function switchLearningTrack(id) {
+  if (!userDataRoot?.tracks?.[id] || id === activeLearningTrackId) return;
+  await saveUserDataRoot({ ...userDataRoot, activeTrackId: id });
+  const meta = (await loadTrackMeta(id)) ?? {};
+  studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
+  studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
+  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  await loadActiveTrackIntoMemory();
+  renderAllTrackViews();
+}
+
+async function renameLearningTrack(id, name) {
+  const trimmed = String(name ?? "").trim();
+  if (!userDataRoot?.tracks?.[id] || !trimmed) return;
+  const tracks = { ...userDataRoot.tracks, [id]: { ...userDataRoot.tracks[id], name: trimmed, updatedAt: nowIso() } };
+  await saveUserDataRoot({ ...userDataRoot, tracks });
+  renderLearningTracks();
+}
+
+async function deleteLearningTrack(id) {
+  if (!canDeleteTrack(userDataRoot, id, activeLearningTrackId)) {
+    throw new Error("Switch to another track before deleting this one.");
+  }
+  for (const storeName of TRACK_RECORD_STORES) {
+    await deleteTrackRecords(storeName, id);
+  }
+  await deleteRawValue(STORE, trackMetaKey(id));
+  const tracks = { ...userDataRoot.tracks };
+  delete tracks[id];
+  await saveUserDataRoot({ ...userDataRoot, tracks });
+  renderLearningTracks();
+}
+
+// Render the Learning Tracks settings card (active name, switch select, delete state).
+function renderLearningTracks() {
+  if (!learningTrackSelect) return;
+  const tracks = Object.values(userDataRoot?.tracks ?? {})
+    .sort((left, right) => (left.createdAt ?? "").localeCompare(right.createdAt ?? ""));
+  const active = userDataRoot?.tracks?.[activeLearningTrackId];
+  if (activeTrackName) activeTrackName.textContent = active?.name ?? "Default Track";
+  learningTrackSelect.innerHTML = tracks
+    .map((track) => `<option value="${escapeHtml(track.id)}"${track.id === activeLearningTrackId ? " selected" : ""}>${escapeHtml(track.name)}${track.id === activeLearningTrackId ? " (active)" : ""}</option>`)
+    .join("");
+  const selectedId = learningTrackSelect.value || activeLearningTrackId;
+  if (deleteTrackButton) deleteTrackButton.disabled = !canDeleteTrack(userDataRoot, selectedId, activeLearningTrackId);
+  if (switchTrackButton) switchTrackButton.disabled = selectedId === activeLearningTrackId;
 }
 
 function normalizeOnReturnAction(value) {
@@ -6955,7 +7294,16 @@ async function init() {
       if (Array.isArray(entry) && entry.length === 2 && entry[0]) aiChatCache.set(String(entry[0]), entry[1]);
     }
   }
-  studyGoals = normalizeStudyGoals(await loadValue("studyGoals", null));
+  // Learning tracks: establish the active track before any per-record load so the in-memory
+  // arrays are scoped to it. Goals are per-track (legacy global `studyGoals` is the fallback).
+  userDataRoot = await loadUserDataRoot();
+  if (userDataRoot) activeLearningTrackId = userDataRoot.activeTrackId;
+  const activeTrackMeta = userDataRoot ? await loadTrackMeta(activeLearningTrackId) : null;
+  studyGoals = normalizeStudyGoals(activeTrackMeta?.studyGoals ?? await loadValue("studyGoals", null));
+  if (activeTrackMeta?.studyOneMoreFilter) {
+    studyOneMoreFilter = normalizeStudyOneMoreFilter(activeTrackMeta.studyOneMoreFilter);
+    applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  }
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));
@@ -6993,24 +7341,27 @@ async function init() {
   renderDebugState();
   renderAppMenu();
   historyItems = await loadValue("history", []);
-  const vocabularyRecords = await loadAllRecordValues(VOCABULARY_STORE);
+  const vocabularyRecords = await loadTrackRecordValues(VOCABULARY_STORE);
   const legacyVocabularyItems = await loadValue("vocabularyItems", []);
   vocabularyItems = mergeVocabularySources(vocabularyRecords, legacyVocabularyItems);
-  const studyEventRecords = await loadAllRecordValues(STUDY_EVENT_STORE);
+  const studyEventRecords = await loadTrackRecordValues(STUDY_EVENT_STORE);
   const legacyStudyEvents = await loadValue("studyEvents", []);
   studyEvents = mergeStudyEventSources(studyEventRecords, legacyStudyEvents);
   vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
   if (vocabularyItems.length > vocabularyRecords.length || legacyVocabularyItems.length || studyEvents.length) await replaceVocabularyStoreForMigration();
   if (studyEvents.length > studyEventRecords.length || legacyStudyEvents.length) await replaceStudyEventStoreForMigration();
-  const spellingRecords = await loadAllRecordValues(SPELLING_STORE);
+  const spellingRecords = await loadTrackRecordValues(SPELLING_STORE);
   spellingItems = mergeVocabularySources(spellingRecords, []);
-  spellingEvents = mergeStudyEventSources(await loadAllRecordValues(SPELLING_EVENT_STORE), []);
+  spellingEvents = mergeStudyEventSources(await loadTrackRecordValues(SPELLING_EVENT_STORE), []);
   const spellingReviewStateBeforeRebuild = new Map(spellingItems.map((item) => [item.normalizedTerm, JSON.stringify(item.review ?? null)]));
   spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
   const spellingWasRebuilt = spellingEvents.length > 0 && spellingItems.some((item) => spellingReviewStateBeforeRebuild.get(item.normalizedTerm) !== JSON.stringify(item.review ?? null));
   if ((spellingWasRebuilt && spellingItems.length > 0) || spellingItems.length > spellingRecords.length) await replaceSpellingStoreForMigration();
-  userDictionaryEntries = mergeUserDictionarySources(await loadAllRecordValues(USER_DICTIONARY_STORE), []);
-  knownWords = mergeKnownSources(await loadAllRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
+  userDictionaryEntries = mergeUserDictionarySources(await loadTrackRecordValues(USER_DICTIONARY_STORE), []);
+  knownWords = mergeKnownSources(await loadTrackRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
+  // First launch after the tracks feature ships: re-key legacy single-track data into
+  // "track_default" and write the registry. Idempotent; skipped once the registry exists.
+  if (!userDataRoot) await migrateLocalDataToTracks();
   // Migrate the old autosave toggle into the new On Return action.
   const storedOnReturn = await loadValue("onReturnAction", null);
   if (storedOnReturn) {
@@ -7030,6 +7381,7 @@ async function init() {
   renderStudyStats();
   renderHistoryChart();
   renderMetrics();
+  renderLearningTracks();
   window.setInterval(refreshReviewScheduleViews, REVIEW_REFRESH_INTERVAL_MS);
   const installed = await hasInstalledDictionary();
   if (previousOpenedAt && Date.now() - Date.parse(previousOpenedAt) > 30 * NORMAL_DAY_MS && !installed) {
@@ -7604,6 +7956,95 @@ deleteLocalDataButton.addEventListener("click", async () => {
     await deleteAllLocalUserData();
   } catch (error) {
     checkpointStatus.textContent = `Delete failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+});
+
+function setLearningTracksStatus(message) {
+  if (learningTracksStatus) learningTracksStatus.textContent = message;
+}
+
+exportUserDataButton?.addEventListener("click", async () => {
+  try {
+    const backup = await exportUserData();
+    setLearningTracksStatus(`Exported ${Object.keys(backup.tracks).length} track(s) to a JSON file.`);
+  } catch (error) {
+    setLearningTracksStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+});
+
+importUserDataButton?.addEventListener("click", () => {
+  if (importUserDataFileInput) importUserDataFileInput.value = "";
+  importUserDataFileInput?.click();
+});
+
+importUserDataFileInput?.addEventListener("change", async () => {
+  const file = importUserDataFileInput.files?.[0];
+  if (!file) return;
+  setLearningTracksStatus("Importing…");
+  try {
+    await importUserData(file);
+    setLearningTracksStatus("Import complete. WordFan switched to the imported learning track. Your previous tracks were kept.");
+  } catch (error) {
+    setLearningTracksStatus(`Import failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    importUserDataFileInput.value = "";
+  }
+});
+
+// The select only chooses a track to manage; switching active is an explicit button so a
+// non-active track stays selectable for deletion.
+learningTrackSelect?.addEventListener("change", () => {
+  const selectedId = learningTrackSelect.value;
+  if (deleteTrackButton) deleteTrackButton.disabled = !canDeleteTrack(userDataRoot, selectedId, activeLearningTrackId);
+  if (switchTrackButton) switchTrackButton.disabled = selectedId === activeLearningTrackId;
+});
+
+switchTrackButton?.addEventListener("click", async () => {
+  const id = learningTrackSelect?.value;
+  if (!id || id === activeLearningTrackId) return;
+  try {
+    await switchLearningTrack(id);
+    setLearningTracksStatus(`Switched to "${userDataRoot?.tracks?.[id]?.name ?? id}".`);
+  } catch (error) {
+    setLearningTracksStatus(`Switch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+});
+
+renameTrackButton?.addEventListener("click", async () => {
+  const id = learningTrackSelect?.value || activeLearningTrackId;
+  const current = userDataRoot?.tracks?.[id];
+  if (!current) return;
+  const values = await showModal({
+    title: "Rename learning track",
+    fields: [{ id: "name", label: "Track name", value: current.name ?? "", required: true }],
+    submitText: "Rename",
+    cancelText: "Cancel",
+  });
+  if (!values) return;
+  await renameLearningTrack(id, values.name);
+  setLearningTracksStatus(`Renamed track to "${values.name.trim()}".`);
+});
+
+deleteTrackButton?.addEventListener("click", async () => {
+  const id = learningTrackSelect?.value;
+  const track = id ? userDataRoot?.tracks?.[id] : null;
+  if (!track || id === activeLearningTrackId) {
+    setLearningTracksStatus("Switch to another track before deleting this one.");
+    return;
+  }
+  const confirmation = await showModal({
+    title: "Delete learning track?",
+    body: `This permanently deletes the track "${track.name}" and all of its words, review history, goals, and spelling progress on this device. This cannot be undone.`,
+    submitText: "Delete track",
+    cancelText: "Cancel",
+    danger: true,
+  });
+  if (!confirmation) return;
+  try {
+    await deleteLearningTrack(id);
+    setLearningTracksStatus(`Deleted track "${track.name}".`);
+  } catch (error) {
+    setLearningTracksStatus(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 
@@ -8257,6 +8698,7 @@ async function saveStudyGoals(next, source = "wizard") {
   // mastery targets) survive a wizard save that only sets new-word + advanced.
   studyGoals = normalizeStudyGoals({ ...(studyGoals ?? {}), ...next, createdAt: created, updatedAt: now, source });
   await saveValue("studyGoals", studyGoals);
+  await saveActiveTrackMeta();
   renderGoalsPanel();
   return studyGoals;
 }
