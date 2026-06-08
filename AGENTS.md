@@ -112,7 +112,12 @@ To create PR or run GitHub actions, use gh installed at: C:\Program Files\GitHub
 
 At the end of a run, do the following:  
 Report the new source files introduced. Otherwise, print 'No new source files added.'  
-For new source files, update .\scripts\generate_code_map.py. Report updating status in a short sentence.  
-Run 'python .\scripts\generate_code_map.py' to update code map and symbol map. Report running results in one short sentence after run.
+Before finishing, run:
 
-Commit code changes and push it.
+python scripts/generate_code_[map.py](http://map.py)
+
+python scripts/generate_code_[map.py](http://map.py) --check
+
+Commit docs/ai/AUTO_SYMBOL_MAP.md and push it if it changed.
+
+Commit other code changes and push it.
