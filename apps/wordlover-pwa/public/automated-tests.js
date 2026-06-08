@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-10";
+} from "./fsrs-scheduler.js?v=20260608-1";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-10";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-10";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260608-1";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260608-1";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-10";
+} from "./ui-preferences.js?v=20260608-1";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-10";
+} from "./sync.js?v=20260608-1";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-10";
+} from "./study-one-more.js?v=20260608-1";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260607-10";
+} from "./goal-forecast.js?v=20260608-1";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-10";
+} from "./tracks.js?v=20260608-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v123";
+const SHELL_CACHE_NAME = "wordlover-shell-v124";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-10",
-  "/persistence.js?v=20260607-10",
-  "/spelling.js?v=20260607-10",
-  "/ui-preferences.js?v=20260607-10",
-  "/review-state.js?v=20260607-10",
-  "/study-one-more.js?v=20260607-10",
-  "/sync.js?v=20260607-10",
-  "/fsrs-scheduler.js?v=20260607-10",
-  "/goal-forecast.js?v=20260607-10",
-  "/tracks.js?v=20260607-10",
-  "/styles.css?v=20260607-10",
-  "/wordlover-config.js?v=20260607-10",
+  "/app.js?v=20260608-1",
+  "/persistence.js?v=20260608-1",
+  "/spelling.js?v=20260608-1",
+  "/ui-preferences.js?v=20260608-1",
+  "/review-state.js?v=20260608-1",
+  "/study-one-more.js?v=20260608-1",
+  "/sync.js?v=20260608-1",
+  "/fsrs-scheduler.js?v=20260608-1",
+  "/goal-forecast.js?v=20260608-1",
+  "/tracks.js?v=20260608-1",
+  "/styles.css?v=20260608-1",
+  "/wordlover-config.js?v=20260608-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-10",
+  "/automated-tests.js?v=20260608-1",
 ];
 
 let lastResults = null;
@@ -1943,7 +1943,13 @@ async function runMainAppStudySmoke() {
       && reviewDueButtonTextBefore !== reviewDueButtonTextAfter
       && reviewDueButtonTextAfter.includes(String(reviewDueCountAfter));
     if (!reviewDueButtonCountDecreases) {
-      throw new Error(`Review due button count should update immediately after a saved review. ${JSON.stringify({ reviewDueButtonTextBefore, reviewDueButtonTextAfter, reviewDueCountBefore, reviewDueCountAfter })}`);
+      const dueAfterDebug = frameWindow.WordLoverApp.getDueVocabularyItems().map((item) => ({
+        term: item.term,
+        dueAt: item.review?.dueAt ?? null,
+        lastRating: item.review?.lastRating ?? null,
+        reviewCount: item.review?.reviewCount ?? null,
+      }));
+      throw new Error(`Review due button count should update immediately after a saved review. ${JSON.stringify({ reviewDueFirstTerm, reviewDueSecondTerm, reviewDueButtonTextBefore, reviewDueButtonTextAfter, reviewDueCountBefore, reviewDueCountAfter, dueAfterDebug, reviewDebug: frameWindow.WordLoverApp.reviewDebug?.events?.().slice(-20) })}`);
     }
     await answerActiveVocabularyQuiz();
     clickFsrsRating("good");
@@ -2176,7 +2182,7 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    const expectedAppVersion = frameWindow.WordLoverApp.appVersion;
+    const expectedAppVersion = frameWindow.WordLoverApp.getState().appVersion;
     if (!updateStatusText.includes(expectedAppVersion) && updateCheckResult?.deviceVersion !== expectedAppVersion) {
       throw new Error(`App update check did not expose the current shell version: ${JSON.stringify({ expectedAppVersion, updateCheckResult, updateStatusText })}`);
     }
@@ -2426,13 +2432,14 @@ async function runEarlyPracticePersistenceTest() {
     item.review.intervalDays = 10;
     item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: futureIso };
     await app.persistVocabularyItemForTest(item);
+    const itemStoreKey = item.learningTrackId ? `${item.learningTrackId}::${item.normalizedTerm}` : item.normalizedTerm;
 
     const originalDueAt = item.review.dueAt;
     const originalIntervalDays = item.review.intervalDays;
     const originalFsrsReps = item.review.fsrsCard?.reps ?? 0;
     // Capture the encrypted blob now; since AES-GCM uses a random IV each write,
     // an identical blob after practice means the record was never re-written.
-    const blobAfterSetup = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
+    const blobAfterSetup = await getAppStoreValue(APP_VOCABULARY_STORE, itemStoreKey);
 
     // Practice pass/hard → early-practice-record-only → event type "practice", item unchanged
     await app.recordReviewRating(item, "hard", "pass", 12000, "practice", "early-practice-persist-test");
@@ -2445,7 +2452,7 @@ async function runEarlyPracticePersistenceTest() {
 
     // Verify IndexedDB blob is unchanged after practice (data is AES-GCM encrypted;
     // a re-write produces a new random IV, so an identical blob = no write occurred).
-    const blobAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
+    const blobAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, itemStoreKey);
     const practiceNotUpdatedInDb = JSON.stringify(blobAfterPractice) === JSON.stringify(blobAfterSetup);
 
     // Practice again/miss → early-practice-full-failure → event type "review", item updated
@@ -2456,7 +2463,7 @@ async function runEarlyPracticePersistenceTest() {
     const failItemDueChanged = item.review.dueAt !== originalDueAt;
 
     // Verify IndexedDB blob changed after full review (new encrypted write = different blob).
-    const blobAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, item.normalizedTerm);
+    const blobAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, itemStoreKey);
     const failUpdatedInDb = JSON.stringify(blobAfterFail) !== JSON.stringify(blobAfterSetup);
 
     return {
@@ -2624,6 +2631,136 @@ async function runManualExportFieldsTest() {
   }
 }
 
+async function runLearningTracksImportExportTest() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-learning-tracks-import=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded && app?.learningTracks?.exportBackupForTest) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Learning tracks import/export test timed out waiting for app load."));
+        }
+      }, 250);
+    });
+
+    const app = frame.contentWindow.WordLoverApp;
+    const FileCtor = frame.contentWindow.File;
+    const catchesAsync = async (fn) => {
+      try {
+        await fn();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const beforeRoot = app.learningTracks.rootForTest();
+    const beforeTrackIds = Object.keys(beforeRoot?.tracks ?? {});
+    const entry = await app.addUserDictionaryEntryForTest("learning tracks import fsrs", "fsrs import definition", "fsrs import");
+    const item = await app.saveVocabularyItem(app.lookupTerm(entry.word), "learning-tracks-import-test");
+    item.review = {
+      ...(item.review ?? {}),
+      dueAt: "2026-07-01T00:00:00.000Z",
+      lastReviewedAt: "2026-06-01T00:00:00.000Z",
+      lastRating: "good",
+      intervalDays: 30,
+      reviewCount: 12,
+      fsrsCard: {
+        ...(item.review?.fsrsCard ?? {}),
+        due: "2026-07-01T00:00:00.000Z",
+        stability: 12.345,
+        difficulty: 6.789,
+        reps: 12,
+        scheduled_days: 30,
+        scheduledDays: 30,
+      },
+    };
+    await app.persistVocabularyItemForTest(item);
+    const backup = await app.learningTracks.exportBackupForTest();
+    const exportedSchemaOk = backup.app === "WordFan" && backup.schemaVersion === 1 && Object.keys(backup.tracks ?? {}).length >= 1;
+
+    const rejectedInvalidJson = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor(["{"], "bad.json", { type: "application/json" })));
+    const rejectedUnsupportedVersion = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor([JSON.stringify({ ...backup, schemaVersion: 99 })], "bad-version.json", { type: "application/json" })));
+    const malformedItemBackup = JSON.parse(JSON.stringify(backup));
+    malformedItemBackup.tracks[malformedItemBackup.activeTrackId].wordLists.vocabulary[0].review.lastRating = "easyy";
+    const rejectedMalformedRecord = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor([JSON.stringify(malformedItemBackup)], "bad-record.json", { type: "application/json" })));
+    const malformedEventBackup = JSON.parse(JSON.stringify(backup));
+    malformedEventBackup.tracks[malformedEventBackup.activeTrackId].reviewLogs = [{ id: "bad", type: "review", term: "bad", rating: "easyy", occurredAt: "2026-06-01T00:00:00.000Z" }];
+    const rejectedMalformedEvent = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor([JSON.stringify(malformedEventBackup)], "bad-event.json", { type: "application/json" })));
+    const oversizedFile = new FileCtor([new Uint8Array(25 * 1024 * 1024 + 1)], "too-large.json", { type: "application/json" });
+    const rejectedOversized = await catchesAsync(() => app.learningTracks.importForTest(oversizedFile));
+
+    const importResult = await app.learningTracks.importForTest(new FileCtor([JSON.stringify(backup)], "wordfan-backup.json", { type: "application/json" }));
+    const afterRoot = app.learningTracks.rootForTest();
+    const afterTrackIds = Object.keys(afterRoot?.tracks ?? {});
+    const importedItem = app.getVocabulary().find((candidate) => candidate.normalizedTerm === item.normalizedTerm);
+    const importedFsrsPreserved =
+      importedItem?.review?.dueAt === item.review.dueAt
+      && importedItem.review.fsrsCard?.stability === item.review.fsrsCard.stability
+      && importedItem.review.fsrsCard?.difficulty === item.review.fsrsCard.difficulty
+      && importedItem.review.reviewCount === item.review.reviewCount
+      && importedItem.review.lastRating === item.review.lastRating;
+    const importedAsNewTrack =
+      importResult.importedCount >= 1
+      && afterTrackIds.length > beforeTrackIds.length
+      && beforeTrackIds.every((id) => afterRoot.tracks[id])
+      && app.learningTracks.activeTrackIdForTest() === importResult.activeTrackId;
+
+    const secondImport = await app.learningTracks.importForTest(new FileCtor([JSON.stringify(backup)], "wordfan-backup-again.json", { type: "application/json" }));
+    const names = Object.values(app.learningTracks.rootForTest().tracks).map((track) => track.name);
+    const duplicateNamesRenamed = new Set(names).size === names.length;
+    const activeDeleteRejected = await catchesAsync(() => app.learningTracks.deleteForTest(app.learningTracks.activeTrackIdForTest()));
+    await app.learningTracks.switchForTest(importResult.activeTrackId);
+    await app.learningTracks.deleteForTest(secondImport.activeTrackId);
+    const nonActiveDeleteWorked = !app.learningTracks.rootForTest().tracks[secondImport.activeTrackId];
+
+    const savedAfterImportEntry = await app.addUserDictionaryEntryForTest("learning tracks encrypted save", "encrypted save definition", "encrypted save");
+    const savedAfterImport = await app.saveVocabularyItem(app.lookupTerm(savedAfterImportEntry.word), "learning-tracks-post-import-save");
+    const storedAfterImport = await getAppStoreValue(APP_VOCABULARY_STORE, `${app.learningTracks.activeTrackIdForTest()}::${savedAfterImport.normalizedTerm}`);
+    const normalSaveEncrypted = isEncryptedRecord(storedAfterImport);
+
+    return {
+      passed: exportedSchemaOk
+        && rejectedInvalidJson
+        && rejectedUnsupportedVersion
+        && rejectedMalformedRecord
+        && rejectedMalformedEvent
+        && rejectedOversized
+        && importedAsNewTrack
+        && importedFsrsPreserved
+        && duplicateNamesRenamed
+        && activeDeleteRejected
+        && nonActiveDeleteWorked
+        && normalSaveEncrypted,
+      exportedSchemaOk,
+      rejectedInvalidJson,
+      rejectedUnsupportedVersion,
+      rejectedMalformedRecord,
+      rejectedMalformedEvent,
+      rejectedOversized,
+      importedAsNewTrack,
+      importedFsrsPreserved,
+      duplicateNamesRenamed,
+      activeDeleteRejected,
+      nonActiveDeleteWorked,
+      normalSaveEncrypted,
+      importResult,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
 function runModuleSmokeTests() {
   const failures = [];
   function assert(label, got, expected) {
@@ -2772,7 +2909,7 @@ function runModuleSmokeTests() {
 
   const sampleFsrsCard = { stability: 12.5, difficulty: 6.3, due: "2026-07-01T00:00:00.000Z", state: "Review" };
   const sampleVocab = [
-    { term: "abandon", normalizedTerm: "abandon", savedAt: "2026-06-01T00:00:00.000Z", archivedAt: null, ignoredAt: null, review: { dueAt: "2026-07-01T00:00:00.000Z", fsrsCard: sampleFsrsCard } },
+    { term: "abandon", normalizedTerm: "abandon", savedAt: "2026-06-01T00:00:00.000Z", archivedAt: null, ignoredAt: null, review: { dueAt: "2026-07-01T00:00:00.000Z", fsrsCard: sampleFsrsCard, reviewCount: 7, lastRating: "good" } },
     { term: "old word", normalizedTerm: "old word", savedAt: "2026-05-01T00:00:00.000Z", archivedAt: "2026-05-02T00:00:00.000Z", ignoredAt: "2026-05-02T00:00:00.000Z", review: { dueAt: "2026-06-01T00:00:00.000Z", fsrsCard: null } },
   ];
   const sampleEvents = [{ id: "e1", eventKey: "k1", type: "review", normalizedTerm: "abandon", rating: "good", occurredAt: "2026-06-02T00:00:00.000Z" }];
@@ -2781,7 +2918,7 @@ function runModuleSmokeTests() {
     activeTrackId: "track_default",
     tracks: exportTracks,
     globalSettings: { theme: "sunrise", fontScale: 1, onReturnAction: "vocabulary", speakOnReturn: false, uiPreferences: {}, geminiApiKey: "SECRET-KEY", googleAccessToken: "SECRET-TOKEN", backupPassphrase: "SECRET-PASS" },
-    trackData: { track_default: { vocabulary: sampleVocab, studyEvents: sampleEvents, spelling: [], spellingEvents: [], userDictionary: [], known: [], goals: { dailyNewWords: 5 }, studyOneMoreFilter: null } },
+    trackData: { track_default: { vocabulary: sampleVocab, studyEvents: sampleEvents, spelling: [], spellingEvents: [], userDictionary: [], known: [], history: [{ term: "abandon", searchedAt: "2026-06-03T00:00:00.000Z", queriedAt: "2026-06-03T00:00:00.000Z" }], goals: { dailyNewWords: 5 }, studyOneMoreFilter: null } },
   }, "2026-06-07T00:00:00.000Z");
 
   // 2) Export creates valid schemaVersion 1 JSON.
@@ -2807,7 +2944,25 @@ function runModuleSmokeTests() {
   assert("validateBackup rejects wrong app", throws(() => validateBackup({ app: "Other", schemaVersion: 1, tracks: { t: {} } })), true);
   assert("validateBackup rejects unsupported schemaVersion", throws(() => validateBackup({ app: "WordFan", schemaVersion: 99, tracks: { t: {} } })), true);
   assert("validateBackup rejects empty tracks", throws(() => validateBackup({ app: "WordFan", schemaVersion: 1, tracks: {} })), true);
+  assert("validateBackup rejects malformed track record", throws(() => validateBackup({ app: "WordFan", schemaVersion: 1, tracks: { t: { name: "Bad", wordLists: { vocabulary: [{ savedAt: "not-a-date" }] } } } })), true);
+  assert("validateBackup rejects malformed review event", throws(() => validateBackup({ app: "WordFan", schemaVersion: 1, tracks: { t: { name: "Bad", reviewLogs: [{ id: "bad", type: "review", term: "bad", rating: "easyy", occurredAt: "2026-06-01T00:00:00.000Z" }] } } })), true);
+  assert("validateBackup repairs missing normalizedTerm", validateBackup({ app: "WordFan", schemaVersion: 1, tracks: { t: { name: "Repair", wordLists: { vocabulary: [{ term: "Mixed Case", savedAt: "2026-06-01T00:00:00.000Z" }] } } } }).tracks.t.wordLists.vocabulary[0].normalizedTerm, "mixed case");
   assert("validateBackup accepts a valid backup", validateBackup(backup).app, "WordFan");
+  const legacyBackup = validateBackup({
+    app: "wordlover",
+    exportedAt: "2026-06-05T00:00:00.000Z",
+    vocabularyItems: sampleVocab,
+    studyEvents: sampleEvents,
+    spellingItems: [],
+    spellingEvents: [],
+    userDictionary: [],
+    knownWords: [],
+    historyItems: [{ term: "legacy history", searchedAt: "2026-06-04T00:00:00.000Z" }],
+  });
+  assert("legacy snapshot converts app", legacyBackup.app, "WordFan");
+  assert("legacy snapshot imports as one track", Object.keys(legacyBackup.tracks).length, 1);
+  assert("legacy snapshot default name", legacyBackup.tracks.legacy_snapshot.name, "Imported legacy snapshot - 2026-06-05");
+  assert("legacy snapshot carries search history", legacyBackup.tracks.legacy_snapshot.searchHistory[0].term, "legacy history");
 
   // 5) Duplicate imported track names are renamed safely.
   assert("dedupeTrackName no collision keeps name", dedupeTrackName(["A"], "B", trackToday), "B");
@@ -2825,11 +2980,17 @@ function runModuleSmokeTests() {
   assert("planImport switches active to imported", plan.newActiveTrackId, "track_import_1");
   assert("planImport registry active matches", plan.registry.activeTrackId, "track_import_1");
   assert("planImport renames duplicate track name", plan.imported[0].meta.name, `Default Track (Imported - ${trackToday})`);
+  let collisionCounter = 0;
+  const collisionPlan = planImport(existingRoot, backup, trackToday, () => (collisionCounter++ === 0 ? "track_default" : "track_import_safe"));
+  assert("planImport avoids generated id collisions", collisionPlan.imported[0].id, "track_import_safe");
   const importedRecords = trackRecords(plan.imported[0].track);
   assert("import preserves fsrs stability", importedRecords.vocabulary[0].review.fsrsCard.stability, 12.5);
   assert("import preserves fsrs difficulty", importedRecords.vocabulary[0].review.fsrsCard.difficulty, 6.3);
   assert("import preserves due date (no recompute)", importedRecords.vocabulary[0].review.dueAt, "2026-07-01T00:00:00.000Z");
+  assert("import preserves review count", importedRecords.vocabulary[0].review.reviewCount, 7);
+  assert("import preserves last rating", importedRecords.vocabulary[0].review.lastRating, "good");
   assert("import preserves review logs", importedRecords.studyEvents[0].eventKey, "k1");
+  assert("import preserves track-specific search history", importedRecords.history[0].term, "abandon");
 
   // 7) Track deletion rules: active cannot be deleted; non-active can (when >1 track).
   const twoTrackRoot = { activeTrackId: "track_default", tracks: { track_default: { id: "track_default", name: "Default Track" }, track_b: { id: "track_b", name: "B" } } };
@@ -2840,7 +3001,7 @@ function runModuleSmokeTests() {
   return {
     passed: failures.length === 0,
     failures,
-    assertionCount: 90,
+    assertionCount: 108,
   };
 }
 
@@ -2879,6 +3040,9 @@ async function runAllPocs() {
 
   addProgress("Verifying manual export snapshot includes all required fields.");
   const manualExportFields = await runManualExportFieldsTest();
+
+  addProgress("Checking Learning Tracks import/export safety.");
+  const learningTracksImportExport = await runLearningTracksImportExportTest();
 
   addProgress("Checking app DB schema has all required object stores.");
   const appDbSchema = await runAppDbSchemaTest();
@@ -2941,6 +3105,7 @@ async function runAllPocs() {
       earlyPracticePersistence: earlyPracticePersistence.passed ? "pass" : "fail",
       studyOneMoreSkipCooldown: studyOneMoreSkipCooldown.passed ? "pass" : "fail",
       manualExportFields: manualExportFields.passed ? "pass" : "fail",
+      learningTracksImportExport: learningTracksImportExport.passed ? "pass" : "fail",
       appDbSchema: appDbSchema.passed ? "pass" : "fail",
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
@@ -2958,6 +3123,7 @@ async function runAllPocs() {
     earlyPracticePersistence,
     studyOneMoreSkipCooldown,
     manualExportFields,
+    learningTracksImportExport,
     appDbSchema,
     dictionaryFetch: dictionaryFetchMetrics,
     dictionaryOpen: opened.metrics,

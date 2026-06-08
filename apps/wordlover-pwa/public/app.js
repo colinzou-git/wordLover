@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-10";
+} from "./fsrs-scheduler.js?v=20260608-1";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-10";
+} from "./persistence.js?v=20260608-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-10";
+} from "./spelling.js?v=20260608-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-10";
+} from "./ui-preferences.js?v=20260608-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-10";
+} from "./review-state.js?v=20260608-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-10";
+} from "./study-one-more.js?v=20260608-1";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-10";
+} from "./sync.js?v=20260608-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-10";
+} from "./goal-forecast.js?v=20260608-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-10";
+} from "./tracks.js?v=20260608-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -223,9 +223,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-10-v123";
+const APP_VERSION = "0.6.2-product.20260608-1-v124";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v123";
+const SHELL_CACHE_VERSION = "wordlover-shell-v124";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -240,6 +240,7 @@ const DICTIONARY_ESTIMATED_BYTES = 40 * 1024 * 1024;
 const DICTIONARY_MANIFEST_URL = "/dictionary-manifest.json";
 const DICTIONARY_VERSION_KEY = "dictionaryDataVersion";
 const MAX_CHECKPOINTS = 5;
+const MAX_USER_DATA_IMPORT_BYTES = 25 * 1024 * 1024;
 const PRODUCTION_GOOGLE_CLIENT_ID = "665953045468-gem626o90ch863ktk2686fb58qa9ql31.apps.googleusercontent.com";
 const GOOGLE_IDENTITY_SCRIPT = "https://accounts.google.com/gsi/client";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
@@ -788,6 +789,8 @@ function isUsingDefaultLocalDataPassphrase() {
 }
 
 function syncEncryptionNotice() {
+  if (CONFIG.allowDefaultCloudBackupPassphrase === true) return "Development backup encryption override is enabled.";
+  if (backupPassphraseSession) return "Cloud backups are encrypted with your backup passphrase.";
   return "";
 }
 
@@ -1044,7 +1047,7 @@ async function saveRecordValue(storeName, key, value) {
   assertUserDataWritable(`Saving "${key}"`);
   recordStoreWriteStatsForTest.puts[storeName] = (recordStoreWriteStatsForTest.puts[storeName] ?? 0) + 1;
   if (value && typeof value === "object") value.learningTrackId = activeLearningTrackId;
-  await saveRawValue(storeName, recordKey(key), value);
+  await saveRawValue(storeName, recordKey(key), await encryptValue(value));
 }
 
 function withTimeout(promise, ms, label) {
@@ -1105,6 +1108,10 @@ function trackMetaKey(trackId) {
   return `track:${trackId}:meta`;
 }
 
+function trackHistoryKey(trackId) {
+  return `track:${trackId}:history`;
+}
+
 async function loadUserDataRoot() {
   const root = await loadValue(USER_DATA_ROOT_KEY, null);
   if (root && root.tracks && root.activeTrackId && root.tracks[root.activeTrackId]) return root;
@@ -1146,6 +1153,7 @@ async function migrateLocalDataToTracks() {
   await replaceRecordStore(USER_DICTIONARY_STORE, userDictionaryEntries, (entry) => entry.normalizedTerm);
   await replaceRecordStore(KNOWN_STORE, knownWords, (record) => record.normalizedTerm);
   await saveActiveTrackMeta();
+  await saveValue(trackHistoryKey(DEFAULT_TRACK_ID), historyItems);
   const now = nowIso();
   await saveUserDataRoot(migrateLegacyToRoot(now));
 }
@@ -1414,7 +1422,7 @@ async function purgeDebugData() {
   await persistStudyEvents();
   await persistSpelling();
   await persistSpellingEvents();
-  await saveValue("history", historyItems);
+  await saveValue(trackHistoryKey(activeLearningTrackId), historyItems);
   renderVocabulary();
   renderHistory();
   renderStudyStats();
@@ -3945,6 +3953,10 @@ async function recordReviewRating(item, rating, quizResult, responseMs, mode = "
       reviewPersistenceTimeoutMs,
       `Saving review for "${item.normalizedTerm}"`,
     );
+    const canonicalIndex = vocabularyItems.findIndex((candidate) => candidate.normalizedTerm === nextItem.normalizedTerm);
+    if (canonicalIndex >= 0) {
+      Object.assign(vocabularyItems[canonicalIndex], nextItem);
+    }
     Object.assign(item, nextItem);
     studyEvents.push(event);
     renderStudyStats();
@@ -5113,7 +5125,7 @@ async function addHistory(item) {
     queriedAt: item.queriedAt ?? at,
   });
   historyItems = [normalizedItem, ...historyItems.filter((entry) => entry.term !== normalizedItem.term)].slice(0, 10);
-  await saveValue("history", historyItems);
+  await saveValue(trackHistoryKey(activeLearningTrackId), historyItems);
   renderHistory();
   if (normalizedItem?.term) prefetchAiChat(normalizedItem.term);
 }
@@ -5661,20 +5673,50 @@ function buildUserDataSnapshot() {
   };
 }
 
-function encryptSnapshotPayload(snapshot, options = {}) {
-  return Promise.resolve({
+async function encryptSnapshotPayload(snapshot, options = {}) {
+  if (options.purpose === "cloud") {
+    const { passphrase, source } = await getCloudBackupPassphrase({ reason: "Google Drive backup", allowCreate: true });
+    return {
+      app: "wordlover",
+      format: "wordlover-cloud-backup-aes-gcm-v2",
+      appVersion: APP_VERSION,
+      userDataFormatVersion: USER_DATA_FORMAT_VERSION,
+      exportedAt: nowIso(),
+      passphraseSource: source,
+      ...(await encryptJsonWithPassphrase(snapshot, passphrase)),
+    };
+  }
+  return {
     app: "wordlover",
     format: "wordlover-user-data-plain-v1",
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
     exportedAt: nowIso(),
     payload: snapshot,
-  });
+  };
 }
 
 async function decryptSnapshotPayload(envelope, options = {}) {
   if (envelope?.format === "wordlover-user-data-plain-v1") {
     return envelope.payload;
+  }
+  if (envelope?.format === "wordlover-cloud-backup-aes-gcm-v2") {
+    const { passphrase, source } = await getCloudBackupPassphrase({ reason: "Google Drive restore", allowCreate: false });
+    try {
+      const snapshot = await decryptJsonWithPassphrase(envelope, passphrase);
+      if (source === "unverified-user-backup-passphrase") {
+        await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
+        backupPassphraseSession = passphrase;
+        await saveValue("backupPassphrasePersisted", passphrase);
+      }
+      return snapshot;
+    } catch (error) {
+      if (source === "unverified-user-backup-passphrase") {
+        backupPassphraseSession = null;
+        await saveValue("backupPassphrasePersisted", null);
+      }
+      throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
+    }
   }
   if (envelope?.format === "wordlover-user-data-aes-gcm-v1") {
     // Legacy encrypted backup — try the default passphrase without prompting.
@@ -6246,6 +6288,9 @@ async function collectAllTracksData() {
     const target = ensure(id);
     target.goals = meta.studyGoals ?? null;
     target.studyOneMoreFilter = meta.studyOneMoreFilter ?? null;
+    target.history = id === activeLearningTrackId
+      ? historyItems
+      : await loadValue(trackHistoryKey(id), []);
   }
   return trackData;
 }
@@ -6263,39 +6308,97 @@ function renderAllTrackViews() {
 }
 
 // Repopulate the in-memory arrays from the active track's persisted records.
-async function loadActiveTrackIntoMemory() {
+async function loadActiveTrackIntoMemory({ rebuildReviewState = false } = {}) {
   vocabularyItems = mergeVocabularySources(await loadTrackRecordValues(VOCABULARY_STORE), []);
   studyEvents = mergeStudyEventSources(await loadTrackRecordValues(STUDY_EVENT_STORE), []);
-  vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
+  if (rebuildReviewState) vocabularyItems = rebuildItemsReviewStateFromEvents(vocabularyItems, studyEvents);
   spellingItems = mergeVocabularySources(await loadTrackRecordValues(SPELLING_STORE), []);
   spellingEvents = mergeStudyEventSources(await loadTrackRecordValues(SPELLING_EVENT_STORE), []);
-  spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
+  if (rebuildReviewState) spellingItems = rebuildItemsReviewStateFromEvents(spellingItems, spellingEvents);
   userDictionaryEntries = mergeUserDictionarySources(await loadTrackRecordValues(USER_DICTIONARY_STORE), []);
   knownWords = mergeKnownSources(await loadTrackRecordValues(KNOWN_STORE), [], activeStudyTermsFromItems(vocabularyItems, spellingItems));
+  historyItems = await loadValue(trackHistoryKey(activeLearningTrackId), activeLearningTrackId === DEFAULT_TRACK_ID ? await loadValue("history", []) : []);
 }
 
-async function exportUserData() {
+async function buildLearningTracksBackup() {
   const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
   const trackData = await collectAllTracksData();
-  const backup = buildBackup({
+  return buildBackup({
     activeTrackId: activeLearningTrackId,
     tracks: root.tracks,
     globalSettings: { theme, fontScale, onReturnAction, speakOnReturn, uiPreferences: currentUiPreferences() },
     trackData,
   }, nowIso());
+}
+
+async function exportUserData() {
+  const backup = await buildLearningTracksBackup();
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
+  const fileName = `wordfan-backup-${localDateKey()}.json`;
   link.href = url;
-  link.download = `wordfan-backup-${localDateKey()}.json`;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return backup;
+  return { backup, fileName, trackCount: Object.keys(backup.tracks).length };
+}
+
+async function writeImportedTracksAtomically(imported, registry) {
+  assertUserDataWritable("Importing user data");
+  const recordGroups = [
+    { storeName: VOCABULARY_STORE, field: "vocabulary", keyOf: (item) => item.normalizedTerm },
+    { storeName: STUDY_EVENT_STORE, field: "studyEvents", keyOf: (event) => event.eventKey ?? event.id },
+    { storeName: SPELLING_STORE, field: "spelling", keyOf: (item) => item.normalizedTerm },
+    { storeName: SPELLING_EVENT_STORE, field: "spellingEvents", keyOf: (event) => event.eventKey ?? event.id },
+    { storeName: USER_DICTIONARY_STORE, field: "userDictionary", keyOf: (entry) => entry.normalizedTerm },
+    { storeName: KNOWN_STORE, field: "known", keyOf: (record) => record.normalizedTerm },
+  ];
+  const encryptedRecords = [];
+  const kvValues = [[USER_DATA_ROOT_KEY, registry]];
+  for (const { id, track } of imported) {
+    const records = trackRecords(track);
+    kvValues.push([trackMetaKey(id), {
+      studyGoals: normalizeStudyGoals(records.goals),
+      studyOneMoreFilter: normalizeStudyOneMoreFilter(records.studyOneMoreFilter ?? {}),
+    }]);
+    kvValues.push([trackHistoryKey(id), Array.isArray(records.history) ? records.history : []]);
+    for (const group of recordGroups) {
+      for (const source of records[group.field] ?? []) {
+        const baseKey = group.keyOf(source);
+        if (!baseKey) throw new Error(`Imported ${group.field} record is missing a key.`);
+        const record = { ...source, learningTrackId: id };
+        encryptedRecords.push({
+          storeName: group.storeName,
+          key: recordKey(baseKey, id),
+          value: await encryptValue(record),
+        });
+      }
+    }
+  }
+  const db = await getUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(
+      [VOCABULARY_STORE, STUDY_EVENT_STORE, SPELLING_STORE, SPELLING_EVENT_STORE, USER_DICTIONARY_STORE, KNOWN_STORE, STORE],
+      "readwrite",
+    );
+    for (const entry of encryptedRecords) {
+      tx.objectStore(entry.storeName).put(entry.value, entry.key);
+    }
+    const kvStore = tx.objectStore(STORE);
+    for (const [key, value] of kvValues) kvStore.put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("User data import transaction aborted."));
+  });
 }
 
 async function importUserData(file) {
+  if (file?.size && file.size > MAX_USER_DATA_IMPORT_BYTES) {
+    throw new Error(`Import file is too large (${formatBytes(file.size)}). Maximum supported size is ${formatBytes(MAX_USER_DATA_IMPORT_BYTES)}.`);
+  }
   const text = await file.text();
   let parsed;
   try {
@@ -6309,28 +6412,22 @@ async function importUserData(file) {
   const today = localDateKey();
   const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
   const { registry, imported, newActiveTrackId } = planImport(root, backup, today, newTrackId);
-  for (const { id, track } of imported) {
-    const records = trackRecords(track);
-    await writeTrackRecords(VOCABULARY_STORE, id, records.vocabulary, (item) => item.normalizedTerm);
-    await writeTrackRecords(STUDY_EVENT_STORE, id, records.studyEvents, (event) => event.eventKey ?? event.id);
-    await writeTrackRecords(SPELLING_STORE, id, records.spelling, (item) => item.normalizedTerm);
-    await writeTrackRecords(SPELLING_EVENT_STORE, id, records.spellingEvents, (event) => event.eventKey ?? event.id);
-    await writeTrackRecords(USER_DICTIONARY_STORE, id, records.userDictionary, (entry) => entry.normalizedTerm);
-    await writeTrackRecords(KNOWN_STORE, id, records.known, (record) => record.normalizedTerm);
-    await saveValue(trackMetaKey(id), {
-      studyGoals: normalizeStudyGoals(records.goals),
-      studyOneMoreFilter: normalizeStudyOneMoreFilter(records.studyOneMoreFilter ?? {}),
-    });
-  }
+  await writeImportedTracksAtomically(imported, registry);
   // Switch to the imported active track and load it into memory.
-  await saveUserDataRoot(registry);
+  userDataRoot = registry;
+  activeLearningTrackId = registry.activeTrackId;
   const meta = (await loadTrackMeta(newActiveTrackId)) ?? {};
   studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
   studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
   applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
-  await loadActiveTrackIntoMemory();
+  await loadActiveTrackIntoMemory({ rebuildReviewState: false });
   renderAllTrackViews();
-  return imported.length;
+  return {
+    importedCount: imported.length,
+    activeTrackId: newActiveTrackId,
+    activeTrackName: registry.tracks[newActiveTrackId]?.name ?? newActiveTrackId,
+    legacy: backup.importNote === "legacy-wordlover-snapshot",
+  };
 }
 
 async function switchLearningTrack(id) {
@@ -6340,7 +6437,7 @@ async function switchLearningTrack(id) {
   studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
   studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
   applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
-  await loadActiveTrackIntoMemory();
+  await loadActiveTrackIntoMemory({ rebuildReviewState: false });
   renderAllTrackViews();
 }
 
@@ -6360,6 +6457,7 @@ async function deleteLearningTrack(id) {
     await deleteTrackRecords(storeName, id);
   }
   await deleteRawValue(STORE, trackMetaKey(id));
+  await deleteRawValue(STORE, trackHistoryKey(id));
   const tracks = { ...userDataRoot.tracks };
   delete tracks[id];
   await saveUserDataRoot({ ...userDataRoot, tracks });
@@ -7518,7 +7616,7 @@ async function init() {
   }
   renderDebugState();
   renderAppMenu();
-  historyItems = await loadValue("history", []);
+  historyItems = await loadValue(trackHistoryKey(activeLearningTrackId), activeLearningTrackId === DEFAULT_TRACK_ID ? await loadValue("history", []) : []);
   const vocabularyRecords = await loadTrackRecordValues(VOCABULARY_STORE);
   const legacyVocabularyItems = await loadValue("vocabularyItems", []);
   vocabularyItems = mergeVocabularySources(vocabularyRecords, legacyVocabularyItems);
@@ -8217,8 +8315,8 @@ function setLearningTracksStatus(message) {
 
 exportUserDataButton?.addEventListener("click", async () => {
   try {
-    const backup = await exportUserData();
-    setLearningTracksStatus(`Exported ${Object.keys(backup.tracks).length} track(s) to a JSON file.`);
+    const result = await exportUserData();
+    setLearningTracksStatus(`Exported ${result.trackCount} track(s) to ${result.fileName}.`);
   } catch (error) {
     setLearningTracksStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -8234,8 +8332,8 @@ importUserDataFileInput?.addEventListener("change", async () => {
   if (!file) return;
   setLearningTracksStatus("Importing…");
   try {
-    await importUserData(file);
-    setLearningTracksStatus("Import complete. WordFan switched to the imported learning track. Your previous tracks were kept.");
+    const result = await importUserData(file);
+    setLearningTracksStatus(`${result.legacy ? "Legacy snapshot imported" : "Import complete"}: ${result.importedCount} track(s). Active track is "${result.activeTrackName}". Your previous tracks were kept.`);
   } catch (error) {
     setLearningTracksStatus(`Import failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
@@ -9230,6 +9328,14 @@ window.WordLoverApp = {
       return currentUiPreferences();
     },
   },
+  learningTracks: {
+    exportBackupForTest: buildLearningTracksBackup,
+    importForTest: importUserData,
+    switchForTest: switchLearningTrack,
+    deleteForTest: deleteLearningTrack,
+    rootForTest: () => userDataRoot,
+    activeTrackIdForTest: () => activeLearningTrackId,
+  },
   runAutomatedSearchSmoke,
   applyTheme: (next) => {
     applyTheme(next);
@@ -9318,12 +9424,19 @@ window.WordLoverApp = {
     lastInfo: () => lastSyncInfo,
     lastSummary: () => lastSyncSummary,
     backupEncryption: {
-      status: async () => ({
-        hasSessionPassphrase: Boolean(backupPassphraseSession),
-        hasVerifier: Boolean(await loadValue("backupPassphraseVerifier", null)),
-        developmentOverride: CONFIG.allowDefaultCloudBackupPassphrase === true,
-        notice: syncEncryptionNotice(),
-      }),
+      status: async () => {
+        const hasVerifier = Boolean(await loadValue("backupPassphraseVerifier", null));
+        const hasSessionPassphrase = Boolean(backupPassphraseSession);
+        const developmentOverride = CONFIG.allowDefaultCloudBackupPassphrase === true;
+        return {
+          hasSessionPassphrase,
+          hasVerifier,
+          developmentOverride,
+          notice: developmentOverride || hasVerifier || hasSessionPassphrase
+            ? syncEncryptionNotice()
+            : "A backup passphrase is required before Google Drive sync can encrypt cloud backups.",
+        };
+      },
       setPassphraseForTest: setBackupPassphraseForTest,
       clearPassphraseForTest: clearBackupPassphraseForTest,
       setPromptForTest: (handler) => {

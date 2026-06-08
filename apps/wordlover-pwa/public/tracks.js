@@ -15,6 +15,7 @@ export const DEFAULT_TRACK_NAME = "Default Track";
 // key, Google OAuth tokens/grant/profile, client-id override, backup passphrase, AI-chat
 // cache — is intentionally excluded so secrets can never leak into an exported file.
 export const GLOBAL_SETTINGS_ALLOWED = ["theme", "fontScale", "onReturnAction", "speakOnReturn", "uiPreferences"];
+const FSRS_RATINGS = new Set(["again", "hard", "good", "easy"]);
 
 export function newTrackId(rng) {
   const random = typeof rng === "function" ? rng : Math.random;
@@ -73,6 +74,7 @@ export function serializeTrack(meta = {}, data = {}) {
     ignoredWords: ignoredFromItems(vocabulary),
     customWords: data.userDictionary ?? [],
     memorizedWords: data.known ?? [],
+    searchHistory: data.history ?? [],
     fsrsCards: fsrsCardsFromItems(vocabulary),
     reviewLogs: data.studyEvents ?? [],
     spellingReviewLogs: data.spellingEvents ?? [],
@@ -91,6 +93,7 @@ export function trackRecords(track = {}) {
     spelling: track.spellingLists?.spelling ?? [],
     userDictionary: track.customWords ?? [],
     known: track.memorizedWords ?? [],
+    history: track.searchHistory ?? [],
     studyEvents: track.reviewLogs ?? [],
     spellingEvents: track.spellingReviewLogs ?? [],
     goals: track.goals ?? null,
@@ -118,21 +121,211 @@ function hasTrackMap(value) {
   return value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
 }
 
+function cloneJson(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeBackupTerm(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[’`]/g, "'")
+    .replace(/\s+/g, " ");
+}
+
+function validOptionalDate(value) {
+  return value === null || value === undefined || value === "" || Number.isFinite(Date.parse(value));
+}
+
+function assertArray(value, path) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`Backup ${path} must be an array.`);
+  return value;
+}
+
+function assertValidDate(value, path) {
+  if (!validOptionalDate(value)) throw new Error(`Backup ${path} has an invalid date.`);
+}
+
+function assertValidRating(value, path) {
+  if (value !== undefined && value !== null && value !== "" && !FSRS_RATINGS.has(String(value).toLowerCase())) {
+    throw new Error(`Backup ${path} has an invalid FSRS rating.`);
+  }
+}
+
+function normalizeTermRecord(record, path, termKey = "term") {
+  if (!isPlainObject(record)) throw new Error(`Backup ${path} must be an object.`);
+  const term = record[termKey] ?? record.term ?? record.word ?? record.normalizedTerm;
+  const normalizedTerm = normalizeBackupTerm(record.normalizedTerm ?? term);
+  if (!normalizedTerm) throw new Error(`Backup ${path} is missing a term/normalizedTerm.`);
+  return { ...record, normalizedTerm };
+}
+
+function validateFsrsCard(card, path) {
+  if (card === undefined || card === null) return;
+  if (!isPlainObject(card)) throw new Error(`Backup ${path} must be an object.`);
+  for (const key of ["due", "last_review"]) assertValidDate(card[key], `${path}.${key}`);
+  for (const key of ["stability", "difficulty", "elapsed_days", "scheduled_days", "reps", "lapses"]) {
+    if (card[key] !== undefined && card[key] !== null && !Number.isFinite(Number(card[key]))) {
+      throw new Error(`Backup ${path}.${key} must be numeric.`);
+    }
+  }
+}
+
+function validateReviewState(review, path) {
+  if (review === undefined || review === null) return null;
+  if (!isPlainObject(review)) throw new Error(`Backup ${path} must be an object.`);
+  assertValidDate(review.dueAt, `${path}.dueAt`);
+  assertValidDate(review.lastReviewedAt, `${path}.lastReviewedAt`);
+  assertValidDate(review.masteredAt, `${path}.masteredAt`);
+  assertValidRating(review.lastRating, `${path}.lastRating`);
+  validateFsrsCard(review.fsrsCard, `${path}.fsrsCard`);
+  return { ...review };
+}
+
+function validateItemRecord(record, path) {
+  const normalized = normalizeTermRecord(record, path);
+  for (const key of ["savedAt", "updatedAt", "archivedAt", "ignoredAt"]) assertValidDate(normalized[key], `${path}.${key}`);
+  const review = validateReviewState(normalized.review, `${path}.review`);
+  return review ? { ...normalized, review } : normalized;
+}
+
+function validateEventRecord(record, path) {
+  const normalized = normalizeTermRecord(record, path);
+  if (!normalized.id && !normalized.eventKey) throw new Error(`Backup ${path} is missing id/eventKey.`);
+  if (!normalized.type) throw new Error(`Backup ${path} is missing type.`);
+  if (!normalized.occurredAt || !validOptionalDate(normalized.occurredAt)) throw new Error(`Backup ${path}.occurredAt has an invalid date.`);
+  if (normalized.rating !== undefined || normalized.type === "review" || normalized.type === "practice") {
+    assertValidRating(normalized.rating, `${path}.rating`);
+  }
+  return normalized;
+}
+
+function validateUserDictionaryRecord(record, path) {
+  if (!isPlainObject(record)) throw new Error(`Backup ${path} must be an object.`);
+  const normalizedTerm = normalizeBackupTerm(record.normalizedTerm ?? record.word);
+  if (!normalizedTerm) throw new Error(`Backup ${path} is missing word/normalizedTerm.`);
+  if (record.englishMeanings !== undefined && !Array.isArray(record.englishMeanings)) throw new Error(`Backup ${path}.englishMeanings must be an array.`);
+  if (record.chineseMeanings !== undefined && !Array.isArray(record.chineseMeanings)) throw new Error(`Backup ${path}.chineseMeanings must be an array.`);
+  return { ...record, normalizedTerm, word: record.word ?? normalizedTerm };
+}
+
+function validateKnownRecord(record, path) {
+  const normalized = normalizeTermRecord(record, path);
+  assertValidDate(normalized.knownAt, `${path}.knownAt`);
+  assertValidDate(normalized.updatedAt, `${path}.updatedAt`);
+  return normalized;
+}
+
+function validateHistoryRecord(record, path) {
+  if (!isPlainObject(record)) throw new Error(`Backup ${path} must be an object.`);
+  if (!record.term) throw new Error(`Backup ${path} is missing term.`);
+  assertValidDate(record.queriedAt ?? record.searchedAt, `${path}.queriedAt`);
+  return { ...record };
+}
+
+function validateTrack(track, id) {
+  if (!isPlainObject(track)) throw new Error(`Backup track ${id} must be an object.`);
+  if (track.wordLists !== undefined && !isPlainObject(track.wordLists)) throw new Error(`Backup tracks.${id}.wordLists must be an object.`);
+  if (track.spellingLists !== undefined && !isPlainObject(track.spellingLists)) throw new Error(`Backup tracks.${id}.spellingLists must be an object.`);
+  if (track.studyOneMoreState !== undefined && !isPlainObject(track.studyOneMoreState)) throw new Error(`Backup tracks.${id}.studyOneMoreState must be an object.`);
+  const name = String(track.name ?? "").trim() || "Imported Track";
+  const vocabulary = assertArray(track.wordLists?.vocabulary, `tracks.${id}.wordLists.vocabulary`)
+    .map((record, index) => validateItemRecord(record, `tracks.${id}.wordLists.vocabulary[${index}]`));
+  const spelling = assertArray(track.spellingLists?.spelling, `tracks.${id}.spellingLists.spelling`)
+    .map((record, index) => validateItemRecord(record, `tracks.${id}.spellingLists.spelling[${index}]`));
+  const reviewLogs = assertArray(track.reviewLogs, `tracks.${id}.reviewLogs`)
+    .map((record, index) => validateEventRecord(record, `tracks.${id}.reviewLogs[${index}]`));
+  const spellingReviewLogs = assertArray(track.spellingReviewLogs, `tracks.${id}.spellingReviewLogs`)
+    .map((record, index) => validateEventRecord(record, `tracks.${id}.spellingReviewLogs[${index}]`));
+  const customWords = assertArray(track.customWords, `tracks.${id}.customWords`)
+    .map((record, index) => validateUserDictionaryRecord(record, `tracks.${id}.customWords[${index}]`));
+  const memorizedWords = assertArray(track.memorizedWords, `tracks.${id}.memorizedWords`)
+    .map((record, index) => validateKnownRecord(record, `tracks.${id}.memorizedWords[${index}]`));
+  const searchHistory = assertArray(track.searchHistory, `tracks.${id}.searchHistory`)
+    .map((record, index) => validateHistoryRecord(record, `tracks.${id}.searchHistory[${index}]`));
+  return {
+    ...track,
+    id: track.id ?? id,
+    name,
+    wordLists: { ...(track.wordLists ?? {}), vocabulary },
+    spellingLists: { ...(track.spellingLists ?? {}), spelling },
+    reviewLogs,
+    spellingReviewLogs,
+    customWords,
+    memorizedWords,
+    searchHistory,
+  };
+}
+
+function legacyTrackName(snapshot) {
+  const rawDate = snapshot?.exportedAt ?? snapshot?.lastOpenedAt ?? snapshot?.createdAt;
+  const parsed = rawDate && Number.isFinite(Date.parse(rawDate)) ? new Date(rawDate) : new Date();
+  const date = parsed.toISOString().slice(0, 10);
+  return `Imported legacy snapshot - ${date}`;
+}
+
+function legacySnapshotToBackup(snapshot) {
+  const trackId = "legacy_snapshot";
+  return {
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    app: BACKUP_APP,
+    exportedAt: snapshot.exportedAt ?? new Date().toISOString(),
+    activeTrackId: trackId,
+    importNote: "legacy-wordlover-snapshot",
+    globalSettings: pickGlobalSettings({
+      theme: snapshot.theme,
+      fontScale: snapshot.fontScale,
+      onReturnAction: snapshot.onReturnAction,
+      speakOnReturn: snapshot.speakOnReturn,
+      uiPreferences: snapshot.uiPreferences,
+    }),
+    tracks: {
+      [trackId]: {
+        id: trackId,
+        name: legacyTrackName(snapshot),
+        createdAt: snapshot.createdAt ?? snapshot.exportedAt ?? null,
+        updatedAt: snapshot.updatedAt ?? snapshot.exportedAt ?? null,
+        goals: snapshot.studyGoals ?? null,
+        studyOneMoreState: { filter: snapshot.studyOneMoreFilter ?? snapshot.uiPreferences?.studyOneMoreFilter ?? null },
+        wordLists: { vocabulary: snapshot.vocabularyItems ?? [] },
+        spellingLists: { spelling: snapshot.spellingItems ?? [] },
+        customWords: snapshot.userDictionary ?? [],
+        memorizedWords: snapshot.knownWords ?? [],
+        searchHistory: snapshot.historyItems ?? [],
+        reviewLogs: snapshot.studyEvents ?? [],
+        spellingReviewLogs: snapshot.spellingEvents ?? [],
+      },
+    },
+  };
+}
+
 // Throws a user-facing Error when the parsed object is not an importable WordFan backup.
 export function validateBackup(parsed) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Backup file is not a valid WordFan backup object.");
   }
-  if (parsed.app !== BACKUP_APP) {
-    throw new Error(`This file is not a WordFan backup (app="${parsed.app ?? ""}").`);
+  const candidate = parsed.app === "wordlover" ? legacySnapshotToBackup(parsed) : cloneJson(parsed);
+  if (candidate.app !== BACKUP_APP) {
+    throw new Error(`This file is not a WordFan backup (app="${candidate.app ?? ""}").`);
   }
-  if (!Number.isInteger(parsed.schemaVersion) || parsed.schemaVersion < 1 || parsed.schemaVersion > BACKUP_SCHEMA_VERSION) {
-    throw new Error(`Unsupported backup schemaVersion ${parsed.schemaVersion}. This app supports versions 1 to ${BACKUP_SCHEMA_VERSION}.`);
+  if (!Number.isInteger(candidate.schemaVersion) || candidate.schemaVersion < 1 || candidate.schemaVersion > BACKUP_SCHEMA_VERSION) {
+    throw new Error(`Unsupported backup schemaVersion ${candidate.schemaVersion}. This app supports versions 1 to ${BACKUP_SCHEMA_VERSION}.`);
   }
-  if (!hasTrackMap(parsed.tracks)) {
+  if (!hasTrackMap(candidate.tracks)) {
     throw new Error("Backup contains no learning tracks.");
   }
-  return parsed;
+  const tracks = {};
+  for (const [id, track] of Object.entries(candidate.tracks)) {
+    tracks[id] = validateTrack(track, id);
+  }
+  const activeTrackId = tracks[candidate.activeTrackId] ? candidate.activeTrackId : Object.keys(tracks)[0];
+  return { ...candidate, activeTrackId, globalSettings: pickGlobalSettings(candidate.globalSettings ?? {}), tracks };
 }
 
 // A track may be deleted only if it exists, is not the active track, and is not the last
@@ -164,8 +357,16 @@ export function planImport(root = {}, backup = {}, today, makeId = newTrackId) {
   const imported = [];
   let newActiveTrackId = root.activeTrackId ?? DEFAULT_TRACK_ID;
   const srcActive = backup.activeTrackId;
+  const usedIds = new Set(Object.keys(existing));
   for (const [srcId, track] of Object.entries(backup.tracks ?? {})) {
-    const id = makeId();
+    let id = makeId();
+    let attempts = 0;
+    while (usedIds.has(id)) {
+      attempts += 1;
+      if (attempts > 100) throw new Error("Could not create a unique imported learning track id.");
+      id = makeId();
+    }
+    usedIds.add(id);
     const name = dedupeTrackName([...usedNames], track.name, today);
     usedNames.add(name);
     const meta = {
