@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-7";
+} from "./fsrs-scheduler.js?v=20260607-8";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-7";
+} from "./persistence.js?v=20260607-8";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-7";
+} from "./spelling.js?v=20260607-8";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-7";
+} from "./ui-preferences.js?v=20260607-8";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-7";
+} from "./review-state.js?v=20260607-8";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-7";
+} from "./study-one-more.js?v=20260607-8";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-7";
+} from "./sync.js?v=20260607-8";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-7";
+} from "./goal-forecast.js?v=20260607-8";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-7";
+} from "./tracks.js?v=20260607-8";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -222,9 +222,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-7-v120";
+const APP_VERSION = "0.6.2-product.20260607-8-v121";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v120";
+const SHELL_CACHE_VERSION = "wordlover-shell-v121";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -4118,16 +4118,20 @@ function updateSpellingProgress() {
   if (progress && activeSpellingSession) progress.textContent = spellingProgressText();
 }
 
+function spellingAnswerMatches(inputValue, expectedTerm) {
+  return String(inputValue ?? "").toLocaleLowerCase() === String(expectedTerm ?? "").toLocaleLowerCase();
+}
+
 function checkSpelling() {
   const item = currentSpellingItem();
   if (!item || !activeSpellingSession || activeSpellingSession.awaitingRetry || activeSpellingSession.pausing) return;
   const input = spellingReviewPanel.querySelector("#spellingInput");
   const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
   if (!input || !feedback) return;
-  const value = input.value.trim(); // Ignore accidental edge spaces; spelling remains case-sensitive.
+  const value = input.value.trim(); // Ignore accidental edge spaces; capitalization is not audible in dictation.
   if (!value) return;
   if (value !== input.value) input.value = value;
-  if (value === item.term) {
+  if (spellingAnswerMatches(value, item.term)) {
     activeSpellingSession.consecutive += 1;
     // Show the result (with the correct word) and keep the typed text on screen for a beat so the
     // user can see what they entered before it clears / advances.
@@ -9083,6 +9087,7 @@ window.WordLoverApp = {
   getDueSpellingItems,
   spelling: {
     ratingFromRetries,
+    answerMatches: spellingAnswerMatches,
     getDue: getDueSpellingItems,
     getPractice: getPracticeSpellingItems,
     start: startSpellingReview,
