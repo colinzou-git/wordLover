@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-9";
+} from "./fsrs-scheduler.js?v=20260607-10";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-9";
+} from "./persistence.js?v=20260607-10";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-9";
+} from "./spelling.js?v=20260607-10";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-9";
+} from "./ui-preferences.js?v=20260607-10";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-9";
+} from "./review-state.js?v=20260607-10";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-9";
+} from "./study-one-more.js?v=20260607-10";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-9";
+} from "./sync.js?v=20260607-10";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-9";
+} from "./goal-forecast.js?v=20260607-10";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-9";
+} from "./tracks.js?v=20260607-10";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -157,6 +157,7 @@ const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
 const statNewSaved = document.querySelector("#statNewSaved");
 const statReviewed = document.querySelector("#statReviewed");
+const statPracticed = document.querySelector("#statPracticed");
 const statMastered = document.querySelector("#statMastered");
 const statKnown = document.querySelector("#statKnown");
 const startReviewButton = document.querySelector("#startReview");
@@ -222,9 +223,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-9-v122";
+const APP_VERSION = "0.6.2-product.20260607-10-v123";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v122";
+const SHELL_CACHE_VERSION = "wordlover-shell-v123";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -3318,19 +3319,37 @@ function getDueTodaySpellingItems() {
   return spellingItems.filter((item) => !item.archivedAt && (!item.review?.dueAt || Date.parse(item.review.dueAt) < end.getTime()));
 }
 
+function countTodayReviewActivity(events) {
+  const todaysAttempts = events.filter((event) =>
+    (event.type === "review" || event.type === "practice")
+    && isToday(event.occurredAt)
+    && normalizeTerm(event.normalizedTerm ?? event.term ?? ""),
+  );
+  const uniqueReviewedTerms = new Set(
+    todaysAttempts
+      .filter((event) => event.type === "review")
+      .map((event) => normalizeTerm(event.normalizedTerm ?? event.term ?? ""))
+      .filter(Boolean),
+  );
+  return {
+    reviewed: uniqueReviewedTerms.size,
+    practiced: Math.max(0, todaysAttempts.length - uniqueReviewedTerms.size),
+  };
+}
+
 function getTodayStats() {
   const newSaved = vocabularyItems.filter((item) => isToday(item.savedAt)).length;
-  const reviewed = studyEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
+  const { reviewed, practiced } = countTodayReviewActivity(studyEvents);
   const mastered = vocabularyItems.filter((item) => isToday(item.review?.masteredAt)).length;
   const known = knownWords.filter((record) => isToday(record.knownAt)).length;
-  return { newSaved, reviewed, mastered, known, dueCount: getDueVocabularyItems().length, dueTodayCount: getDueTodayVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
+  return { newSaved, reviewed, practiced, mastered, known, dueCount: getDueVocabularyItems().length, dueTodayCount: getDueTodayVocabularyItems().length, activeCount: getPracticeVocabularyItems().length };
 }
 
 function getSpellingTodayStats() {
   const newSaved = spellingItems.filter((item) => isToday(item.savedAt)).length;
-  const reviewed = spellingEvents.filter((event) => event.type === "review" && isToday(event.occurredAt)).length;
+  const { reviewed, practiced } = countTodayReviewActivity(spellingEvents);
   const mastered = spellingItems.filter((item) => isToday(item.review?.masteredAt)).length;
-  return { newSaved, reviewed, mastered, known: 0, dueCount: getDueSpellingItems().length, dueTodayCount: getDueTodaySpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
+  return { newSaved, reviewed, practiced, mastered, known: 0, dueCount: getDueSpellingItems().length, dueTodayCount: getDueTodaySpellingItems().length, activeCount: spellingItems.filter((item) => !item.archivedAt).length };
 }
 
 function renderStudyStats() {
@@ -3341,6 +3360,7 @@ function renderStudyStats() {
   const stats = isSpelling ? getSpellingTodayStats() : getTodayStats();
   statNewSaved.textContent = String(stats.newSaved);
   statReviewed.textContent = String(stats.reviewed);
+  if (statPracticed) statPracticed.textContent = String(stats.practiced);
   statMastered.textContent = String(stats.mastered);
   if (statKnown) statKnown.textContent = String(stats.known);
 

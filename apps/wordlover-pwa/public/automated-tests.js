@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-9";
+} from "./fsrs-scheduler.js?v=20260607-10";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-9";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-9";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-10";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-10";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-9";
+} from "./ui-preferences.js?v=20260607-10";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-9";
+} from "./sync.js?v=20260607-10";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-9";
+} from "./study-one-more.js?v=20260607-10";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260607-9";
+} from "./goal-forecast.js?v=20260607-10";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-9";
+} from "./tracks.js?v=20260607-10";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v122";
+const SHELL_CACHE_NAME = "wordlover-shell-v123";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-9",
-  "/persistence.js?v=20260607-9",
-  "/spelling.js?v=20260607-9",
-  "/ui-preferences.js?v=20260607-9",
-  "/review-state.js?v=20260607-9",
-  "/study-one-more.js?v=20260607-9",
-  "/sync.js?v=20260607-9",
-  "/fsrs-scheduler.js?v=20260607-9",
-  "/goal-forecast.js?v=20260607-9",
-  "/tracks.js?v=20260607-9",
-  "/styles.css?v=20260607-9",
-  "/wordlover-config.js?v=20260607-9",
+  "/app.js?v=20260607-10",
+  "/persistence.js?v=20260607-10",
+  "/spelling.js?v=20260607-10",
+  "/ui-preferences.js?v=20260607-10",
+  "/review-state.js?v=20260607-10",
+  "/study-one-more.js?v=20260607-10",
+  "/sync.js?v=20260607-10",
+  "/fsrs-scheduler.js?v=20260607-10",
+  "/goal-forecast.js?v=20260607-10",
+  "/tracks.js?v=20260607-10",
+  "/styles.css?v=20260607-10",
+  "/wordlover-config.js?v=20260607-10",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-9",
+  "/automated-tests.js?v=20260607-10",
 ];
 
 let lastResults = null;
@@ -1624,6 +1624,40 @@ async function runMainAppStudySmoke() {
       .getVocabulary()
       .filter((item) => item.review?.masteredAt).length;
     if (masteredAfterManualAdd !== masteredBeforeManualAdd) throw new Error("Known should not count as Mastered.");
+    const todayStatsPrefix = `stats-${Date.now()}`;
+    const readTodayStats = () => ({
+      reviewed: Number(frameDocument.querySelector("#statReviewed")?.textContent ?? "0"),
+      practiced: Number(frameDocument.querySelector("#statPracticed")?.textContent ?? "0"),
+    });
+    frameWindow.WordLoverApp.spelling.setTodayTrack("vocabulary");
+    const vocabStatsBefore = readTodayStats();
+    frameWindow.WordLoverApp.getStudyEvents().push(
+      { id: `${todayStatsPrefix}-v1`, type: "review", track: "vocabulary", term: "today stats vocab", normalizedTerm: "today stats vocab", rating: "good", occurredAt: new Date().toISOString() },
+      { id: `${todayStatsPrefix}-v2`, type: "review", track: "vocabulary", term: "today stats vocab", normalizedTerm: "today stats vocab", rating: "easy", occurredAt: new Date().toISOString() },
+      { id: `${todayStatsPrefix}-v3`, type: "practice", track: "vocabulary", term: "today stats vocab", normalizedTerm: "today stats vocab", rating: "hard", occurredAt: new Date().toISOString() },
+    );
+    frameWindow.WordLoverApp.refreshReviewScheduleViews();
+    const vocabStatsAfter = readTodayStats();
+    const todayMemorizeStatsSplit = vocabStatsAfter.reviewed === vocabStatsBefore.reviewed + 1
+      && vocabStatsAfter.practiced === vocabStatsBefore.practiced + 2;
+    if (!todayMemorizeStatsSplit) {
+      throw new Error(`Today Memorize stats should split unique reviewed from extra practice: ${JSON.stringify({ vocabStatsBefore, vocabStatsAfter })}`);
+    }
+    frameWindow.WordLoverApp.spelling.setTodayTrack("spelling");
+    const spellingStatsBefore = readTodayStats();
+    frameWindow.WordLoverApp.getSpellingEvents().push(
+      { id: `${todayStatsPrefix}-s1`, type: "review", track: "spelling", term: "today stats spelling", normalizedTerm: "today stats spelling", rating: "good", occurredAt: new Date().toISOString() },
+      { id: `${todayStatsPrefix}-s2`, type: "review", track: "spelling", term: "today stats spelling", normalizedTerm: "today stats spelling", rating: "easy", occurredAt: new Date().toISOString() },
+      { id: `${todayStatsPrefix}-s3`, type: "practice", track: "spelling", term: "today stats spelling", normalizedTerm: "today stats spelling", rating: "hard", occurredAt: new Date().toISOString() },
+    );
+    frameWindow.WordLoverApp.spelling.setTodayTrack("spelling");
+    const spellingStatsAfter = readTodayStats();
+    const todaySpellingStatsSplit = spellingStatsAfter.reviewed === spellingStatsBefore.reviewed + 1
+      && spellingStatsAfter.practiced === spellingStatsBefore.practiced + 2;
+    if (!todaySpellingStatsSplit) {
+      throw new Error(`Today Spelling stats should split unique reviewed from extra practice: ${JSON.stringify({ spellingStatsBefore, spellingStatsAfter })}`);
+    }
+    frameWindow.WordLoverApp.spelling.setTodayTrack("vocabulary");
     click("[data-study-next]");
     const secondTerm = await waitForStudyOneMoreCard(firstTerm);
     const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
@@ -2195,6 +2229,8 @@ async function runMainAppStudySmoke() {
       updateCheckStatus: updateCheckResult?.status,
       studyOneMoreMissCreatesAgainReview,
       studyOneMoreFilterPersists: true,
+      todayMemorizeStatsSplit,
+      todaySpellingStatsSplit,
       firstQuizIpa,
       vocabularyStatsRendered: true,
       againCount,
