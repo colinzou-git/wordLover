@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260607-8";
+} from "./fsrs-scheduler.js?v=20260607-9";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260607-8";
+} from "./persistence.js?v=20260607-9";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260607-8";
+} from "./spelling.js?v=20260607-9";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260607-8";
+} from "./ui-preferences.js?v=20260607-9";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260607-8";
+} from "./review-state.js?v=20260607-9";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260607-8";
+} from "./study-one-more.js?v=20260607-9";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-8";
+} from "./sync.js?v=20260607-9";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260607-8";
+} from "./goal-forecast.js?v=20260607-9";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-8";
+} from "./tracks.js?v=20260607-9";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -222,9 +222,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260607-8-v121";
+const APP_VERSION = "0.6.2-product.20260607-9-v122";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v121";
+const SHELL_CACHE_VERSION = "wordlover-shell-v122";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -4576,20 +4576,43 @@ function renderQuizQuestionMarkup(entry, mode, optionsRevealed) {
   `;
 }
 
+const QUIZ_OPTION_KEYS = ["a", "b", "c", "d"];
+
 function renderQuizOptionsMarkup(options) {
   return `
     <div class="quiz-options">
       ${options
         .map(
           (option, index) => `
-            <button type="button" data-quiz-option="${index}">
-              ${escapeHtml(option.text)}
+            <button type="button" data-quiz-option="${index}" aria-keyshortcuts="${QUIZ_OPTION_KEYS[index]?.toUpperCase() ?? ""}">
+              <span class="quiz-option-key" aria-hidden="true">${escapeHtml(QUIZ_OPTION_KEYS[index]?.toUpperCase() ?? String(index + 1))}</span>
+              <span class="quiz-option-text">${escapeHtml(option.text)}</span>
             </button>
           `,
         )
         .join("")}
     </div>
   `;
+}
+
+function focusQuizRevealButton() {
+  window.requestAnimationFrame(() => {
+    quizPanel.querySelector("[data-quiz-reveal]")?.focus();
+  });
+}
+
+function focusFirstQuizOption() {
+  window.requestAnimationFrame(() => {
+    quizPanel.querySelector("[data-quiz-option]")?.focus();
+  });
+}
+
+function focusRecommendedRatingButton(rating) {
+  window.requestAnimationFrame(() => {
+    const recommended = FSRS_RATING_LABELS[rating] ? quizPanel.querySelector(`[data-fsrs-rating="${rating}"]`) : null;
+    const fallback = quizPanel.querySelector("[data-fsrs-rating]");
+    (recommended ?? fallback)?.focus();
+  });
 }
 
 function renderQuiz(entry, mode) {
@@ -4620,6 +4643,7 @@ function renderQuiz(entry, mode) {
     `;
   }
   quizPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (stepwise) focusQuizRevealButton();
 }
 
 function revealQuizOptions() {
@@ -4633,6 +4657,7 @@ function revealQuizOptions() {
   quizPanel.innerHTML = activeQuiz.mode === "study-one-more"
     ? `<div class="study-one-more-card">${content}</div>`
     : content;
+  focusFirstQuizOption();
 }
 
 function buildVocabularyReviewSession() {
@@ -4863,6 +4888,7 @@ function renderFsrsRatingChoices(passed, inferredRating) {
     `,
   );
   bindFsrsRatingButtons();
+  focusRecommendedRatingButton(inferredRating);
   recordReviewDebug("render-rating-buttons", {
     passed,
     inferredRating,
@@ -4895,6 +4921,18 @@ function bindFsrsRatingButtons() {
     button.addEventListener("touchend", (event) => activate(event, "button-touchend"), { capture: true, passive: false });
     button.addEventListener("click", (event) => activate(event, "button-click"), { capture: true });
   });
+}
+
+function moveFsrsRatingFocus(delta) {
+  const buttons = [...quizPanel.querySelectorAll("[data-fsrs-rating]")]
+    .filter((button) => button instanceof HTMLButtonElement && !button.disabled);
+  if (!buttons.length) return false;
+  const currentIndex = buttons.indexOf(document.activeElement);
+  const nextIndex = currentIndex >= 0
+    ? (currentIndex + delta + buttons.length) % buttons.length
+    : 0;
+  buttons[nextIndex].focus();
+  return true;
 }
 
 function ratingButtonFromEvent(event) {
@@ -4999,6 +5037,9 @@ async function handleFsrsRating(rating) {
     nextTerm: session?.queue?.[session.index]?.term ?? null,
     persistenceStatus: reviewResult?.persistenceStatus ?? "unknown",
   });
+  renderStudyStats();
+  renderVocabulary();
+  renderHistoryChart();
   quizPanel.hidden = false;
   quizPanel.innerHTML = `<p class="muted">Recorded as ${escapeHtml(FSRS_RATING_LABELS[rating])}. Loading next word...</p>`;
   activeQuiz = null;
@@ -7998,6 +8039,31 @@ quizPanel.addEventListener("pointerup", (event) => {
 quizPanel.addEventListener("touchend", (event) => {
   activateRatingButtonFromEvent(event, "touchend");
 }, { capture: true, passive: false });
+
+quizPanel.addEventListener("keydown", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.matches("input, textarea, select")) return;
+  if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    if (moveFsrsRatingFocus(-1)) {
+      event.preventDefault();
+      return;
+    }
+  }
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    if (moveFsrsRatingFocus(1)) {
+      event.preventDefault();
+      return;
+    }
+  }
+  const keyIndex = QUIZ_OPTION_KEYS.indexOf(event.key.toLowerCase());
+  if (keyIndex >= 0 && activeQuiz?.optionsRevealed && !activeQuiz.answered) {
+    const option = quizPanel.querySelector(`[data-quiz-option="${keyIndex}"]`);
+    if (option instanceof HTMLButtonElement && !option.disabled) {
+      event.preventDefault();
+      void handleQuizAnswer(keyIndex);
+    }
+  }
+});
 
 quizPanel.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;

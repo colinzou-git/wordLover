@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260607-8";
+} from "./fsrs-scheduler.js?v=20260607-9";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-8";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-8";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260607-9";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260607-9";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260607-8";
+} from "./ui-preferences.js?v=20260607-9";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260607-8";
+} from "./sync.js?v=20260607-9";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260607-8";
+} from "./study-one-more.js?v=20260607-9";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260607-8";
+} from "./goal-forecast.js?v=20260607-9";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260607-8";
+} from "./tracks.js?v=20260607-9";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v121";
+const SHELL_CACHE_NAME = "wordlover-shell-v122";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260607-8",
-  "/persistence.js?v=20260607-8",
-  "/spelling.js?v=20260607-8",
-  "/ui-preferences.js?v=20260607-8",
-  "/review-state.js?v=20260607-8",
-  "/study-one-more.js?v=20260607-8",
-  "/sync.js?v=20260607-8",
-  "/fsrs-scheduler.js?v=20260607-8",
-  "/goal-forecast.js?v=20260607-8",
-  "/tracks.js?v=20260607-8",
-  "/styles.css?v=20260607-8",
-  "/wordlover-config.js?v=20260607-8",
+  "/app.js?v=20260607-9",
+  "/persistence.js?v=20260607-9",
+  "/spelling.js?v=20260607-9",
+  "/ui-preferences.js?v=20260607-9",
+  "/review-state.js?v=20260607-9",
+  "/study-one-more.js?v=20260607-9",
+  "/sync.js?v=20260607-9",
+  "/fsrs-scheduler.js?v=20260607-9",
+  "/goal-forecast.js?v=20260607-9",
+  "/tracks.js?v=20260607-9",
+  "/styles.css?v=20260607-9",
+  "/wordlover-config.js?v=20260607-9",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260607-8",
+  "/automated-tests.js?v=20260607-9",
 ];
 
 let lastResults = null;
@@ -1771,6 +1771,12 @@ async function runMainAppStudySmoke() {
     frame.style.cssText = "position:fixed;left:0;top:0;width:520px;height:760px;z-index:9999;background:white;border:0;";
     let reviewDueRatingButtonsVisible = false;
     let reviewDueWaitsForManualRating = false;
+    let reviewDueRevealAutoFocus = false;
+    let reviewDueOptionKeyboardLabels = false;
+    let reviewDueKeyboardOptionSelects = false;
+    let reviewDueRecommendedRatingFocus = false;
+    let reviewDueArrowRatingNavigation = false;
+    let reviewDueButtonCountDecreases = false;
     const vocabularyReviewManualOne = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual one", "review due manual one meaning", "review due manual one");
     const vocabularyReviewManualTwo = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual two", "review due manual two meaning", "review due manual two");
     const vocabularyReviewManualThree = await frameWindow.WordLoverApp.addUserDictionaryEntryForTest("review due manual three", "review due manual three meaning", "review due manual three");
@@ -1802,14 +1808,43 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
-    const answerActiveVocabularyQuiz = async () => {
+    const waitForQuizFocus = (predicate, message) => new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        if (predicate()) {
+          window.clearInterval(timer);
+          resolve(true);
+          return;
+        }
+        if (performance.now() - startedAt > 1500) {
+          window.clearInterval(timer);
+          reject(new Error(message));
+        }
+      }, 50);
+    });
+    const answerActiveVocabularyQuiz = async ({ useKeyboard = false } = {}) => {
       const quizBefore = frameWindow.WordLoverApp.getActiveQuiz();
       if (!quizBefore?.entry?.term) throw new Error("Vocabulary Review due auto-advance test has no active quiz.");
+      await waitForQuizFocus(
+        () => frameDocument.activeElement?.matches?.("[data-quiz-reveal]"),
+        `Reveal options button should receive focus for ${quizBefore.entry.term}. Active: ${frameDocument.activeElement?.outerHTML}`,
+      );
+      reviewDueRevealAutoFocus = true;
       click("[data-quiz-reveal]");
       const revealedQuiz = frameWindow.WordLoverApp.getActiveQuiz();
       const correctIndex = revealedQuiz.options.findIndex((option) => option.correct);
       if (correctIndex < 0) throw new Error(`Vocabulary quiz for ${revealedQuiz.entry.term} has no correct option.`);
-      click(`[data-quiz-option="${correctIndex}"]`);
+      const optionKeys = [...frameDocument.querySelectorAll("[data-quiz-option] .quiz-option-key")].map((node) => node.textContent?.trim()).join("");
+      reviewDueOptionKeyboardLabels = optionKeys === "ABCD";
+      if (!reviewDueOptionKeyboardLabels) throw new Error(`Vocabulary quiz options should be labeled A/B/C/D. Labels: ${optionKeys}`);
+      if (useKeyboard) {
+        const key = ["a", "b", "c", "d"][correctIndex];
+        frameDocument.querySelector("#quizPanel")?.dispatchEvent(new frameWindow.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        reviewDueKeyboardOptionSelects = Boolean(frameWindow.WordLoverApp.getActiveQuiz()?.answered);
+        if (!reviewDueKeyboardOptionSelects) throw new Error(`Vocabulary quiz should accept ${key.toUpperCase()} as an answer shortcut.`);
+      } else {
+        click(`[data-quiz-option="${correctIndex}"]`);
+      }
       await new Promise((resolve, reject) => {
         const startedAt = performance.now();
         const timer = window.setInterval(() => {
@@ -1835,6 +1870,18 @@ async function runMainAppStudySmoke() {
       });
       const panelText = frameDocument.querySelector("#quizPanel")?.textContent ?? "";
       const debugState = frameWindow.WordLoverApp.reviewDebug?.state?.();
+      const inferredRating = debugState?.latest?.findLast?.((event) => event.stage === "answer")?.inferredRating ?? "easy";
+      const focusedRating = frameDocument.activeElement?.closest?.("[data-fsrs-rating]")?.dataset?.fsrsRating;
+      reviewDueRecommendedRatingFocus = focusedRating === inferredRating;
+      if (!reviewDueRecommendedRatingFocus) {
+        throw new Error(`Recommended FSRS rating should receive focus. Expected ${inferredRating}, focused ${focusedRating ?? "none"}.`);
+      }
+      frameDocument.activeElement?.dispatchEvent(new frameWindow.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+      const movedRating = frameDocument.activeElement?.closest?.("[data-fsrs-rating]")?.dataset?.fsrsRating;
+      reviewDueArrowRatingNavigation = Boolean(movedRating && movedRating !== focusedRating);
+      if (!reviewDueArrowRatingNavigation) {
+        throw new Error(`Arrow keys should move between FSRS rating buttons. Before ${focusedRating}, after ${movedRating ?? "none"}.`);
+      }
       reviewDueWaitsForManualRating =
         !/Auto-recording/i.test(panelText)
         && debugState?.activeQuiz?.pending === true
@@ -1850,9 +1897,20 @@ async function runMainAppStudySmoke() {
     };
     await frameWindow.WordLoverApp.startDueReview();
     const reviewDueFirstTerm = await waitForVocabularyQuizTerm();
-    await answerActiveVocabularyQuiz();
+    const reviewDueButtonTextBefore = frameDocument.querySelector("#startReview")?.textContent ?? "";
+    const reviewDueCountBefore = frameWindow.WordLoverApp.getDueVocabularyItems().length;
+    await answerActiveVocabularyQuiz({ useKeyboard: true });
     clickFsrsRating("good");
     const reviewDueSecondTerm = await waitForVocabularyQuizTerm(reviewDueFirstTerm);
+    const reviewDueButtonTextAfter = frameDocument.querySelector("#startReview")?.textContent ?? "";
+    const reviewDueCountAfter = frameWindow.WordLoverApp.getDueVocabularyItems().length;
+    reviewDueButtonCountDecreases =
+      reviewDueCountAfter === reviewDueCountBefore - 1
+      && reviewDueButtonTextBefore !== reviewDueButtonTextAfter
+      && reviewDueButtonTextAfter.includes(String(reviewDueCountAfter));
+    if (!reviewDueButtonCountDecreases) {
+      throw new Error(`Review due button count should update immediately after a saved review. ${JSON.stringify({ reviewDueButtonTextBefore, reviewDueButtonTextAfter, reviewDueCountBefore, reviewDueCountAfter })}`);
+    }
     await answerActiveVocabularyQuiz();
     clickFsrsRating("good");
     const reviewDueThirdTerm = await waitForVocabularyQuizTerm(reviewDueSecondTerm);
@@ -2084,8 +2142,9 @@ async function runMainAppStudySmoke() {
     if (/Failed to fetch|Could not check the server app version/i.test(updateStatusText)) {
       throw new Error(`App update check failed in main app smoke: ${updateStatusText}`);
     }
-    if (!/Device: 0\.6\.2-product\.\d{8}(?:-\d+)?-v117/i.test(updateStatusText) && !/v117/.test(updateCheckResult?.deviceVersion ?? "")) {
-      throw new Error(`App update check did not expose the current v117 shell: ${JSON.stringify({ updateCheckResult, updateStatusText })}`);
+    const expectedAppVersion = frameWindow.WordLoverApp.appVersion;
+    if (!updateStatusText.includes(expectedAppVersion) && updateCheckResult?.deviceVersion !== expectedAppVersion) {
+      throw new Error(`App update check did not expose the current shell version: ${JSON.stringify({ expectedAppVersion, updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
@@ -2145,6 +2204,12 @@ async function runMainAppStudySmoke() {
       masteredDueIncluded,
       reviewDueRatingButtonsVisible,
       reviewDueWaitsForManualRating,
+      reviewDueRevealAutoFocus,
+      reviewDueOptionKeyboardLabels,
+      reviewDueKeyboardOptionSelects,
+      reviewDueRecommendedRatingFocus,
+      reviewDueArrowRatingNavigation,
+      reviewDueButtonCountDecreases,
       reviewDueManualRatingAdvancesPastSecondWord,
       reviewDuePersistenceFailureSafe,
       reviewDueFsrsRepairStillAdvances,
