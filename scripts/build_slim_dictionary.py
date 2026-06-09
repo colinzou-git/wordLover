@@ -38,6 +38,27 @@ DEFAULT_INPUT = Path("data/dictionary.sqlite")
 DEFAULT_OUTPUT = Path("data/dictionary-slim.sqlite")
 DEFAULT_TARGET = 100_000
 
+# K-12 / AP STEM coverage tags whose entries must always survive slimming,
+# even when they carry no frequency signal (frq/bnc) at all. Matching is done
+# per tag token: a token is kept if it equals one of these, or begins with one
+# of them followed by "_" (so "ap_physics" also keeps "ap_physics_1", and
+# "ap_computer_science" keeps "ap_computer_science_a").
+AP_STEM_TAGS = (
+    "k12_stem",
+    "k12_math",
+    "k12_science",
+    "ap_biology",
+    "ap_chemistry",
+    "ap_calculus_ab",
+    "ap_calculus_bc",
+    "ap_statistics",
+    "ap_precalculus",
+    "ap_physics",
+    "ap_environmental_science",
+    "ap_computer_science",
+    "linear_algebra_extension",
+)
+
 
 # Schema mirrors scripts/build_dictionary.py so the app sees the same columns.
 SCHEMA_SQL = """
@@ -113,6 +134,24 @@ def select_ranked_singles(src: sqlite3.Connection) -> set[int]:
 def select_toefl(src: sqlite3.Connection) -> set[int]:
     rows = src.execute("SELECT id FROM dictionary_entries WHERE is_toefl = 1").fetchall()
     return {row[0] for row in rows}
+
+
+def tag_matches_ap_stem(tag: str | None) -> bool:
+    if not tag:
+        return False
+    for token in tag.split():
+        for needle in AP_STEM_TAGS:
+            if token == needle or token.startswith(needle + "_"):
+                return True
+    return False
+
+
+def select_ap_stem(src: sqlite3.Connection) -> set[int]:
+    """All entries carrying a K-12/AP STEM tag, regardless of frequency signal."""
+    rows = src.execute(
+        "SELECT id, tag FROM dictionary_entries WHERE tag IS NOT NULL AND tag != ''"
+    ).fetchall()
+    return {row_id for row_id, tag in rows if tag_matches_ap_stem(tag)}
 
 
 def select_top_phrases(
@@ -236,7 +275,8 @@ def main() -> int:
 
         toefl_ids = select_toefl(src)
         ranked_ids = select_ranked_singles(src)
-        chosen_ids: set[int] = set(toefl_ids) | set(ranked_ids)
+        ap_stem_ids = select_ap_stem(src)
+        chosen_ids: set[int] = set(toefl_ids) | set(ranked_ids) | set(ap_stem_ids)
 
         # Build a frequency-rank map over the slim set's single words so
         # phrase selection can prefer phrases made of common words.
@@ -295,6 +335,7 @@ def main() -> int:
     print(f"  rows inserted: {inserted:,}")
     print(f"    TOEFL-tagged: {len(toefl_ids):,}")
     print(f"    ranked single words: {len(ranked_ids):,}")
+    print(f"    K-12/AP STEM-tagged: {len(ap_stem_ids):,}")
     print(f"    phrases (constituent-matched): {len(phrase_ids):,}")
     print(f"    final total: {len(chosen_ids):,}")
     print(f"  size: {size_mb:.1f} MB")

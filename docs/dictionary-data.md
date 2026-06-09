@@ -63,6 +63,57 @@ This writes `apps/wordlover-pwa/public/dictionary-manifest.json`, `apps/wordlove
 
 To package the full ~770k-entry dictionary instead (rare; for memory benchmarking or research builds), pass `--input data/dictionary.sqlite`.
 
+## K-12 / AP STEM Expansion
+
+WordFan supplements ECDICT with a curated K-12 and AP STEM term list
+(`data/sources/wordfan_k12_ap_stem_ecdict_style.csv`) so school-curriculum
+vocabulary is searchable and reviewable. Import it into the full dictionary
+**after** `build_dictionary.py` (and any augmentation) and **before**
+`build_slim_dictionary.py`:
+
+```powershell
+python scripts/import_ap_stem_dictionary.py
+```
+
+**Full ECDICT stays the metadata source of truth.** For any word that already
+exists in `dictionary_entries`, the import changes only three columns:
+
+- `definition` — appends the CSV definition (deduplicated, `;`-joined).
+- `translation` — appends the CSV translation (deduplicated, `;`-joined).
+- `tag` — appends the CSV tags (deduplicated, space-joined).
+
+Every other ECDICT-derived column is left exactly as it was: `phonetic`, `pos`,
+`collins`, `oxford`, `bnc`, `frq`, `exchange`, `detail`, `audio`, `source`,
+`definition_source`, `is_toefl`, `id`, `normalized_word`. The CSV never
+overrides ECDICT frequency, ranking, or phonetic data for existing words.
+
+Words **not** present in ECDICT are inserted from the CSV with `source` and
+`definition_source` set to `WordFan_AP_STEM`. No frequency/ranking metadata
+(`frq`, `bnc`, `collins`, `oxford`, `phonetic`) is invented for these rows —
+those columns are populated only from what the CSV provides (usually blank).
+`is_toefl` is set to 1 only when the final tag list contains `toefl`.
+
+After updating the content table the script rebuilds the external-content
+`dictionary_search_fts` index so the new and merged terms are searchable by
+English word, definition, and Chinese translation.
+
+`build_slim_dictionary.py` always retains entries carrying any K-12/AP STEM
+coverage tag (`k12_stem`, `k12_math`, `k12_science`, `ap_biology`,
+`ap_chemistry`, `ap_calculus_ab`, `ap_calculus_bc`, `ap_statistics`,
+`ap_precalculus`, `ap_physics*`, `ap_environmental_science`,
+`ap_computer_science*`, `linear_algebra_extension`), even when they have no
+`frq`/`bnc` signal — so curriculum terms are never dropped during slimming.
+Existing TOEFL/frequency/phrase selection behavior is unchanged.
+
+Full rebuild flow including the AP STEM step:
+
+```powershell
+python scripts/build_dictionary.py
+python scripts/import_ap_stem_dictionary.py
+python scripts/build_slim_dictionary.py --data-version 2026.06.08.ap-stem
+python scripts/package_dictionary_web.py --copy-sqlite
+```
+
 ## Upgrade Behavior For Already-Installed Devices
 
 When a device already has an older dictionary in OPFS/IndexedDB, the new app shell detects the version mismatch on the next online dictionary load. The flow is:
