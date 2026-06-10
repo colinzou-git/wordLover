@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260609-1";
+} from "./fsrs-scheduler.js?v=20260609-2";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260609-1";
+} from "./persistence.js?v=20260609-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260609-1";
+} from "./spelling.js?v=20260609-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260609-1";
+} from "./ui-preferences.js?v=20260609-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260609-1";
+} from "./review-state.js?v=20260609-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260609-1";
+} from "./study-one-more.js?v=20260609-2";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260609-1";
+} from "./sync.js?v=20260609-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260609-1";
+} from "./goal-forecast.js?v=20260609-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260609-1";
+} from "./tracks.js?v=20260609-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -223,9 +223,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260609-1-v125";
+const APP_VERSION = "0.6.2-product.20260609-2-v126";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v125";
+const SHELL_CACHE_VERSION = "wordlover-shell-v126";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -457,6 +457,28 @@ function applyStudyOneMoreFilterToPopup(filter) {
     cb.checked = filter.excludeTags.includes(cb.value);
   }
   if (filterIncludePhrase) filterIncludePhrase.checked = Boolean(filter.includePhrase);
+}
+
+// Single entry point for restoring the active Study-One-More filter: normalize it, store it,
+// and reflect it into the popup. Always pair a `studyOneMoreFilter = ...` change with this so
+// the popup never drifts from the in-memory filter.
+function applyStudyOneMoreFilter(filter) {
+  studyOneMoreFilter = normalizeStudyOneMoreFilter(filter ?? {});
+  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  return studyOneMoreFilter;
+}
+
+// Resolve which filter to restore on startup. Priority: the active track's saved filter (a
+// default/empty filter object is still a valid persisted state, so test presence — not
+// truthiness), then the legacy global uiPreferences filter, then a normalized empty filter.
+function resolveStudyOneMoreFilter(trackMeta, fallbackUiPreferences) {
+  if (trackMeta && trackMeta.studyOneMoreFilter != null) {
+    return normalizeStudyOneMoreFilter(trackMeta.studyOneMoreFilter);
+  }
+  if (fallbackUiPreferences && fallbackUiPreferences.studyOneMoreFilter != null) {
+    return normalizeStudyOneMoreFilter(fallbackUiPreferences.studyOneMoreFilter);
+  }
+  return normalizeStudyOneMoreFilter({});
 }
 
 function readStudyOneMoreFilterFromPopup() {
@@ -4474,6 +4496,7 @@ function renderStudyOneMoreEntry(entry) {
       ${renderQuizQuestionMarkup(entry, "study-one-more", false)}
       <div class="quiz-actions">
         <button type="button" data-quiz-reveal="1">Reveal options</button>
+        <button class="secondary-button" type="button" data-study-one-more-known="1">Add to Known</button>
       </div>
     </div>
   `;
@@ -4496,6 +4519,14 @@ function renderStudyOneMoreLoading() {
 function setStudyOneMoreLoading(loading) {
   if (studyNewWordButton) studyNewWordButton.disabled = Boolean(loading);
   if (studyOneMoreFilterButton) studyOneMoreFilterButton.disabled = Boolean(loading);
+}
+
+// Disable every action button currently in the Study-One-More card so a second tap can't fire
+// another add (or advance) while the first add is still awaiting persistence.
+function disableStudyOneMoreActions() {
+  for (const button of quizPanel.querySelectorAll(".study-one-more-card button")) {
+    button.disabled = true;
+  }
 }
 
 async function recordStudyOneMoreEvent(entry, type) {
@@ -4814,6 +4845,11 @@ async function addStudyOneMoreCandidate(target) {
   const pendingResult = activeQuiz?.pendingResult ?? null;
   const data = lookupTerm(entry.term);
   if (data.status !== "found") return;
+  // Clear active state and disable the card before awaiting so a double-tap can't re-add or
+  // race the auto-advance into a second pick.
+  activeStudyOneMoreEntry = null;
+  activeQuiz = null;
+  disableStudyOneMoreActions();
   if (target === "spelling") {
     await saveSpellingItem(data, "study-one-more");
   } else {
@@ -4822,35 +4858,24 @@ async function addStudyOneMoreCandidate(target) {
       await recordReviewRating(item, "again", "miss", pendingResult.responseMs ?? 0, "review", "study-one-more-miss");
     }
   }
-  activeStudyOneMoreEntry = null;
-  activeQuiz = null;
-  quizPanel.hidden = false;
-  quizPanel.innerHTML = `
-    <p class="muted">Added "${escapeHtml(entry.term)}" to ${target === "spelling" ? "Spelling" : "Memorize"}.</p>
-    <div class="quiz-actions">
-      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
-      <button type="button" data-study-next="1">Study another</button>
-    </div>
-  `;
+  // Auto-advance: the just-added word is now in vocabulary/spelling, so the next pick excludes it.
+  await startNewWordStudy();
 }
 
 async function addStudyOneMoreKnown() {
   if (!activeStudyOneMoreEntry) return;
   const entry = activeStudyOneMoreEntry;
   const responseMs = activeQuiz?.pendingResult?.responseMs ?? null;
-  await recordKnownWord(entry, responseMs);
+  // Clear active state and disable the card before awaiting so a double-tap can't re-add or
+  // race the auto-advance into a second pick.
   activeStudyOneMoreEntry = null;
   activeQuiz = null;
-  quizPanel.hidden = false;
-  quizPanel.innerHTML = `
-    <p class="muted">Added "${escapeHtml(entry.term)}" to Known. WordFan will not suggest it again.</p>
-    <div class="quiz-actions">
-      <button class="secondary-button" type="button" data-quiz-close="1">Close</button>
-      <button type="button" data-study-next="1">Study another</button>
-    </div>
-  `;
+  disableStudyOneMoreActions();
+  await recordKnownWord(entry, responseMs);
   renderStudyStats();
   renderVocabulary();
+  // Auto-advance: the just-known word is now in knownWords, so the next pick excludes it.
+  await startNewWordStudy();
 }
 
 async function skipStudyOneMoreCandidate() {
@@ -6436,8 +6461,7 @@ async function importUserData(file) {
   activeLearningTrackId = registry.activeTrackId;
   const meta = (await loadTrackMeta(newActiveTrackId)) ?? {};
   studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
-  studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
-  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  applyStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
   await loadActiveTrackIntoMemory({ rebuildReviewState: false });
   renderAllTrackViews();
   return {
@@ -6453,8 +6477,7 @@ async function switchLearningTrack(id) {
   await saveUserDataRoot({ ...userDataRoot, activeTrackId: id });
   const meta = (await loadTrackMeta(id)) ?? {};
   studyGoals = normalizeStudyGoals(meta.studyGoals ?? null);
-  studyOneMoreFilter = normalizeStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
-  applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
+  applyStudyOneMoreFilter(meta.studyOneMoreFilter ?? {});
   await loadActiveTrackIntoMemory({ rebuildReviewState: false });
   renderAllTrackViews();
 }
@@ -7576,7 +7599,8 @@ async function init() {
   applyTheme(theme);
   fontScale = normalizeFontScale(await loadValue("fontScale", DEFAULT_FONT_SCALE));
   applyFontScale(fontScale);
-  applyUiPreferences(await loadValue("uiPreferences", {}));
+  const savedUiPreferences = await loadValue("uiPreferences", {});
+  applyUiPreferences(savedUiPreferences);
   debugMode = await loadValue("debugMode", debugMode);
   googleClientIdOverride = String(await loadValue("googleClientIdOverride", "") ?? "").trim();
   geminiApiKeyOverride = String(await loadValue("geminiApiKeyOverride", "") ?? "").trim();
@@ -7595,10 +7619,9 @@ async function init() {
   if (userDataRoot) activeLearningTrackId = userDataRoot.activeTrackId;
   const activeTrackMeta = userDataRoot ? await loadTrackMeta(activeLearningTrackId) : null;
   studyGoals = normalizeStudyGoals(activeTrackMeta?.studyGoals ?? await loadValue("studyGoals", null));
-  if (activeTrackMeta?.studyOneMoreFilter) {
-    studyOneMoreFilter = normalizeStudyOneMoreFilter(activeTrackMeta.studyOneMoreFilter);
-    applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
-  }
+  // Restore the Study-One-More filter explicitly: track meta wins, then the legacy global
+  // preference, then a default empty filter (an empty filter is a valid saved state).
+  applyStudyOneMoreFilter(resolveStudyOneMoreFilter(activeTrackMeta, savedUiPreferences));
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));

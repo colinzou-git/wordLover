@@ -22,6 +22,12 @@
   --warning-bg: #fff8df;
   --warning-line: #d4b15f;
   --warning-text: #4e3c12;
+  --quiz-correct-bg: #e7f6ef;
+  --quiz-correct-text: #134634;
+  --quiz-correct-border: #2c8f6b;
+  --quiz-incorrect-bg: #fff0eb;
+  --quiz-incorrect-text: #6e2a18;
+  --quiz-incorrect-border: #bb6b54;
   background: var(--bg);
   color: var(--text);
 }
@@ -46,6 +52,12 @@
   --warning-bg: #352d19;
   --warning-line: #8f7332;
   --warning-text: #f5e3ac;
+  --quiz-correct-bg: #163d31;
+  --quiz-correct-text: #c8f4e1;
+  --quiz-correct-border: #3fae85;
+  --quiz-incorrect-bg: #3d1d15;
+  --quiz-incorrect-text: #f7c8b9;
+  --quiz-incorrect-border: #c1755c;
 }
 
 :root[data-theme="sunrise"] {
@@ -1793,13 +1805,23 @@ li button {
 }
 
 .quiz-options button.correct {
-  border-color: #2c8f6b;
-  background: #e7f6ef;
+  border-color: var(--quiz-correct-border);
+  background: var(--quiz-correct-bg);
+  color: var(--quiz-correct-text);
+}
+
+.quiz-options button.correct .quiz-option-key {
+  color: var(--quiz-correct-text);
 }
 
 .quiz-options button.incorrect {
-  border-color: #bb6b54;
-  background: #fff0eb;
+  border-color: var(--quiz-incorrect-border);
+  background: var(--quiz-incorrect-bg);
+  color: var(--quiz-incorrect-text);
+}
+
+.quiz-options button.incorrect .quiz-option-key {
+  color: var(--quiz-incorrect-text);
 }
 
 .vocabulary-list {

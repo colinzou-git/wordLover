@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260609-1";
+} from "./fsrs-scheduler.js?v=20260609-2";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260609-1";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260609-1";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260609-2";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260609-2";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260609-1";
+} from "./ui-preferences.js?v=20260609-2";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260609-1";
+} from "./sync.js?v=20260609-2";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260609-1";
+} from "./study-one-more.js?v=20260609-2";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260609-1";
+} from "./goal-forecast.js?v=20260609-2";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260609-1";
+} from "./tracks.js?v=20260609-2";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v125";
+const SHELL_CACHE_NAME = "wordlover-shell-v126";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260609-1",
-  "/persistence.js?v=20260609-1",
-  "/spelling.js?v=20260609-1",
-  "/ui-preferences.js?v=20260609-1",
-  "/review-state.js?v=20260609-1",
-  "/study-one-more.js?v=20260609-1",
-  "/sync.js?v=20260609-1",
-  "/fsrs-scheduler.js?v=20260609-1",
-  "/goal-forecast.js?v=20260609-1",
-  "/tracks.js?v=20260609-1",
-  "/styles.css?v=20260609-1",
-  "/wordlover-config.js?v=20260609-1",
+  "/app.js?v=20260609-2",
+  "/persistence.js?v=20260609-2",
+  "/spelling.js?v=20260609-2",
+  "/ui-preferences.js?v=20260609-2",
+  "/review-state.js?v=20260609-2",
+  "/study-one-more.js?v=20260609-2",
+  "/sync.js?v=20260609-2",
+  "/fsrs-scheduler.js?v=20260609-2",
+  "/goal-forecast.js?v=20260609-2",
+  "/tracks.js?v=20260609-2",
+  "/styles.css?v=20260609-2",
+  "/wordlover-config.js?v=20260609-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260609-1",
+  "/automated-tests.js?v=20260609-2",
 ];
 
 let lastResults = null;
@@ -881,6 +881,32 @@ async function runMainAppStudySmoke() {
         }, 100);
       });
 
+    // WCAG-style contrast ratio between two computed CSS colors, used to verify quiz result text
+    // stays legible on its highlight background across themes (notably Ink, whose --text is light).
+    const parseRgb = (value) => {
+      const match = String(value).match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(",").map((n) => parseFloat(n.trim()));
+      return parts.length >= 3 && parts.every((n) => Number.isFinite(n)) ? parts.slice(0, 3) : null;
+    };
+    const relativeLuminance = ([r, g, b]) => {
+      const channel = (c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const contrastRatio = (fg, bg) => {
+      const f = parseRgb(fg);
+      const b = parseRgb(bg);
+      if (!f || !b) return 0;
+      const l1 = relativeLuminance(f);
+      const l2 = relativeLuminance(b);
+      const hi = Math.max(l1, l2);
+      const lo = Math.min(l1, l2);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
     const candidateRows = [
       { word: "alpha", normalized_word: "alpha", frq: 100, bnc: 100, definition: "alpha definition", translation: "alpha" },
       { word: "bravo", normalized_word: "bravo", frq: 90, bnc: 90, definition: "bravo definition", translation: "bravo" },
@@ -1541,6 +1567,10 @@ async function runMainAppStudySmoke() {
     if (!firstCandidate || firstCandidate.studyLevel !== "very_easy") throw new Error("Study One More did not default to a Very Easy candidate.");
     if (frameDocument.querySelector("#quizPanel [data-quiz-option]")) throw new Error("Study One More showed meaning choices before Reveal options.");
     if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning before the quiz.");
+    // The initial card offers both Reveal options and Add to Known, without exposing options/meaning.
+    if (!frameDocument.querySelector("#quizPanel .study-one-more-card [data-quiz-reveal]")) throw new Error("Study One More initial card is missing Reveal options.");
+    if (!frameDocument.querySelector("#quizPanel .study-one-more-card [data-study-one-more-known]")) throw new Error("Study One More initial card is missing Add to Known beside Reveal options.");
+    const studyOneMoreInitialAddToKnownPresent = true;
     click("[data-quiz-reveal]");
     if (!frameDocument.querySelector("#quizPanel [data-quiz-option]")) throw new Error("Study One More did not show quiz options after Reveal options.");
     if (frameDocument.querySelector("[data-study-one-more-meaning]")) throw new Error("Study One More disclosed the full meaning after Reveal options.");
@@ -1559,6 +1589,20 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
+    // Ink theme readability: the selected correct option must keep legible text on its highlight
+    // background. Regression for the hard-coded light-green bg + light Ink --text combination.
+    const themeBeforeInk = frameWindow.WordLoverApp.getState().theme;
+    frameWindow.WordLoverApp.applyTheme("ink");
+    const inkCorrectOption = frameDocument.querySelector("#quizPanel .quiz-options button.correct");
+    if (!inkCorrectOption) throw new Error("Study One More correct option missing after answering, cannot check Ink readability.");
+    const inkCorrectStyle = frameWindow.getComputedStyle(inkCorrectOption);
+    const inkCorrectContrast = contrastRatio(inkCorrectStyle.color, inkCorrectStyle.backgroundColor);
+    if (inkCorrectContrast < 3) {
+      throw new Error(`Ink theme correct option text is not readable (contrast ${inkCorrectContrast.toFixed(2)}): ${inkCorrectStyle.color} on ${inkCorrectStyle.backgroundColor}`);
+    }
+    const inkQuizCorrectReadable = true;
+    frameWindow.WordLoverApp.applyTheme(themeBeforeInk);
+
     const knownBeforeUserChoice = frameWindow.WordLoverApp
       .getKnownWords()
       .some((record) => record.normalizedTerm === firstCandidate.normalizedTerm);
@@ -1582,7 +1626,7 @@ async function runMainAppStudySmoke() {
         const record = frameWindow.WordLoverApp
           .getKnownWords()
           .find((item) => item.normalizedTerm === firstCandidate.normalizedTerm);
-        if (record && frameDocument.querySelector("[data-study-next]")) {
+        if (record) {
           window.clearInterval(timer);
           resolve(record);
           return;
@@ -1594,6 +1638,13 @@ async function runMainAppStudySmoke() {
       }, 100);
     });
     if (knownAfterCorrect.review || knownAfterCorrect.fsrsCard) throw new Error("Known record should not include FSRS review state.");
+    // Add to Known auto-advances to the next word — no "Study another" click required.
+    const secondTerm = await waitForStudyOneMoreCard(firstTerm);
+    const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    if (!secondCandidate || secondCandidate.normalizedTerm === firstCandidate.normalizedTerm) {
+      throw new Error("Study One More did not auto-advance to a new word after Add to Known.");
+    }
+    const studyOneMoreAddToKnownAutoAdvances = true;
     const snapshotWithKnown = frameWindow.WordLoverApp.buildUserDataSnapshot();
     if (!snapshotWithKnown.knownWords?.some((record) => record.normalizedTerm === firstCandidate.normalizedTerm)) {
       throw new Error("Sync snapshot did not include Known records.");
@@ -1662,10 +1713,7 @@ async function runMainAppStudySmoke() {
       throw new Error(`Today Spelling stats should split unique reviewed from extra practice: ${JSON.stringify({ spellingStatsBefore, spellingStatsAfter })}`);
     }
     frameWindow.WordLoverApp.spelling.setTodayTrack("vocabulary");
-    click("[data-study-next]");
-    const secondTerm = await waitForStudyOneMoreCard(firstTerm);
-    const secondCandidate = frameWindow.WordLoverApp.studyOneMore.current();
-    if (!secondCandidate || secondCandidate.normalizedTerm === firstCandidate.normalizedTerm) throw new Error("Study One More repeated an introduced-today word.");
+    // The second card came from the Add-to-Known auto-advance; it must not repeat the first word.
     click("[data-quiz-reveal]");
     answerStudyOneMore(false);
     await new Promise((resolve, reject) => {
@@ -1686,6 +1734,17 @@ async function runMainAppStudySmoke() {
       .getKnownWords()
       .some((record) => record.normalizedTerm === secondCandidate.normalizedTerm);
     if (knownAfterWrong) throw new Error("Incorrect Study One More answer should not create a Known record.");
+    // Ink theme readability for the missed-answer highlight.
+    frameWindow.WordLoverApp.applyTheme("ink");
+    const inkIncorrectOption = frameDocument.querySelector("#quizPanel .quiz-options button.incorrect");
+    if (!inkIncorrectOption) throw new Error("Study One More incorrect option missing after a wrong answer, cannot check Ink readability.");
+    const inkIncorrectStyle = frameWindow.getComputedStyle(inkIncorrectOption);
+    const inkIncorrectContrast = contrastRatio(inkIncorrectStyle.color, inkIncorrectStyle.backgroundColor);
+    if (inkIncorrectContrast < 3) {
+      throw new Error(`Ink theme incorrect option text is not readable (contrast ${inkIncorrectContrast.toFixed(2)}): ${inkIncorrectStyle.color} on ${inkIncorrectStyle.backgroundColor}`);
+    }
+    const inkQuizIncorrectReadable = true;
+    frameWindow.WordLoverApp.applyTheme(themeBeforeInk);
     click('[data-study-one-more-add="spelling"]');
     await new Promise((resolve, reject) => {
       const startedAt = performance.now();
@@ -1693,7 +1752,7 @@ async function runMainAppStudySmoke() {
         const saved = frameWindow.WordLoverApp
           .getSpelling()
           .some((item) => item.normalizedTerm === secondCandidate.normalizedTerm);
-        if (saved && frameDocument.querySelector("[data-study-next]")) {
+        if (saved) {
           window.clearInterval(timer);
           resolve();
           return;
@@ -1705,9 +1764,13 @@ async function runMainAppStudySmoke() {
       }, 100);
     });
 
-    click("[data-study-next]");
+    // Add to Spelling auto-advances to the next word — no "Study another" click required.
     const thirdTerm = await waitForStudyOneMoreCard(secondTerm);
     const thirdCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    if (!thirdCandidate || thirdCandidate.normalizedTerm === secondCandidate.normalizedTerm) {
+      throw new Error("Study One More did not auto-advance to a new word after Add to Spelling.");
+    }
+    const studyOneMoreAddToSpellingAutoAdvances = true;
     click("[data-quiz-reveal]");
     answerStudyOneMore(false);
     await new Promise((resolve, reject) => {
@@ -1739,7 +1802,7 @@ async function runMainAppStudySmoke() {
             && event.rating === "again"
             && event.source === "study-one-more-miss"
           );
-        if (saved && reviewEvent && frameDocument.querySelector("[data-study-next]")) {
+        if (saved && reviewEvent) {
           window.clearInterval(timer);
           resolve(true);
           return;
@@ -1750,6 +1813,56 @@ async function runMainAppStudySmoke() {
         }
       }, 100);
     });
+
+    // Add to Memorize auto-advances to the next word — no "Study another" click required.
+    const fourthTerm = await waitForStudyOneMoreCard(thirdTerm);
+    const fourthCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    if (!fourthCandidate || fourthCandidate.normalizedTerm === thirdCandidate.normalizedTerm) {
+      throw new Error("Study One More did not auto-advance to a new word after Add to Memorize.");
+    }
+    const studyOneMoreAddToMemorizeAutoAdvances = true;
+
+    // Initial Add to Known (no reveal): the freshly auto-advanced card lets the user mark a word
+    // Known without revealing options or meaning, then auto-advances again.
+    if (frameDocument.querySelector("#quizPanel [data-quiz-option]")) {
+      throw new Error("Auto-advanced Study One More card showed options before Reveal.");
+    }
+    if (frameDocument.querySelector("[data-study-one-more-meaning]")) {
+      throw new Error("Auto-advanced Study One More card disclosed the meaning before Reveal.");
+    }
+    if (!frameDocument.querySelector("#quizPanel .study-one-more-card [data-study-one-more-known]")) {
+      throw new Error("Auto-advanced Study One More card is missing the initial Add to Known button.");
+    }
+    if (frameWindow.WordLoverApp.getKnownWords().some((record) => record.normalizedTerm === fourthCandidate.normalizedTerm)) {
+      throw new Error("Word should not be Known before clicking the initial Add to Known.");
+    }
+    click("#quizPanel .study-one-more-card [data-study-one-more-known]");
+    const knownFromInitialAdd = await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        const record = frameWindow.WordLoverApp
+          .getKnownWords()
+          .find((item) => item.normalizedTerm === fourthCandidate.normalizedTerm);
+        if (record) {
+          window.clearInterval(timer);
+          resolve(record);
+          return;
+        }
+        if (performance.now() - startedAt > 10000) {
+          window.clearInterval(timer);
+          reject(new Error("Initial Add to Known did not create a Known record."));
+        }
+      }, 100);
+    });
+    if (knownFromInitialAdd.review || knownFromInitialAdd.fsrsCard) {
+      throw new Error("Initial Add to Known record should not include FSRS review state.");
+    }
+    const fifthTerm = await waitForStudyOneMoreCard(fourthTerm);
+    const fifthCandidate = frameWindow.WordLoverApp.studyOneMore.current();
+    if (!fifthCandidate || fifthCandidate.normalizedTerm === fourthCandidate.normalizedTerm) {
+      throw new Error("Initial Add to Known did not auto-advance to a new word.");
+    }
+    const studyOneMoreInitialAddToKnownWorks = true;
 
     const statsButtons = [...frameDocument.querySelectorAll(".vocab-stat")];
     const againButton = frameDocument.querySelector('[data-action="vocab-filter"][data-filter="again"]');
@@ -2238,6 +2351,13 @@ async function runMainAppStudySmoke() {
       applyAfterCheckStatus: applyAfterCheck?.status,
       updateCheckStatus: updateCheckResult?.status,
       studyOneMoreMissCreatesAgainReview,
+      studyOneMoreInitialAddToKnownPresent,
+      studyOneMoreAddToKnownAutoAdvances,
+      studyOneMoreAddToSpellingAutoAdvances,
+      studyOneMoreAddToMemorizeAutoAdvances,
+      studyOneMoreInitialAddToKnownWorks,
+      inkQuizCorrectReadable,
+      inkQuizIncorrectReadable,
       studyOneMoreFilterPersists: true,
       todayMemorizeStatsSplit,
       todaySpellingStatsSplit,
@@ -2830,6 +2950,37 @@ async function runLearningTracksImportExportTest() {
     const storedAfterImport = await getAppStoreValue(APP_VOCABULARY_STORE, `${app.learningTracks.activeTrackIdForTest()}::${savedAfterImport.normalizedTerm}`);
     const normalSaveEncrypted = isEncryptedRecord(storedAfterImport);
 
+    // Per-track Study One More filter: each learning track keeps its own filter. Set filter A on
+    // the original default track, filter B on the imported track, then switch back and confirm
+    // each track restores its own filter (in memory and in the popup DOM).
+    const trackA = beforeTrackIds[0];
+    const trackB = importResult.activeTrackId;
+    const filterDoc = frame.contentDocument;
+    const popupFreqMin = () => filterDoc.querySelector("#filterIncludeFreqMin")?.value ?? "";
+    const popupFreqMax = () => filterDoc.querySelector("#filterIncludeFreqMax")?.value ?? "";
+    await app.learningTracks.switchForTest(trackA);
+    await app.studyOneMore.setFilter({ includeFreqMin: 1000, includeFreqMax: 4000 });
+    await app.learningTracks.switchForTest(trackB);
+    await app.studyOneMore.setFilter({ includeFreqMin: 7000, includeFreqMax: 9000 });
+    await app.learningTracks.switchForTest(trackA);
+    const restoredFilterA = app.studyOneMore.getFilter();
+    const perTrackFilterAOk =
+      restoredFilterA.includeFreqMin === 1000
+      && restoredFilterA.includeFreqMax === 4000
+      && popupFreqMin() === "1000"
+      && popupFreqMax() === "4000";
+    await app.learningTracks.switchForTest(trackB);
+    const restoredFilterB = app.studyOneMore.getFilter();
+    const perTrackFilterBOk =
+      restoredFilterB.includeFreqMin === 7000
+      && restoredFilterB.includeFreqMax === 9000
+      && popupFreqMin() === "7000"
+      && popupFreqMax() === "9000";
+    const perTrackStudyOneMoreFilter = perTrackFilterAOk && perTrackFilterBOk;
+    if (!perTrackStudyOneMoreFilter) {
+      throw new Error(`Per-track Study One More filter did not restore: ${JSON.stringify({ restoredFilterA, restoredFilterB, popup: { min: popupFreqMin(), max: popupFreqMax() } })}`);
+    }
+
     return {
       passed: exportedSchemaOk
         && rejectedInvalidJson
@@ -2842,7 +2993,8 @@ async function runLearningTracksImportExportTest() {
         && duplicateNamesRenamed
         && activeDeleteRejected
         && nonActiveDeleteWorked
-        && normalSaveEncrypted,
+        && normalSaveEncrypted
+        && perTrackStudyOneMoreFilter,
       exportedSchemaOk,
       rejectedInvalidJson,
       rejectedUnsupportedVersion,
@@ -2855,6 +3007,7 @@ async function runLearningTracksImportExportTest() {
       activeDeleteRejected,
       nonActiveDeleteWorked,
       normalSaveEncrypted,
+      perTrackStudyOneMoreFilter,
       importResult,
     };
   } finally {
