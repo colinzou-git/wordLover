@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260608-1";
+} from "./fsrs-scheduler.js?v=20260609-1";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260608-1";
+} from "./persistence.js?v=20260609-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260608-1";
+} from "./spelling.js?v=20260609-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260608-1";
+} from "./ui-preferences.js?v=20260609-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260608-1";
+} from "./review-state.js?v=20260609-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260608-1";
+} from "./study-one-more.js?v=20260609-1";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260608-1";
+} from "./sync.js?v=20260609-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260608-1";
+} from "./goal-forecast.js?v=20260609-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260608-1";
+} from "./tracks.js?v=20260609-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -223,9 +223,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260608-1-v124";
+const APP_VERSION = "0.6.2-product.20260609-1-v125";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v124";
+const SHELL_CACHE_VERSION = "wordlover-shell-v125";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -381,8 +381,23 @@ function formatMs(value) {
   return `${Math.round(value)} ms`;
 }
 
+// All the apostrophe-like glyphs a phone/desktop keyboard or paste can produce, folded to ASCII "'".
+// U+2018 \u2018 left single quote, U+2019 \u2019 right single quote (iOS smart quote), U+02BC \u02bc modifier
+// letter apostrophe, U+0060 ` backtick, U+FF07 \uff07 fullwidth apostrophe.
+const APOSTROPHE_VARIANTS_RE = /[\u2018\u2019\u02bc`\uff07]/g;
+
+function normalizeApostrophes(value) {
+  return String(value ?? "").replace(APOSTROPHE_VARIANTS_RE, "'");
+}
+
 function normalizeTerm(term) {
-  return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return normalizeApostrophes(term).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// Single source of truth for "is this an acceptable English word/phrase input?".
+// Normalizes apostrophe variants first so "it's" and "it\u2019s" validate identically.
+function isValidEnglishTerm(value) {
+  return TERM_RE.test(normalizeTerm(value));
 }
 
 function isValidFsrsRating(rating) {
@@ -1519,7 +1534,7 @@ function renderResult(data) {
   if (data.status === "invalid_input") {
     currentResult = null;
     scheduleAutosave(null);
-    result.innerHTML = `<p class="muted">Invalid input. Use English letters, Chinese characters, spaces, hyphens, or apostrophes.</p>`;
+    result.innerHTML = `<p class="muted">Invalid input. Use English letters, Chinese characters, spaces, hyphens, or apostrophes (e.g. "it's", "they're").</p>`;
     return;
   }
   if (data.status === "not_found") {
@@ -2599,7 +2614,7 @@ async function showUnknownTermDialog(typedTerm) {
     title: "Save term without dictionary match?",
     body: "WordFan did not find an exact match. You can save anyway, edit the term, or cancel. Provide at least one meaning before saving.",
     fields: [
-      { id: "term", label: "Term", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
+      { id: "term", label: "Term", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes (e.g. \"it's\", \"they're\"); up to 6 words."},
       { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
       { id: "chinese", label: "Chinese meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
       { id: "phonetic", label: "Pronunciation / IPA (optional)", value: "" },
@@ -2613,7 +2628,7 @@ async function showUnknownTermDialog(typedTerm) {
   if (!normalizedTerm || !TERM_RE.test(normalizedTerm)) {
     await showModal({
       title: "Term cannot be saved",
-      body: "The term must use English letters, spaces, hyphens, or apostrophes, and be no more than 6 words.",
+      body: "The term must use English letters, spaces, hyphens, or apostrophes (e.g. \"it's\", \"they're\"), and be no more than 6 words.",
       submitText: "OK",
       allowCancel: false,
     });
@@ -2656,7 +2671,7 @@ async function showAddToDictionaryDialog(typedTerm) {
     title: "Add a word to the dictionary",
     body: "Add a new word so it becomes searchable and eligible for the spelling list. The word must not already exist in the dictionary.",
     fields: [
-      { id: "term", label: "Word", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes; up to 6 words." },
+      { id: "term", label: "Word", value: initial, required: true, hint: "Letters, spaces, hyphens, apostrophes (e.g. \"it's\", \"they're\"); up to 6 words."},
       { id: "phonetic", label: "Pronunciation / IPA (optional)", value: "" },
       { id: "english", label: "English meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "", required: true },
       { id: "chinese", label: "Chinese meaning", type: "textarea", rows: 2, hint: "Use semicolons to separate multiple meanings.", value: "" },
@@ -2668,7 +2683,7 @@ async function showAddToDictionaryDialog(typedTerm) {
   const term = values.term.trim();
   const normalizedTerm = normalizeTerm(term);
   if (!normalizedTerm || !TERM_RE.test(normalizedTerm)) {
-    await showModal({ title: "Word cannot be added", body: "Use English letters, spaces, hyphens, or apostrophes, up to 6 words.", submitText: "OK", allowCancel: false });
+    await showModal({ title: "Word cannot be added", body: "Use English letters, spaces, hyphens, or apostrophes (e.g. \"it's\", \"they're\"), up to 6 words.", submitText: "OK", allowCancel: false });
     return null;
   }
   // Reject words that already exist (shipped dictionary or user dictionary).
@@ -4151,7 +4166,10 @@ function updateSpellingProgress() {
 }
 
 function spellingAnswerMatches(inputValue, expectedTerm) {
-  return String(inputValue ?? "").toLocaleLowerCase() === String(expectedTerm ?? "").toLocaleLowerCase();
+  // Apostrophe variants (it's vs it’s) are not audible in dictation and must compare equal;
+  // capitalization is intentionally ignored too.
+  return normalizeApostrophes(inputValue).toLocaleLowerCase()
+    === normalizeApostrophes(expectedTerm).toLocaleLowerCase();
 }
 
 function checkSpelling() {
@@ -7202,16 +7220,16 @@ function bindAiQuizHandlers(payload) {
   const fillCheck = aiChatContent.querySelector("#aiFillCheck");
   if (fillCheck) {
     fillCheck.addEventListener("click", () => {
-      const value = (aiChatContent.querySelector("#aiFillInput").value ?? "").trim().toLowerCase();
-      const ok = value === aiChatState.term.toLowerCase();
+      const value = normalizeTerm(aiChatContent.querySelector("#aiFillInput").value ?? "");
+      const ok = value === normalizeTerm(aiChatState.term);
       showQuizFeedback(ok, ok ? "Correct." : `Expected: ${aiChatState.term}`);
     });
   }
   const zhEnCheck = aiChatContent.querySelector("#aiZhEnCheck");
   if (zhEnCheck) {
     zhEnCheck.addEventListener("click", () => {
-      const value = (aiChatContent.querySelector("#aiZhEnInput").value ?? "").trim().toLowerCase();
-      const ok = value === aiChatState.term.toLowerCase();
+      const value = normalizeTerm(aiChatContent.querySelector("#aiZhEnInput").value ?? "");
+      const ok = value === normalizeTerm(aiChatState.term);
       showQuizFeedback(ok, ok ? "Correct." : `Expected: ${aiChatState.term}`);
     });
   }
@@ -7227,8 +7245,9 @@ function bindAiQuizHandlers(payload) {
   const completeCheck = aiChatContent.querySelector("#aiCompleteCheck");
   if (completeCheck) {
     completeCheck.addEventListener("click", () => {
-      const value = (aiChatContent.querySelector("#aiCompleteInput").value ?? "").trim().toLowerCase();
-      const ok = value.includes(aiChatState.term.toLowerCase()) && value.length > aiChatState.term.length;
+      const value = normalizeTerm(aiChatContent.querySelector("#aiCompleteInput").value ?? "");
+      const target = normalizeTerm(aiChatState.term);
+      const ok = value.includes(target) && value.length > target.length;
       const modelEl = aiChatContent.querySelector("#aiCompleteModel");
       if (modelEl) modelEl.hidden = false;
       showQuizFeedback(ok, ok ? "Looks good — your sentence uses the term." : "Your sentence should use the target word.");
@@ -9121,6 +9140,8 @@ window.WordLoverApp = {
   ensureDictionaryLoaded,
   lookupTerm,
   suggestTerms,
+  normalizeTerm,
+  isValidEnglishTerm,
   lookupChineseTerm,
   saveVocabularyItem,
   saveManualVocabularyItem,

@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260608-1";
+} from "./fsrs-scheduler.js?v=20260609-1";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260608-1";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260608-1";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260609-1";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260609-1";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260608-1";
+} from "./ui-preferences.js?v=20260609-1";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260608-1";
+} from "./sync.js?v=20260609-1";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260608-1";
+} from "./study-one-more.js?v=20260609-1";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260608-1";
+} from "./goal-forecast.js?v=20260609-1";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260608-1";
+} from "./tracks.js?v=20260609-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v124";
+const SHELL_CACHE_NAME = "wordlover-shell-v125";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260608-1",
-  "/persistence.js?v=20260608-1",
-  "/spelling.js?v=20260608-1",
-  "/ui-preferences.js?v=20260608-1",
-  "/review-state.js?v=20260608-1",
-  "/study-one-more.js?v=20260608-1",
-  "/sync.js?v=20260608-1",
-  "/fsrs-scheduler.js?v=20260608-1",
-  "/goal-forecast.js?v=20260608-1",
-  "/tracks.js?v=20260608-1",
-  "/styles.css?v=20260608-1",
-  "/wordlover-config.js?v=20260608-1",
+  "/app.js?v=20260609-1",
+  "/persistence.js?v=20260609-1",
+  "/spelling.js?v=20260609-1",
+  "/ui-preferences.js?v=20260609-1",
+  "/review-state.js?v=20260609-1",
+  "/study-one-more.js?v=20260609-1",
+  "/sync.js?v=20260609-1",
+  "/fsrs-scheduler.js?v=20260609-1",
+  "/goal-forecast.js?v=20260609-1",
+  "/tracks.js?v=20260609-1",
+  "/styles.css?v=20260609-1",
+  "/wordlover-config.js?v=20260609-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260608-1",
+  "/automated-tests.js?v=20260609-1",
 ];
 
 let lastResults = null;
@@ -245,8 +245,12 @@ async function deleteAppStoreValue(storeName, key) {
   db.close();
 }
 
+// Keep in lockstep with app.js normalizeTerm / APOSTROPHE_VARIANTS_RE. Folds every
+// apostrophe-like glyph (\u2018 \u2019 \u02bc ` \uff07) to ASCII "'" so contractions compare identically.
+const APOSTROPHE_VARIANTS_RE = /[\u2018\u2019\u02bc`\uff07]/g;
+
 function normalizeTerm(term) {
-  return term.trim().replace(/[\u2019`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return String(term ?? "").replace(APOSTROPHE_VARIANTS_RE, "'").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function sampleChecksum(bytes) {
@@ -2482,6 +2486,103 @@ async function runEarlyPracticePersistenceTest() {
   }
 }
 
+// Apostrophe handling across every word-input surface: validation, lookup, user-dictionary,
+// vocabulary/spelling save, spelling answer matching, and the AI-quiz comparison logic.
+// Contractions ("it's", "they're") and curly/variant apostrophes ("it’s") must behave identically.
+async function runApostropheHandlingTest() {
+  const frame = document.createElement("iframe");
+  frame.hidden = true;
+  frame.src = `/?suite-apostrophe=${Date.now()}`;
+  document.body.append(frame);
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = performance.now();
+      const timer = window.setInterval(() => {
+        unlockMainAppFrame(frame);
+        const app = frame.contentWindow?.WordLoverApp;
+        if (app?.getState?.().loaded) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (performance.now() - startedAt > 60000) {
+          window.clearInterval(timer);
+          reject(new Error("Apostrophe handling test timed out waiting for app load."));
+        }
+      }, 250);
+    });
+
+    const app = frame.contentWindow.WordLoverApp;
+
+    // 1. Contractions and apostrophe variants are valid input (never invalid_input).
+    const validContractions = ["it's", "they're", "it’s", "they’re", "don’t", "don`t", "itʼs", "it＇s"];
+    const allContractionsValid = validContractions.every((term) => app.isValidEnglishTerm(term) === true);
+    // Punctuation must still be rejected; leading/trailing separators are not allowed.
+    const rejectsBadInput = [
+      "'word",
+      "word'",
+      "-word",
+      "word.",
+      "wo!rd",
+      "",
+    ].every((term) => app.isValidEnglishTerm(term) === false);
+
+    // 2. All apostrophe variants normalize to ASCII "'".
+    const normalizesVariants = ["it’s", "it`s", "itʼs", "it＇s", "IT'S", "  it's  "]
+      .every((term) => app.normalizeTerm(term) === "it's");
+
+    // 3. The duplicate test-harness normalizeTerm/TERM_RE stays in lockstep with the app.
+    const harnessParity = validContractions.every((term) =>
+      normalizeTerm(term) === app.normalizeTerm(term) && TERM_RE.test(normalizeTerm(term)));
+
+    // 4. A user-dictionary contraction normalizes, persists, and is searchable via straight + curly forms.
+    await app.addUserDictionaryEntryForTest("it's", "used in the third person singular present", "它是");
+    const userDictHasContraction = app.getUserDictionary().some((entry) => entry.normalizedTerm === "it's");
+    const straightLookup = app.lookupTerm("it's");
+    const curlyLookup = app.lookupTerm("it’s");
+    const contractionSearchable = straightLookup.status === "found" && curlyLookup.status === "found";
+
+    // 5. Saveable to vocabulary and to the spelling list.
+    const vocabItem = await app.saveVocabularyItem(straightLookup, "apostrophe-test");
+    const savedToVocabulary = Boolean(vocabItem) && app.getVocabulary().some((item) => item.normalizedTerm === "it's");
+    const spellingItem = await app.saveSpellingItem(straightLookup, "apostrophe-test");
+    const savedToSpelling = Boolean(spellingItem) && app.getSpelling().some((item) => item.normalizedTerm === "it's");
+
+    // 6. Spelling review accepts both straight and curly apostrophes; case is ignored; "its" is not "it's".
+    const spellingAccepts = app.spelling.answerMatches("it's", "it's") === true
+      && app.spelling.answerMatches("it’s", "it's") === true
+      && app.spelling.answerMatches("IT'S", "it's") === true
+      && app.spelling.answerMatches("its", "it's") === false;
+
+    // 7. AI-quiz word answers compare via normalizeTerm (same logic #aiFillInput / #aiZhEnInput use):
+    //    a curly-apostrophe answer must equal the straight-apostrophe target.
+    const aiQuizMatches = app.normalizeTerm("it’s") === app.normalizeTerm("it's")
+      && app.normalizeTerm("THEY’RE") === app.normalizeTerm("they're");
+
+    const passed = allContractionsValid && rejectsBadInput && normalizesVariants && harnessParity
+      && userDictHasContraction && contractionSearchable && savedToVocabulary && savedToSpelling
+      && spellingAccepts && aiQuizMatches;
+
+    return {
+      passed,
+      allContractionsValid,
+      rejectsBadInput,
+      normalizesVariants,
+      harnessParity,
+      userDictHasContraction,
+      contractionSearchable,
+      straightLookupStatus: straightLookup.status,
+      curlyLookupStatus: curlyLookup.status,
+      savedToVocabulary,
+      savedToSpelling,
+      spellingAccepts,
+      aiQuizMatches,
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
 async function runStudyOneMoreSkipCooldownTest() {
   const frame = document.createElement("iframe");
   frame.hidden = true;
@@ -3038,6 +3139,9 @@ async function runAllPocs() {
   addProgress("Running Study One More skip cooldown and ignore test.");
   const studyOneMoreSkipCooldown = await runStudyOneMoreSkipCooldownTest();
 
+  addProgress("Running apostrophe / contraction handling test across word inputs.");
+  const apostropheHandling = await runApostropheHandlingTest();
+
   addProgress("Verifying manual export snapshot includes all required fields.");
   const manualExportFields = await runManualExportFieldsTest();
 
@@ -3104,6 +3208,7 @@ async function runAllPocs() {
       checkpointRollback: checkpointRollback.passed ? "pass" : "fail",
       earlyPracticePersistence: earlyPracticePersistence.passed ? "pass" : "fail",
       studyOneMoreSkipCooldown: studyOneMoreSkipCooldown.passed ? "pass" : "fail",
+      apostropheHandling: apostropheHandling.passed ? "pass" : "fail",
       manualExportFields: manualExportFields.passed ? "pass" : "fail",
       learningTracksImportExport: learningTracksImportExport.passed ? "pass" : "fail",
       appDbSchema: appDbSchema.passed ? "pass" : "fail",
@@ -3122,6 +3227,7 @@ async function runAllPocs() {
     checkpointRollback,
     earlyPracticePersistence,
     studyOneMoreSkipCooldown,
+    apostropheHandling,
     manualExportFields,
     learningTracksImportExport,
     appDbSchema,
