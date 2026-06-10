@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260609-2";
+} from "./fsrs-scheduler.js?v=20260610-1";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   deriveKek,
   encryptJsonWithPassphrase,
   decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260609-2";
+} from "./persistence.js?v=20260610-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260609-2";
+} from "./spelling.js?v=20260610-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260609-2";
+} from "./ui-preferences.js?v=20260610-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260609-2";
+} from "./review-state.js?v=20260610-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260609-2";
+} from "./study-one-more.js?v=20260610-1";
 
 import {
   studyEventTrack,
@@ -70,11 +70,11 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260609-2";
+} from "./sync.js?v=20260610-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260609-2";
+} from "./goal-forecast.js?v=20260610-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +86,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260609-2";
+} from "./tracks.js?v=20260610-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -223,9 +223,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260609-2-v126";
+const APP_VERSION = "0.6.2-product.20260610-1-v127";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v126";
+const SHELL_CACHE_VERSION = "wordlover-shell-v127";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -826,8 +826,8 @@ function isUsingDefaultLocalDataPassphrase() {
 }
 
 function syncEncryptionNotice() {
-  if (CONFIG.allowDefaultCloudBackupPassphrase === true) return "Development backup encryption override is enabled.";
-  if (backupPassphraseSession) return "Cloud backups are encrypted with your backup passphrase.";
+  // Cloud backups are stored as plain JSON in your private Drive appDataFolder; there is no backup
+  // passphrase. Return nothing so sync status never claims cloud data is encrypted.
   return "";
 }
 
@@ -5716,19 +5716,11 @@ function buildUserDataSnapshot() {
   };
 }
 
+// Cloud sync, checkpoints, and local export all share one plain envelope. Cloud backups are no
+// longer encrypted, so this never derives or prompts for a backup passphrase. `options` is accepted
+// (and ignored) only so legacy call sites passing { purpose: "cloud" } keep working.
 async function encryptSnapshotPayload(snapshot, options = {}) {
-  if (options.purpose === "cloud") {
-    const { passphrase, source } = await getCloudBackupPassphrase({ reason: "Google Drive backup", allowCreate: true });
-    return {
-      app: "wordlover",
-      format: "wordlover-cloud-backup-aes-gcm-v2",
-      appVersion: APP_VERSION,
-      userDataFormatVersion: USER_DATA_FORMAT_VERSION,
-      exportedAt: nowIso(),
-      passphraseSource: source,
-      ...(await encryptJsonWithPassphrase(snapshot, passphrase)),
-    };
-  }
+  void options;
   return {
     app: "wordlover",
     format: "wordlover-user-data-plain-v1",
@@ -5740,34 +5732,18 @@ async function encryptSnapshotPayload(snapshot, options = {}) {
 }
 
 async function decryptSnapshotPayload(envelope, options = {}) {
+  void options;
   if (envelope?.format === "wordlover-user-data-plain-v1") {
     return envelope.payload;
   }
-  if (envelope?.format === "wordlover-cloud-backup-aes-gcm-v2") {
-    const { passphrase, source } = await getCloudBackupPassphrase({ reason: "Google Drive restore", allowCreate: false });
-    try {
-      const snapshot = await decryptJsonWithPassphrase(envelope, passphrase);
-      if (source === "unverified-user-backup-passphrase") {
-        await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
-        backupPassphraseSession = passphrase;
-        await saveValue("backupPassphrasePersisted", passphrase);
-      }
-      return snapshot;
-    } catch (error) {
-      if (source === "unverified-user-backup-passphrase") {
-        backupPassphraseSession = null;
-        await saveValue("backupPassphrasePersisted", null);
-      }
-      throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
-    }
-  }
-  if (envelope?.format === "wordlover-user-data-aes-gcm-v1") {
-    // Legacy encrypted backup — try the default passphrase without prompting.
-    try {
-      return await decryptJsonWithPassphrase(envelope, DEFAULT_LOCAL_PASSPHRASE);
-    } catch {
-      throw new Error("Could not decrypt legacy Drive backup. The backup was encrypted with a custom passphrase; export it manually before migrating.");
-    }
+  // Both legacy encrypted formats were written by older versions that encrypted cloud backups.
+  // WordFan no longer encrypts cloud data and never prompts for a backup passphrase; surface a
+  // tagged error so sync can offer to overwrite and restore can show a legacy-backup message.
+  if (envelope?.format === "wordlover-cloud-backup-aes-gcm-v2"
+      || envelope?.format === "wordlover-user-data-aes-gcm-v1") {
+    const error = new Error("This Drive backup is a legacy encrypted backup. WordFan no longer encrypts cloud backups and cannot read it automatically.");
+    error.legacyEncryptedBackup = true;
+    throw error;
   }
   throw new Error("Drive backup format is not supported.");
 }
@@ -6108,31 +6084,32 @@ async function syncToGoogleDriveInner() {
     let remoteSnapshot = null;
     lastSyncInfo.stage = "decrypt";
     try {
-      remoteSnapshot = await decryptSnapshotPayload(remoteEnvelope, { purpose: "cloud", allowLegacyDefault: true });
+      remoteSnapshot = await decryptSnapshotPayload(remoteEnvelope);
       lastSyncInfo.decrypted = true;
     } catch (decryptError) {
       lastSyncInfo.decrypted = false;
-      // Legacy backup encrypted with a custom passphrase — offer to replace it with local data.
+      // Legacy encrypted backup (or otherwise unreadable) — offer to replace it with local plain
+      // data. No backup passphrase is requested.
       const confirmed = await showModal({
         title: "Cannot read existing Drive backup",
-        body: `The Drive backup was encrypted with a custom passphrase and cannot be decrypted automatically. You can overwrite it with your current local data (${vocabularyItems.length} word(s)), or cancel and delete the backup manually via drive.google.com/drive/appdata.`,
+        body: `The Drive backup is a legacy encrypted backup and cannot be read by this version. You can overwrite it with your current local data (${vocabularyItems.length} word(s)), or cancel and delete the backup manually via drive.google.com/drive/appdata.`,
         submitText: `Overwrite Drive backup with local data`,
         cancelText: "Cancel",
         danger: true,
       });
-      if (!confirmed) throw new Error(decryptError instanceof Error ? decryptError.message : "Drive backup could not be decrypted.");
+      if (!confirmed) throw new Error(decryptError instanceof Error ? decryptError.message : "Drive backup could not be read.");
       // Upload local data only — skip merge.
       snapshotToUpload = buildUserDataSnapshot();
       lastSyncInfo.mergedCount = vocabularyItems.length;
       lastSyncInfo.action = "overwrite";
       googleAuthStatus.textContent = "Overwriting Drive backup with local data...";
       lastSyncInfo.stage = "upload";
-      const localSnapshot = await encryptSnapshotPayload(snapshotToUpload, { purpose: "cloud" });
+      const snapshotEnvelope = await encryptSnapshotPayload(snapshotToUpload);
       const uploadHeaders = { "Content-Type": "application/json" };
       const overwriteResponse = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
         method: "PATCH",
         headers: uploadHeaders,
-        body: JSON.stringify(localSnapshot),
+        body: JSON.stringify(snapshotEnvelope),
       });
       if (!overwriteResponse.ok) throw new Error(`Google Drive sync failed: ${overwriteResponse.status} ${await overwriteResponse.text()}`);
       const overwriteResult = await overwriteResponse.json();
@@ -6154,7 +6131,7 @@ async function syncToGoogleDriveInner() {
 
   googleAuthStatus.textContent = "Uploading merged snapshot...";
   lastSyncInfo.stage = "upload";
-  const encryptedSnapshot = await encryptSnapshotPayload(snapshotToUpload, { purpose: "cloud" });
+  const snapshotEnvelope = await encryptSnapshotPayload(snapshotToUpload);
   if (existing?.id) {
     lastSyncInfo.stage = "revision-check";
     const latestMetadata = await getGoogleDriveSnapshotMetadata(existing.id);
@@ -6165,7 +6142,7 @@ async function syncToGoogleDriveInner() {
     const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
       method: "PATCH",
       headers: uploadHeaders,
-      body: JSON.stringify(encryptedSnapshot),
+      body: JSON.stringify(snapshotEnvelope),
     });
     if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
     const resultData = await response.json();
@@ -6201,7 +6178,7 @@ async function syncToGoogleDriveInner() {
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
     "",
-    JSON.stringify(encryptedSnapshot),
+    JSON.stringify(snapshotEnvelope),
     `--${boundary}--`,
   ].join("\r\n");
   const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size,headRevisionId`, {
@@ -6550,7 +6527,16 @@ async function restoreFromGoogleDrive() {
   const response = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${latest.id}?alt=media`);
   if (!response.ok) throw new Error(`Google Drive restore failed: ${response.status} ${await response.text()}`);
   const envelope = await response.json();
-  const snapshot = await decryptSnapshotPayload(envelope, { purpose: "cloud", allowLegacyDefault: true });
+  let snapshot;
+  try {
+    snapshot = await decryptSnapshotPayload(envelope);
+  } catch (error) {
+    if (error?.legacyEncryptedBackup) {
+      googleAuthStatus.textContent = "This Drive backup is a legacy encrypted backup from an older version and can no longer be restored automatically. Use Sync now to replace it with your current local data.";
+      return null;
+    }
+    throw error;
+  }
   await applyUserDataSnapshot(snapshot, { allowDuringDecryptBlock: true });
   googleAuthStatus.textContent = `Restored Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
   syncStatus.textContent = navigator.onLine ? "Synced" : "Offline";
@@ -9476,9 +9462,7 @@ window.WordLoverApp = {
           hasSessionPassphrase,
           hasVerifier,
           developmentOverride,
-          notice: developmentOverride || hasVerifier || hasSessionPassphrase
-            ? syncEncryptionNotice()
-            : "A backup passphrase is required before Google Drive sync can encrypt cloud backups.",
+          notice: "Cloud backups are stored as plain JSON; no backup passphrase is used.",
         };
       },
       setPassphraseForTest: setBackupPassphraseForTest,

@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260609-2";
+} from "./fsrs-scheduler.js?v=20260610-1";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260609-2";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260609-2";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260610-1";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260610-1";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260609-2";
+} from "./ui-preferences.js?v=20260610-1";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,17 +26,17 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260609-2";
+} from "./sync.js?v=20260610-1";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260609-2";
+} from "./study-one-more.js?v=20260610-1";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260609-2";
+} from "./goal-forecast.js?v=20260610-1";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -46,7 +46,7 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260609-2";
+} from "./tracks.js?v=20260610-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +60,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v126";
+const SHELL_CACHE_NAME = "wordlover-shell-v127";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +77,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260609-2",
-  "/persistence.js?v=20260609-2",
-  "/spelling.js?v=20260609-2",
-  "/ui-preferences.js?v=20260609-2",
-  "/review-state.js?v=20260609-2",
-  "/study-one-more.js?v=20260609-2",
-  "/sync.js?v=20260609-2",
-  "/fsrs-scheduler.js?v=20260609-2",
-  "/goal-forecast.js?v=20260609-2",
-  "/tracks.js?v=20260609-2",
-  "/styles.css?v=20260609-2",
-  "/wordlover-config.js?v=20260609-2",
+  "/app.js?v=20260610-1",
+  "/persistence.js?v=20260610-1",
+  "/spelling.js?v=20260610-1",
+  "/ui-preferences.js?v=20260610-1",
+  "/review-state.js?v=20260610-1",
+  "/study-one-more.js?v=20260610-1",
+  "/sync.js?v=20260610-1",
+  "/fsrs-scheduler.js?v=20260610-1",
+  "/goal-forecast.js?v=20260610-1",
+  "/tracks.js?v=20260610-1",
+  "/styles.css?v=20260610-1",
+  "/wordlover-config.js?v=20260610-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +104,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260609-2",
+  "/automated-tests.js?v=20260610-1",
 ];
 
 let lastResults = null;
@@ -1216,64 +1216,45 @@ async function runMainAppStudySmoke() {
       && reloadedGoalsState?.desiredRetention === restoredGoalTargets.desiredRetention
       && reloadedGoalsState?.forecastDays === restoredGoalTargets.forecastDays;
 
-    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
-    const noBackupPassphraseStatus = await frameWindow.WordLoverApp.sync.backupEncryption.status();
-    const productionBackupPassphraseBlocksSync =
-      noBackupPassphraseStatus.developmentOverride === false
-      && noBackupPassphraseStatus.hasVerifier === false
-      && /backup passphrase is required/i.test(noBackupPassphraseStatus.notice);
-    await frameWindow.WordLoverApp.sync.backupEncryption.setPassphraseForTest("correct horse battery staple");
+    // Cloud backups are plain JSON and must never reach the backup-passphrase prompt. Arm the
+    // prompt to throw if any cloud path tries to call it — this is the regression tripwire.
+    let backupPassphrasePromptCalled = false;
+    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => {
+      backupPassphrasePromptCalled = true;
+      throw new Error("backup passphrase prompt must never run for plain cloud backups");
+    });
     const cloudSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
-    const encryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.encryptForTest(cloudSnapshot);
-    const decryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
-    const backupPassphraseRoundTrips =
-      encryptedCloudSnapshot.passphraseSource === "user-backup-passphrase"
-      && decryptedCloudSnapshot.app === cloudSnapshot.app
+    const cloudEnvelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptForTest(cloudSnapshot);
+    const cloudBackupIsPlainJson =
+      cloudEnvelope.format === "wordlover-user-data-plain-v1"
+      && cloudEnvelope.payload !== undefined
+      && cloudEnvelope.data === undefined
+      && cloudEnvelope.iv === undefined
+      && cloudEnvelope.salt === undefined
+      && cloudEnvelope.passphraseSource === undefined;
+    const decryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(cloudEnvelope);
+    const plainCloudBackupRoundTrips =
+      decryptedCloudSnapshot.app === cloudSnapshot.app
       && decryptedCloudSnapshot.exportedAt === cloudSnapshot.exportedAt;
-    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
-    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => "correct horse battery staple");
-    const newDeviceDecryptedSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
-    const newDeviceStatusAfterRestore = await frameWindow.WordLoverApp.sync.backupEncryption.status();
-    const newDeviceCloudRestoreCreatesVerifier =
-      newDeviceDecryptedSnapshot.exportedAt === cloudSnapshot.exportedAt
-      && newDeviceStatusAfterRestore.hasVerifier
-      && newDeviceStatusAfterRestore.hasSessionPassphrase;
-    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
-    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => "wrong horse battery staple");
-    let wrongNewDevicePassphraseFailsSafely = false;
-    const vocabCountBeforeWrongNewDevicePass = frameWindow.WordLoverApp.getVocabulary().length;
+    // Existing encrypted Drive backups (legacy v1 default-passphrase and v2 user-passphrase) must
+    // be rejected as legacy without ever prompting, so sync can offer overwrite and restore can warn.
+    const legacyV1Envelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptLegacyForTest(cloudSnapshot);
+    const legacyV2Envelope = { app: "wordlover", format: "wordlover-cloud-backup-aes-gcm-v2", data: "ZmFrZQ==", iv: [1, 2, 3], salt: [4, 5, 6] };
+    let legacyV1RejectedWithoutPrompt = false;
+    let legacyV2RejectedWithoutPrompt = false;
     try {
-      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(encryptedCloudSnapshot);
-    } catch {
-      const statusAfterWrongNewDevicePass = await frameWindow.WordLoverApp.sync.backupEncryption.status();
-      wrongNewDevicePassphraseFailsSafely =
-        frameWindow.WordLoverApp.getVocabulary().length === vocabCountBeforeWrongNewDevicePass
-        && statusAfterWrongNewDevicePass.hasVerifier === false
-        && statusAfterWrongNewDevicePass.hasSessionPassphrase === false;
+      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyV1Envelope);
+    } catch (error) {
+      legacyV1RejectedWithoutPrompt = /legacy encrypted backup/i.test(error.message);
+    }
+    try {
+      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyV2Envelope);
+    } catch (error) {
+      legacyV2RejectedWithoutPrompt = /legacy encrypted backup/i.test(error.message);
     }
     frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(null);
-    let wrongBackupPassphraseFailsSafely = false;
-    const vocabCountBeforeWrongPass = frameWindow.WordLoverApp.getVocabulary().length;
-    try {
-      await frameWindow.WordLoverApp.sync.backupEncryption.decryptWithPassphraseForTest(encryptedCloudSnapshot, "wrong horse battery staple");
-    } catch {
-      wrongBackupPassphraseFailsSafely = frameWindow.WordLoverApp.getVocabulary().length === vocabCountBeforeWrongPass;
-    }
-    const legacyEnvelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptLegacyForTest(cloudSnapshot);
-    await frameWindow.WordLoverApp.sync.backupEncryption.clearPassphraseForTest();
-    const legacyDecrypted = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyEnvelope);
-    const legacyDefaultBackupCanRestore = legacyDecrypted.exportedAt === cloudSnapshot.exportedAt;
-    if (!productionBackupPassphraseBlocksSync || !backupPassphraseRoundTrips || !newDeviceCloudRestoreCreatesVerifier || !wrongNewDevicePassphraseFailsSafely || !wrongBackupPassphraseFailsSafely || !legacyDefaultBackupCanRestore) {
-      throw new Error(`Cloud backup encryption tests failed: ${JSON.stringify({ productionBackupPassphraseBlocksSync, backupPassphraseRoundTrips, newDeviceCloudRestoreCreatesVerifier, wrongNewDevicePassphraseFailsSafely, wrongBackupPassphraseFailsSafely, legacyDefaultBackupCanRestore, noBackupPassphraseStatus, encryptedSource: encryptedCloudSnapshot.passphraseSource })}`);
-    }
-    const validate = frameWindow.WordLoverApp.sync.backupEncryption.validatePassphraseForTest;
-    const weakPassphraseRejected = /too simple/i.test(validate("abc", "abc", { create: true }) ?? "");
-    const commonPassphraseRejected = /too simple/i.test(validate("password123", "password123", { create: true }) ?? "");
-    const mismatchPassphraseRejected = /do not match/i.test(validate("WordFan-Backup-2026!", "WordFan-Backup-WRONG!", { create: true }) ?? "");
-    const validPassphraseAccepted = validate("WordFan-Backup-2026!", "WordFan-Backup-2026!", { create: true }) === null;
-    const restoreSkipsPolicy = validate("short", "short", { create: false }) === null;
-    if (!weakPassphraseRejected || !commonPassphraseRejected || !mismatchPassphraseRejected || !validPassphraseAccepted || !restoreSkipsPolicy) {
-      throw new Error(`Passphrase validation tests failed: ${JSON.stringify({ weakPassphraseRejected, commonPassphraseRejected, mismatchPassphraseRejected, validPassphraseAccepted, restoreSkipsPolicy })}`);
+    if (!cloudBackupIsPlainJson || !plainCloudBackupRoundTrips || !legacyV1RejectedWithoutPrompt || !legacyV2RejectedWithoutPrompt || backupPassphrasePromptCalled) {
+      throw new Error(`Cloud backup must be plain JSON and never prompt for a passphrase: ${JSON.stringify({ cloudBackupIsPlainJson, plainCloudBackupRoundTrips, legacyV1RejectedWithoutPrompt, legacyV2RejectedWithoutPrompt, backupPassphrasePromptCalled, cloudEnvelope })}`);
     }
     const currentSnapshotValidates = Boolean(frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot()).checksum);
     const oldSnapshot = { ...frameWindow.WordLoverApp.buildUserDataSnapshot() };
@@ -2333,15 +2314,11 @@ async function runMainAppStudySmoke() {
       goalSettingsPersistNewFields,
       goalForecastUsesFsrs,
       olderSnapshotWithoutGoalsStable,
-      productionBackupPassphraseBlocksSync,
-      backupPassphraseRoundTrips,
-      wrongBackupPassphraseFailsSafely,
-      legacyDefaultBackupCanRestore,
-      weakPassphraseRejected,
-      commonPassphraseRejected,
-      mismatchPassphraseRejected,
-      validPassphraseAccepted,
-      restoreSkipsPolicy,
+      cloudBackupIsPlainJson,
+      plainCloudBackupRoundTrips,
+      legacyV1RejectedWithoutPrompt,
+      legacyV2RejectedWithoutPrompt,
+      backupPassphrasePromptCalled,
       currentSnapshotValidates,
       oldSnapshotValidates,
       wrongAppRejected,
