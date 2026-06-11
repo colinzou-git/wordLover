@@ -4,7 +4,7 @@ data/*.db
 data/dictionary-report.json
 data/wordnet-augmentation-report.json
 data/opted-augmentation-report.json
-data/sources/
+#data/sources/
 data/ci/
 apps/wordlover-pwa/public/dictionary.sqlite
 apps/wordlover-pwa/public/dictionary.sqlite.zst

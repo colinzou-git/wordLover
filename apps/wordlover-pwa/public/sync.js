@@ -9,7 +9,7 @@ import {
   DEFAULT_TRACK_ID,
   serializeTrack,
   trackRecords,
-} from "./tracks.js?v=20260610-2";
+} from "./tracks.js?v=20260610-3";
 
 function normalizeTerm(term) {
   return term.trim().replace(/['`]/g, "'").replace(/\s+/g, " ").toLowerCase();
