@@ -1,169 +1,58 @@
-# Keep using this pattern:
+# Deploy
 
-feature branch → main → copy public folder → gh-pages
+## How it works now (automatic)
 
-And always use the separate folder:
+**Push to `main` → it deploys.** The `deploy` job in `.github/workflows/ci.yml`
+runs after the `static-checks` and `smoke` jobs pass, publishes the app shell from
+`apps/wordlover-pwa/public/` to the `gh-pages` branch, and GitHub Pages serves it at
+https://wordfan.app/.
 
-WordFan-gh-pages
+This means you can edit code, commit, and push from anywhere (including the iPhone
+Claude app driving this machine remotely) and the live site updates with no manual
+step on the Windows box.
 
-That avoids the deletion/locked-folder errors you had when switching branches inside the same working directory.
+What the job does:
 
-Best future workflow: **keep source work on `main` / feature branches, and keep deployment in a separate `gh-pages` worktree**. Do **not** keep switching the same folder between `main` and `gh-pages`; that caused the locked-folder cleanup problems.
+1. Copies the web shell from `public/` (excludes dev launchers `*.ps1`, build
+   scripts `*.py`, docs `*.md`, certs).
+2. **Carries `dictionary.sqlite` + `.zst` forward from the existing `gh-pages`
+   branch.** The ~32 MB dictionary is gitignored on `main` and CI has no source to
+   rebuild the full 100k-entry set, so it is never rebuilt for a code-only deploy.
+3. Verifies the carried dictionary's sha256 matches `dictionary-manifest.json` on
+   `main`. If they differ, the deploy **fails loudly** rather than shipping a broken
+   manifest/binary pair.
+4. Force-pushes a single orphan commit to `gh-pages` (keeps the branch from
+   accumulating 32 MB blobs in history).
 
-## One-time setup
+Re-deploy without a new commit: GitHub → Actions → CI → **Run workflow** on `main`
+(the job also accepts `workflow_dispatch`).
 
-From your normal repo folder:
+## The one case that still needs the Windows box: changing the dictionary
 
-```plaintext
-cd C:\Users\colin\Documents\WordFan
+The dictionary content rarely changes. When it does, CI can't rebuild it, so the
+auto-deploy guard will fail on purpose. Publish the new binary once locally:
 
-git fetch origin
-git worktree add ..\WordFan-gh-pages gh-pages
+```powershell
+# Rebuild the dictionary (see CLAUDE.md "Dictionary data pipeline"), which updates
+# apps/wordlover-pwa/public/dictionary-manifest.json, then commit that manifest to main.
+git add apps/wordlover-pwa/public/dictionary-manifest.json
+git commit -m "Bump dictionary to <version>"
 
+# Publish the new binary + manifest to gh-pages directly.
+powershell -NoProfile -ExecutionPolicy Bypass -File apps\wordlover-pwa\scripts\deploy-github-pages.ps1
 ```
 
-After this, you have two folders:
+After that, the dictionary on `gh-pages` matches the manifest on `main` again, and
+subsequent code-only pushes auto-deploy as normal.
 
-```plaintext
-C:\Users\colin\Documents\WordFan          # source repo: main / feature branches
-C:\Users\colin\Documents\WordFan-gh-pages # publish repo: gh-pages only
+## Verify a deploy
 
-```
-
-## Normal future workflow
-
-### 1. Work on a feature branch
-
-```plaintext
-cd C:\Users\colin\Documents\WordFan
-
-git checkout main
-git pull origin main
-
-git checkout -b feat/my-new-feature
-
-```
-
-Do your coding. Then test locally.
-
-### 2. Commit and push feature branch
-
-```plaintext
-git status
-git add .
-git commit -m "Describe the feature"
-git push -u origin feat/my-new-feature
-
-```
-
-### 3. Merge feature branch into `main`
-
-You can merge locally:
-
-```plaintext
-git checkout main
-git pull origin main
-git merge feat/my-new-feature
-git push origin main
-
-```
-
-Or use a GitHub PR. For your current personal workflow, local merge is okay.
-
-### 4. Deploy `main` public folder to `gh-pages`
-
-Stay in the source repo first:
-
-```plaintext
-cd C:\Users\colin\Documents\WordFan
-git checkout main
-git pull origin main
-```
-
-Then copy the app’s public folder into your `gh-pages` worktree:
-
-```plaintext
-cd C:\Users\colin\Documents\WordFan
-
-robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git /XF .git
-"wordfan.app" | Set-Content ..\WordFan-gh-pages\CNAME -NoNewline
-
-```
-
-Then publish from the `gh-pages` worktree:
-
-```plaintext
-cd ..\WordFan-gh-pages
-
-git status
-git add .
-git commit -m "Publish WordFan app"
-git push origin gh-pages
-
-```
-
-That final push publishes to:
-
-```plaintext
-https://wordfan.app/
-
-```
-
-## Best full command template
-
-Use this after your feature branch is ready:
-
-```plaintext
-cd C:\Users\colin\Documents\WordFan
-
-# Push feature branch
-git status
-git add .
-git commit -m "Your feature summary"
-git push -u origin HEAD
-
-# Merge to main
-$feature = git branch --show-current
-git checkout main
-git pull origin main
-git merge $feature
-git push origin main
-
-# Deploy public folder to gh-pages worktree
-robocopy .\apps\wordlover-pwa\public ..\WordFan-gh-pages /MIR /XD .git /XF .git
-"wordfan.app" | Set-Content ..\WordFan-gh-pages\CNAME -NoNewline
-
-cd ..\WordFan-gh-pages
-git status
-git add .
-git commit -m "Publish WordFan app"
-git push origin gh-pages
-cd ..\WordFan\
-
-```
-
-## After deploy, verify
-
-```plaintext
+```powershell
 gh api repos/colinzou-git/wordLover/pages --jq "{status: .status, html_url: .html_url, source: .source}"
-gh api repos/colinzou-git/wordLover/pages/builds --jq ".[0] | {status: .status, error: .error, created_at: .created_at, updated_at: .updated_at}"
-
+gh api repos/colinzou-git/wordLover/pages/builds --jq ".[0] | {status: .status, error: .error, updated_at: .updated_at}"
 ```
 
-## My recommendation
+## One-time GitHub setup (already done, for reference)
 
-Keep using this pattern:
-
-```plaintext
-feature branch → main → copy public folder → gh-pages
-
-```
-
-And always use the separate folder:
-
-```plaintext
-WordFan-gh-pages
-
-```
-
-That avoids the deletion/locked-folder errors you had when switching branches inside the same working directory.
+GitHub repo → Settings → Pages → Source = **Deploy from a branch**, branch =
+`gh-pages` / `(root)`, custom domain = `wordfan.app`, **Enforce HTTPS** on.

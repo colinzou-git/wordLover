@@ -81,3 +81,82 @@ jobs:
           name: test-results
           path: apps/wordlover-pwa/test-results/
           if-no-files-found: ignore
+
+  deploy:
+    name: Deploy to GitHub Pages (gh-pages)
+    needs: [static-checks, smoke]
+    # Only after checks pass, only for main (push or manual re-deploy).
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: deploy-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site (shell from main + dictionary carried from gh-pages)
+        run: |
+          set -euo pipefail
+          SRC=apps/wordlover-pwa/public
+          SITE="$RUNNER_TEMP/site"
+          rm -rf "$SITE"; mkdir -p "$SITE"
+
+          # Web shell only — drop dev launchers, build scripts, docs and certs.
+          rsync -a \
+            --exclude='*.ps1' --exclude='*.py' --exclude='*.md' \
+            --exclude='*.pem' --exclude='*.cer' --exclude='certs/' \
+            "$SRC"/ "$SITE"/
+
+          # The ~32 MB dictionary is gitignored on main and lives only on gh-pages.
+          # Carry the already-published binary forward so code-only pushes deploy
+          # without rebuilding it (CI has no source to rebuild the 100k-entry set).
+          git fetch --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
+          git show origin/gh-pages:dictionary.sqlite     > "$SITE/dictionary.sqlite"
+          git show origin/gh-pages:dictionary.sqlite.zst > "$SITE/dictionary.sqlite.zst"
+
+          # GitHub Pages config.
+          tr -d '\n' < CNAME > "$SITE/CNAME"
+          : > "$SITE/.nojekyll"
+
+      - name: Verify carried dictionary matches the manifest on main
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          MAN="$SITE/dictionary-manifest.json"
+          for key in sqlite zstd; do
+            file=$(jq -r ".$key.path"   "$MAN")
+            want=$(jq -r ".$key.sha256" "$MAN")
+            got=$(sha256sum "$SITE/$file" | cut -d' ' -f1)
+            if [ "$want" != "$got" ]; then
+              echo "::error::$file sha256 mismatch: manifest on main expects $want, dictionary on gh-pages is $got."
+              echo "The dictionary content changed but CI cannot rebuild the full set."
+              echo "Publish the new binary once from the Windows box, then re-push:"
+              echo "  powershell -File apps/wordlover-pwa/scripts/deploy-github-pages.ps1"
+              exit 1
+            fi
+          done
+          echo "Dictionary matches manifest ($(jq -r .dictionaryDataVersion "$MAN"))."
+
+      - name: Publish to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          cd "$SITE"
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Deploy WordFan from ${GITHUB_SHA:0:7}"
+          # Single orphan commit (force) keeps the gh-pages branch from accumulating
+          # 32 MB dictionary blobs in history; the local deploy script stays compatible.
+          git push -q --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          echo "Pushed to gh-pages — GitHub Pages will rebuild https://$(cat CNAME)/"
