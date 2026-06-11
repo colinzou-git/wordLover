@@ -3,12 +3,14 @@
 Simulates two devices signed into the same Google account by sharing one in-memory
 "Drive appDataFolder" between two separate browser contexts:
 
-  Device A: add 9 words -> Sync now -> uploads an encrypted snapshot to the mock Drive.
-  Device B: fresh/empty -> Sync now -> finds A's file, decrypts (same passphrase),
-            merges, and ends up with all 9 words.
+  Device A: add 9 words -> Sync now -> uploads a PLAIN-JSON learning-tracks backup to mock Drive.
+  Device B: fresh/empty -> Sync now -> finds A's file, reads it (no passphrase), merges by track
+            id, and ends up with all 9 words.
+  Device D: imports a backup as a NEW track, studies a word, Sync now -> the Drive backup contains
+            that imported track under `tracks`.
 
-This proves the end-to-end sync path (list -> read -> decrypt -> merge -> apply -> upload)
-and the cross-device encryption compatibility, without needing real Google/Drive.
+This proves the end-to-end sync path (list -> read -> merge -> apply -> upload) and that Google
+Drive backups are unencrypted plain JSON learning-tracks data, without needing real Google/Drive.
 """
 from __future__ import annotations
 
@@ -120,10 +122,10 @@ def handle_google(route):
 
 
 def extract_envelope(multipart_body: str) -> str:
-    # The encrypted envelope is the single-line JSON part containing the format marker.
+    # The plain-JSON envelope is the single-line JSON part carrying the learning-tracks format.
     for line in multipart_body.splitlines():
         line = line.strip()
-        if line.startswith("{") and "wordlover-user-data-aes-gcm-v1" in line:
+        if line.startswith("{") and "wordfan-learning-tracks-plain-v1" in line:
             return line
     # Fallback: last {...} blob.
     matches = re.findall(r"\{.*\}", multipart_body)
@@ -207,6 +209,29 @@ def main() -> int:
             failures.append(f"device A first sync should create, got {a_sync['info'].get('action')}")
         if drive_store["envelope"] is None:
             failures.append("device A did not upload an envelope to the mock Drive")
+        else:
+            try:
+                env = json.loads(drive_store["envelope"])
+            except Exception as exc:  # noqa: BLE001
+                env = {}
+                failures.append(f"device A Drive envelope is not valid JSON: {exc}")
+            if env.get("format") != "wordfan-learning-tracks-plain-v1":
+                failures.append(f"Drive envelope format should be wordfan-learning-tracks-plain-v1, got {env.get('format')!r}")
+            payload = env.get("payload") or {}
+            if payload.get("app") != "WordFan":
+                failures.append(f"Drive payload app should be 'WordFan', got {payload.get('app')!r}")
+            tracks = payload.get("tracks") or {}
+            if "track_default" not in tracks:
+                failures.append(f"Drive payload should carry track_default, got tracks={list(tracks.keys())}")
+            else:
+                vocab = (tracks["track_default"].get("wordLists") or {}).get("vocabulary") or []
+                if len(vocab) != 9:
+                    failures.append(f"Drive payload track_default should hold 9 words, got {len(vocab)}")
+            # Plain JSON: there must be no ciphertext/iv/salt/tag fields anywhere in the envelope.
+            blob = drive_store["envelope"].lower()
+            for marker in ("ciphertext", '"iv"', '"salt"', '"tag"', "aes-gcm", "passphrase"):
+                if marker in blob:
+                    failures.append(f"Drive envelope must be plain JSON but contains {marker!r}")
         ctx_a.close()
 
         # --- Device B: fresh/empty, sync should pull A's 9 words ---
@@ -322,6 +347,88 @@ def main() -> int:
             if not info.get("error"):
                 failures.append("lastSyncInfo.error was not captured for a failed sync")
         ctx_c.close()
+
+        # --- Device D: import a backup as a NEW track, study a word, sync -> Drive carries it ---
+        drive_mode["value"] = "normal"
+        import_backup = {
+            "schemaVersion": 1,
+            "app": "WordFan",
+            "exportedAt": "2026-06-05T00:00:00.000Z",
+            "activeTrackId": "track_src",
+            "globalSettings": {},
+            "tracks": {
+                "track_src": {
+                    "id": "track_src",
+                    "name": "My Imported Track",
+                    "wordLists": {"vocabulary": [{
+                        "term": "wanderlust", "normalizedTerm": "wanderlust",
+                        "savedAt": "2026-06-01T00:00:00.000Z",
+                        "review": {"dueAt": "2026-07-01T00:00:00.000Z", "fsrsCard": None},
+                    }]},
+                    "spellingLists": {"spelling": []},
+                    "reviewLogs": [], "spellingReviewLogs": [],
+                    "customWords": [], "memorizedWords": [], "searchHistory": [],
+                },
+            },
+        }
+        ctx_d = browser.new_context(service_workers="block")
+        page_d = setup_page(ctx_d)
+        boot(page_d, base, "d")
+        d_import = page_d.evaluate(
+            """async (backupText) => {
+                const file = new File([backupText], 'wordfan-backup.json', { type: 'application/json' });
+                const result = await window.WordLoverApp.learningTracks.importForTest(file);
+                // Study a brand-new word in the freshly-imported (now active) track.
+                await window.WordLoverApp.saveManualVocabularyItem({
+                    term: 'newword', normalizedTerm: 'newword',
+                    english: ['a new word'], chinese: ['新词'], phonetic: ''
+                });
+                return {
+                    activeTrackName: result.activeTrackName,
+                    vocab: window.WordLoverApp.getVocabulary().map((v) => v.normalizedTerm).sort(),
+                };
+            }""",
+            json.dumps(import_backup),
+        )
+        print(f"device D import: {d_import}", flush=True)
+        if "My Imported Track" not in (d_import.get("activeTrackName") or ""):
+            failures.append(f"device D should switch to the imported track, active={d_import.get('activeTrackName')!r}")
+        if d_import.get("vocab") != ["newword", "wanderlust"]:
+            failures.append(f"imported active track should hold wanderlust + newword, got {d_import.get('vocab')}")
+
+        d_sync = page_d.evaluate(
+            """async () => {
+                try { await window.WordLoverApp.sync.now(); return { ok: true, info: window.WordLoverApp.sync.lastInfo() }; }
+                catch (e) { return { ok: false, error: e.message }; }
+            }"""
+        )
+        print(f"device D sync: {d_sync}", flush=True)
+        if not d_sync.get("ok"):
+            failures.append(f"device D sync failed: {d_sync.get('error')}")
+        # The Drive backup must now contain the imported track (by name) with its words under `tracks`.
+        try:
+            env_d = json.loads(drive_store["envelope"] or "{}")
+        except Exception as exc:  # noqa: BLE001
+            env_d = {}
+            failures.append(f"device D Drive envelope is not valid JSON: {exc}")
+        if env_d.get("format") != "wordfan-learning-tracks-plain-v1":
+            failures.append(f"device D Drive envelope format wrong: {env_d.get('format')!r}")
+        tracks_d = (env_d.get("payload") or {}).get("tracks") or {}
+        imported_track = next((t for t in tracks_d.values() if t.get("name") == "My Imported Track"), None)
+        if imported_track is None:
+            failures.append(f"Drive backup missing imported track; track names={[t.get('name') for t in tracks_d.values()]}")
+        else:
+            terms = sorted((v.get("normalizedTerm") for v in (imported_track.get("wordLists") or {}).get("vocabulary") or []))
+            if terms != ["newword", "wanderlust"]:
+                failures.append(f"Drive imported track should carry wanderlust + newword, got {terms}")
+        if "track_default" not in tracks_d:
+            failures.append(f"Drive backup should still carry the merged default track; got {list(tracks_d.keys())}")
+        # Plain JSON end-to-end (no encryption markers) for the imported-track sync too.
+        blob_d = (drive_store["envelope"] or "").lower()
+        for marker in ("ciphertext", '"iv"', '"salt"', "aes-gcm", "passphrase"):
+            if marker in blob_d:
+                failures.append(f"device D Drive envelope must be plain JSON but contains {marker!r}")
+        ctx_d.close()
 
         browser.close()
 

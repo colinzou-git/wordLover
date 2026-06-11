@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260610-1";
+} from "./fsrs-scheduler.js?v=20260610-2";
 
 import {
   isEncryptedRecord,
@@ -11,14 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-  encryptJsonWithPassphrase,
-  decryptJsonWithPassphrase,
-} from "./persistence.js?v=20260610-1";
+} from "./persistence.js?v=20260610-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260610-1";
+} from "./spelling.js?v=20260610-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260610-1";
+} from "./ui-preferences.js?v=20260610-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260610-1";
+} from "./review-state.js?v=20260610-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +57,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260610-1";
+} from "./study-one-more.js?v=20260610-2";
 
 import {
   studyEventTrack,
@@ -70,11 +68,12 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260610-1";
+  mergeLearningTracksBackups as _mergeLearningTracksBackups,
+} from "./sync.js?v=20260610-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260610-1";
+} from "./goal-forecast.js?v=20260610-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,7 +85,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260610-1";
+} from "./tracks.js?v=20260610-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -223,9 +222,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260610-1-v127";
+const APP_VERSION = "0.6.2-product.20260610-2-v128";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v127";
+const SHELL_CACHE_VERSION = "wordlover-shell-v128";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -370,8 +369,6 @@ let googleClientIdOverride = "";
 let dataDecryptBlock = null;
 let dataDecryptWarningOpen = false;
 let googleReconnectPromise = null;
-let backupPassphraseSession = null;
-let backupPassphrasePromptForTest = null;
 const recordStoreWriteStatsForTest = {
   rewrites: 0,
   puts: Object.create(null),
@@ -831,122 +828,10 @@ function syncEncryptionNotice() {
   return "";
 }
 
-async function createBackupPassphraseVerifier(passphrase) {
-  return {
-    format: "wordlover-backup-passphrase-check-v1",
-    createdAt: nowIso(),
-    ...(await encryptJsonWithPassphrase({ ok: true, app: "wordlover-backup-passphrase-check" }, passphrase)),
-  };
-}
-
-async function verifyBackupPassphrase(passphrase, verifier) {
-  if (!verifier?.data) return false;
-  try {
-    const payload = await decryptJsonWithPassphrase(verifier, passphrase);
-    return payload?.ok === true && payload?.app === "wordlover-backup-passphrase-check";
-  } catch {
-    return false;
-  }
-}
-
-async function setBackupPassphraseForTest(passphrase) {
-  backupPassphraseSession = String(passphrase ?? "");
-  await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(backupPassphraseSession));
-}
-
-async function clearBackupPassphraseForTest() {
-  backupPassphraseSession = null;
-  backupPassphrasePromptForTest = null;
-  await saveValue("backupPassphraseVerifier", null);
-  await saveValue("backupPassphrasePersisted", null);
-}
-
-function validateBackupPassphrase(passphrase, confirm, { create = false } = {}) {
-  if (!create) return null;
-  const POLICY_MSG = "Backup passphrase is too simple. Use at least 12 characters and include uppercase letters, lowercase letters, numbers, and symbols, or use a longer 20+ character passphrase made of several words.";
-  if (passphrase.length < 12) return POLICY_MSG;
-  const lower = passphrase.toLowerCase();
-  if (["password", "wordfan", "wordlover", "12345678"].some((b) => lower === b)) return POLICY_MSG;
-  if (/^(.)\1+$/.test(passphrase)) return POLICY_MSG;
-  const chars = [...passphrase];
-  if (chars.length >= 2 && chars.every((c, i) => i === 0 || c.charCodeAt(0) - chars[i - 1].charCodeAt(0) === 1)) return POLICY_MSG;
-  if (passphrase.length < 20) {
-    const categories = [/[A-Z]/.test(passphrase), /[a-z]/.test(passphrase), /[0-9]/.test(passphrase), /[^A-Za-z0-9]/.test(passphrase)].filter(Boolean).length;
-    if (categories < 3) return POLICY_MSG;
-  }
-  if (passphrase !== confirm) return "Backup passphrases do not match.";
-  return null;
-}
-
-async function promptForBackupPassphrase({ create = false, reason = "Google Drive backup" } = {}) {
-  if (backupPassphrasePromptForTest) {
-    const response = await backupPassphrasePromptForTest({ create, reason });
-    const passphrase = String(typeof response === "object" && response !== null ? response.passphrase ?? "" : response ?? "");
-    const confirm = String(typeof response === "object" && response !== null ? response.confirm ?? passphrase : passphrase);
-    if (create) {
-      const err = validateBackupPassphrase(passphrase, confirm, { create: true });
-      if (err) throw new Error(err);
-    }
-    return passphrase;
-  }
-  const values = await showModal({
-    title: create ? "Create backup passphrase" : "Enter backup passphrase",
-    body: create
-      ? `${reason} needs a backup passphrase. Use at least 12 characters. Include at least 3 of: uppercase letters, lowercase letters, numbers, symbols. Or use a 20+ character phrase with several words. WordFan cannot recover it if lost.`
-      : `${reason} needs your backup passphrase to decrypt or encrypt the Drive backup.`,
-    submitText: create ? "Save passphrase" : "Continue",
-    cancelText: "Cancel",
-    fields: [
-      { id: "passphrase", label: "Backup passphrase", type: "password", autocomplete: "new-password", required: true },
-      ...(create ? [{ id: "confirm", label: "Confirm passphrase", type: "password", autocomplete: "new-password", required: true }] : []),
-    ],
-    ...(create ? { validate: (vals) => validateBackupPassphrase(String(vals.passphrase ?? ""), String(vals.confirm ?? ""), { create: true }) } : {}),
-  });
-  if (!values) throw new Error("Google Drive sync canceled because no backup passphrase was entered.");
-  return String(values.passphrase ?? "");
-}
-
-async function getCloudBackupPassphrase({ reason = "Google Drive backup", allowCreate = true } = {}) {
-  if (CONFIG.allowDefaultCloudBackupPassphrase === true) {
-    return { passphrase: await getLocalDataPassphrase(), source: "development-override-local-passphrase" };
-  }
-  if (backupPassphraseSession) {
-    recordAuthDiag("backup-passphrase-source", { path: "session" });
-    return { passphrase: backupPassphraseSession, source: "user-backup-passphrase" };
-  }
-  // Recover session from persisted storage before prompting. backupPassphrasePersisted is only
-  // written after successful verification, so it is safe to use without re-verifying.
-  const persisted = await loadValue("backupPassphrasePersisted", null);
-  if (persisted) {
-    recordAuthDiag("backup-passphrase-source", { path: "persisted-recovered" });
-    backupPassphraseSession = persisted;
-    return { passphrase: persisted, source: "user-backup-passphrase" };
-  }
-  const verifier = await loadValue("backupPassphraseVerifier", null);
-  if (!verifier) {
-    if (!allowCreate) {
-      recordAuthDiag("backup-passphrase-source", { path: "prompt-unverified", reason });
-      const passphrase = await promptForBackupPassphrase({ create: false, reason });
-      backupPassphraseSession = passphrase;
-      // Don't persist yet — passphrase is unverified until decryption succeeds.
-      return { passphrase, source: "unverified-user-backup-passphrase" };
-    }
-    recordAuthDiag("backup-passphrase-source", { path: "prompt-create", reason });
-    const passphrase = await promptForBackupPassphrase({ create: true, reason });
-    await saveValue("backupPassphraseVerifier", await createBackupPassphraseVerifier(passphrase));
-    backupPassphraseSession = passphrase;
-    await saveValue("backupPassphrasePersisted", passphrase);
-    return { passphrase, source: "user-backup-passphrase" };
-  }
-  recordAuthDiag("backup-passphrase-source", { path: "prompt-verify", reason });
-  const passphrase = await promptForBackupPassphrase({ create: false, reason });
-  if (!(await verifyBackupPassphrase(passphrase, verifier))) {
-    throw new Error("Backup passphrase is incorrect. Local data was not changed and Drive backup was not overwritten.");
-  }
-  backupPassphraseSession = passphrase;
-  await saveValue("backupPassphrasePersisted", passphrase);
-  return { passphrase, source: "user-backup-passphrase" };
-}
+// Cloud-backup passphrase code was removed: Google Drive backups are plain JSON and never
+// encrypted, so nothing in the sync/import/export/restore paths derives, prompts for, or
+// verifies a backup passphrase. Local IndexedDB encryption (getEncryptionKey / wrappedDek)
+// is unrelated and stays internal-only. See [[feedback_workflow]] / the cloud-sync notice.
 
 function showDataDecryptWarning() {
   if (!dataDecryptBlock || dataDecryptWarningOpen) return;
@@ -2742,6 +2627,7 @@ async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese
   await getDeviceId();
   const now = nowIso();
   const existing = getVocabularyItem(term);
+  let item;
   if (existing) {
     existing.archivedAt = null;
     existing.updatedAt = now;
@@ -2754,8 +2640,9 @@ async function saveManualVocabularyItem({ term, normalizedTerm, english, chinese
     existing.isSynced = false;
     existing.lastSaveReason = "manual-unknown";
     existing.review = normalizeReviewState(existing.review ?? { dueAt: now });
+    item = existing;
   } else {
-    const item = markDebugRecord({
+    item = markDebugRecord({
       id: normalizedTerm,
       term,
       normalizedTerm,
@@ -5409,9 +5296,7 @@ function authDiagnosticsSnapshot() {
       passphraseSource: getLocalDataPassphraseSource(),
       warning: syncEncryptionNotice(),
     },
-    backupPassphrase: {
-      hasSession: Boolean(backupPassphraseSession),
-    },
+    cloudBackup: { format: "wordfan-learning-tracks-plain-v1", encrypted: false, passphrase: false },
     lastSync: lastSyncInfo,
     events: authDiagnostics.slice(),
   };
@@ -5716,10 +5601,11 @@ function buildUserDataSnapshot() {
   };
 }
 
-// Cloud sync, checkpoints, and local export all share one plain envelope. Cloud backups are no
-// longer encrypted, so this never derives or prompts for a backup passphrase. `options` is accepted
-// (and ignored) only so legacy call sites passing { purpose: "cloud" } keep working.
-async function encryptSnapshotPayload(snapshot, options = {}) {
+// Local checkpoints (and the flat "Export state" diagnostic) wrap the active-track snapshot in a
+// plain, unencrypted envelope. This never derives or prompts for a passphrase. Google Drive sync
+// uses the separate learning-tracks envelope (wrapLearningTracksBackup) instead. `options` is
+// accepted (and ignored) only so legacy call sites keep working.
+async function wrapPlainBackupPayload(snapshot, options = {}) {
   void options;
   return {
     app: "wordlover",
@@ -5731,14 +5617,14 @@ async function encryptSnapshotPayload(snapshot, options = {}) {
   };
 }
 
-async function decryptSnapshotPayload(envelope, options = {}) {
+async function unwrapPlainBackupPayload(envelope, options = {}) {
   void options;
   if (envelope?.format === "wordlover-user-data-plain-v1") {
     return envelope.payload;
   }
   // Both legacy encrypted formats were written by older versions that encrypted cloud backups.
-  // WordFan no longer encrypts cloud data and never prompts for a backup passphrase; surface a
-  // tagged error so sync can offer to overwrite and restore can show a legacy-backup message.
+  // WordFan no longer encrypts backups and never prompts for a backup passphrase; surface a
+  // tagged error so callers can show a legacy-backup message and offer to overwrite.
   if (envelope?.format === "wordlover-cloud-backup-aes-gcm-v2"
       || envelope?.format === "wordlover-user-data-aes-gcm-v1") {
     const error = new Error("This Drive backup is a legacy encrypted backup. WordFan no longer encrypts cloud backups and cannot read it automatically.");
@@ -5746,6 +5632,151 @@ async function decryptSnapshotPayload(envelope, options = {}) {
     throw error;
   }
   throw new Error("Drive backup format is not supported.");
+}
+
+// ── Google Drive learning-tracks backup envelope (plain JSON, never encrypted) ──────────────
+const LEARNING_TRACKS_BACKUP_FORMAT = "wordfan-learning-tracks-plain-v1";
+
+// Wrap a learning-tracks backup (tracks.js buildBackup shape) in the Drive envelope. Plain JSON:
+// the readable payload sits under `payload`, with no ciphertext/iv/salt/tag fields anywhere.
+function wrapLearningTracksBackup(backup) {
+  return {
+    app: "wordlover",
+    format: LEARNING_TRACKS_BACKUP_FORMAT,
+    appVersion: APP_VERSION,
+    exportedAt: nowIso(),
+    payload: backup,
+  };
+}
+
+// Read any Drive envelope into a validated learning-tracks backup:
+//   • wordfan-learning-tracks-plain-v1 → validate the payload directly.
+//   • wordlover-user-data-plain-v1 (old flat snapshot) → validateBackup migrates the legacy
+//     "wordlover" snapshot into a single imported track (tracks.js legacySnapshotToBackup).
+//   • legacy AES-GCM formats → throw a tagged error (no passphrase prompt) so callers can offer
+//     to overwrite the Drive backup with current local data.
+function unwrapDriveBackup(envelope) {
+  if (envelope?.format === LEARNING_TRACKS_BACKUP_FORMAT) {
+    return validateBackup(envelope.payload);
+  }
+  if (envelope?.format === "wordlover-user-data-plain-v1") {
+    return validateBackup(envelope.payload);
+  }
+  if (envelope?.format === "wordlover-cloud-backup-aes-gcm-v2"
+      || envelope?.format === "wordlover-user-data-aes-gcm-v1") {
+    const error = new Error("This Drive backup is a legacy encrypted backup. WordFan no longer encrypts cloud backups and cannot read it automatically.");
+    error.legacyEncryptedBackup = true;
+    throw error;
+  }
+  throw new Error("Drive backup format is not supported.");
+}
+
+// appNowMs()-aware wrapper so merged review state respects debug time scaling.
+function mergeLearningTracksBackups(localBackup, remoteBackup) {
+  return _mergeLearningTracksBackups(localBackup, remoteBackup, appNowMs());
+}
+
+// Apply a merged/validated learning-tracks backup to local storage: rewrite EVERY track's records
+// (the merged backup is the union of local + remote, so a full atomic replace can never drop a
+// track), the registry, per-track meta/history, and the allow-listed global settings. Records are
+// re-encrypted for IndexedDB; the backup itself stays plain JSON. Creates a pre-restore checkpoint
+// unless disabled.
+async function applyLearningTracksBackup(backup, options = {}) {
+  const { createPreRestoreCheckpoint = true, allowDuringDecryptBlock = false } = options;
+  assertUserDataWritable("Applying learning-tracks backup", { allowDuringDecryptBlock });
+  const validated = validateBackup(backup);
+  if (createPreRestoreCheckpoint && !dataDecryptBlock) await createCheckpoint("pre-restore");
+
+  const recordGroups = [
+    { storeName: VOCABULARY_STORE, field: "vocabulary", keyOf: (item) => item.normalizedTerm },
+    { storeName: STUDY_EVENT_STORE, field: "studyEvents", keyOf: (event) => event.eventKey ?? event.id },
+    { storeName: SPELLING_STORE, field: "spelling", keyOf: (item) => item.normalizedTerm },
+    { storeName: SPELLING_EVENT_STORE, field: "spellingEvents", keyOf: (event) => event.eventKey ?? event.id },
+    { storeName: USER_DICTIONARY_STORE, field: "userDictionary", keyOf: (entry) => entry.normalizedTerm },
+    { storeName: KNOWN_STORE, field: "known", keyOf: (record) => record.normalizedTerm },
+  ];
+
+  const registryTracks = {};
+  const kvValues = [];
+  const encryptedRecords = [];
+  for (const [id, track] of Object.entries(validated.tracks)) {
+    const records = trackRecords(track);
+    registryTracks[id] = {
+      id,
+      name: track.name,
+      createdAt: track.createdAt ?? nowIso(),
+      updatedAt: track.updatedAt ?? nowIso(),
+      ...(track.importedAt ? { importedAt: track.importedAt } : {}),
+    };
+    kvValues.push([trackMetaKey(id), {
+      studyGoals: normalizeStudyGoals(records.goals),
+      studyOneMoreFilter: normalizeStudyOneMoreFilter(records.studyOneMoreFilter ?? {}),
+    }]);
+    kvValues.push([trackHistoryKey(id), Array.isArray(records.history) ? records.history : []]);
+    for (const group of recordGroups) {
+      for (const source of records[group.field] ?? []) {
+        const baseKey = group.keyOf(source);
+        if (!baseKey) continue;
+        encryptedRecords.push({
+          storeName: group.storeName,
+          key: recordKey(baseKey, id),
+          value: await encryptValue({ ...source, learningTrackId: id }),
+        });
+      }
+    }
+  }
+
+  const registry = {
+    schemaVersion: 1,
+    activeTrackId: validated.activeTrackId,
+    tracks: registryTracks,
+  };
+  kvValues.push([USER_DATA_ROOT_KEY, registry]);
+
+  // Global settings (theme/font/etc.) from the backup, falling back to current values.
+  const settings = validated.globalSettings ?? {};
+  const nextTheme = THEME_IDS.includes(settings.theme) ? settings.theme : theme;
+  const nextFontScale = normalizeFontScale(settings.fontScale ?? fontScale);
+  const nextOnReturnAction = normalizeOnReturnAction(settings.onReturnAction ?? onReturnAction);
+  const nextSpeakOnReturn = settings.speakOnReturn !== undefined ? Boolean(settings.speakOnReturn) : speakOnReturn;
+  const nextUiPreferences = normalizeUiPreferences(settings.uiPreferences ?? currentUiPreferences());
+  kvValues.push(["theme", nextTheme]);
+  kvValues.push(["fontScale", nextFontScale]);
+  kvValues.push(["onReturnAction", nextOnReturnAction]);
+  kvValues.push(["speakOnReturn", nextSpeakOnReturn]);
+  kvValues.push(["uiPreferences", nextUiPreferences]);
+
+  const db = await getUserDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([...TRACK_RECORD_STORES, STORE], "readwrite");
+    // Full replace: clear every track-record store, then write the merged union.
+    for (const storeName of TRACK_RECORD_STORES) tx.objectStore(storeName).clear();
+    for (const entry of encryptedRecords) tx.objectStore(entry.storeName).put(entry.value, entry.key);
+    const kvStore = tx.objectStore(STORE);
+    for (const [key, value] of kvValues) kvStore.put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("Learning-tracks backup transaction aborted."));
+  });
+  if (allowDuringDecryptBlock) clearDataDecryptBlock();
+
+  userDataRoot = registry;
+  activeLearningTrackId = registry.activeTrackId;
+  const activeMeta = (await loadTrackMeta(activeLearningTrackId)) ?? {};
+  studyGoals = normalizeStudyGoals(activeMeta.studyGoals ?? null);
+  applyStudyOneMoreFilter(activeMeta.studyOneMoreFilter ?? {});
+  await loadActiveTrackIntoMemory({ rebuildReviewState: true });
+  theme = nextTheme;
+  fontScale = nextFontScale;
+  onReturnAction = nextOnReturnAction;
+  speakOnReturn = nextSpeakOnReturn;
+  applyUiPreferences(nextUiPreferences);
+  applyTheme(theme);
+  applyFontScale(fontScale);
+  renderAllTrackViews();
+  renderMetrics();
+  renderAppMenu();
+  return { trackCount: Object.keys(registryTracks).length, activeTrackId: activeLearningTrackId };
 }
 
 async function listCheckpoints() {
@@ -5765,7 +5796,7 @@ async function createCheckpoint(reason = "manual") {
   assertUserDataWritable(`Creating checkpoint "${reason}"`);
   const snapshot = buildUserDataSnapshot();
   const integrity = validateUserDataSnapshot(snapshot);
-  const envelope = await encryptSnapshotPayload(snapshot);
+  const envelope = await wrapPlainBackupPayload(snapshot);
   const createdAt = nowIso();
   const id = `checkpoint-${createdAt.replace(/[:.]/g, "-")}-${reason.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`;
   const checkpoint = {
@@ -5807,7 +5838,7 @@ async function rollbackLatestCheckpoint() {
     return null;
   }
   await createCheckpoint("pre-rollback");
-  const snapshot = await decryptSnapshotPayload(latest.envelope);
+  const snapshot = await unwrapPlainBackupPayload(latest.envelope);
   await applyUserDataSnapshot(snapshot, { createPreRestoreCheckpoint: false });
   checkpointStatus.textContent = `Rolled back to checkpoint from ${latest.createdAt}.`;
   return latest;
@@ -6066,6 +6097,30 @@ async function syncToGoogleDrive() {
   }
 }
 
+// Active, non-archived vocabulary across every track in a learning-tracks backup — used for
+// the user-facing "N words" sync counts.
+function totalTrackVocabCount(backup) {
+  let count = 0;
+  for (const track of Object.values(backup?.tracks ?? {})) {
+    count += (track.wordLists?.vocabulary ?? []).filter((item) => item && !item.archivedAt).length;
+  }
+  return count;
+}
+
+// PATCH an existing Drive file with a plain-JSON envelope. Sends If-Match when an ETag is known
+// so a concurrent change is rejected rather than silently clobbered.
+async function uploadDriveBackup(fileId, envelope, etagSource) {
+  const headers = { "Content-Type": "application/json" };
+  if (etagSource?.etag) headers["If-Match"] = etagSource.etag;
+  const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(envelope),
+  });
+  if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
 async function syncToGoogleDriveInner() {
   googleAuthStatus.textContent = "Checking Google Drive for existing backup...";
   const fileName = CONFIG.googleDriveFileName ?? "wordlover-user-data.json";
@@ -6074,101 +6129,90 @@ async function syncToGoogleDriveInner() {
   lastSyncInfo.filesFound = snapshots.length;
   lastSyncInfo.action = existing?.id ? "merge" : "create";
 
-  let snapshotToUpload;
-  let mergedSnapshotToApply = null;
+  // The whole learning-track registry is the unit of sync now (not just the active track), so an
+  // imported track's identity travels to Drive and back.
+  const localBackup = await buildLearningTracksBackup();
+  let backupToUpload = localBackup;
+  let mergedBackupToApply = null;
+
   if (existing?.id) {
     lastSyncInfo.stage = "read";
     const readResponse = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${existing.id}?alt=media`);
     if (!readResponse.ok) throw new Error(`Google Drive read failed: ${readResponse.status} ${await readResponse.text()}`);
     const remoteEnvelope = await readResponse.json();
-    let remoteSnapshot = null;
+    let remoteBackup = null;
     lastSyncInfo.stage = "decrypt";
     try {
-      remoteSnapshot = await decryptSnapshotPayload(remoteEnvelope);
+      // Reads the new learning-tracks envelope and migrates an old flat plain backup; legacy
+      // encrypted backups throw (handled below) without ever prompting for a passphrase.
+      remoteBackup = unwrapDriveBackup(remoteEnvelope);
       lastSyncInfo.decrypted = true;
-    } catch (decryptError) {
+    } catch (readError) {
+      if (!readError?.legacyEncryptedBackup) throw readError;
       lastSyncInfo.decrypted = false;
-      // Legacy encrypted backup (or otherwise unreadable) — offer to replace it with local plain
-      // data. No backup passphrase is requested.
       const confirmed = await showModal({
         title: "Cannot read existing Drive backup",
-        body: `The Drive backup is a legacy encrypted backup and cannot be read by this version. You can overwrite it with your current local data (${vocabularyItems.length} word(s)), or cancel and delete the backup manually via drive.google.com/drive/appdata.`,
-        submitText: `Overwrite Drive backup with local data`,
+        body: `The Drive backup is a legacy encrypted backup and can no longer be read automatically (WordFan stores backups as plain JSON now). You can overwrite it with your current local data, or cancel and delete the backup manually via drive.google.com/drive/appdata.`,
+        submitText: "Overwrite Drive backup with local data",
         cancelText: "Cancel",
         danger: true,
       });
-      if (!confirmed) throw new Error(decryptError instanceof Error ? decryptError.message : "Drive backup could not be read.");
-      // Upload local data only — skip merge.
-      snapshotToUpload = buildUserDataSnapshot();
-      lastSyncInfo.mergedCount = vocabularyItems.length;
+      if (!confirmed) throw new Error(readError.message);
       lastSyncInfo.action = "overwrite";
+      lastSyncInfo.mergedCount = totalTrackVocabCount(localBackup);
       googleAuthStatus.textContent = "Overwriting Drive backup with local data...";
       lastSyncInfo.stage = "upload";
-      const snapshotEnvelope = await encryptSnapshotPayload(snapshotToUpload);
-      const uploadHeaders = { "Content-Type": "application/json" };
-      const overwriteResponse = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
-        method: "PATCH",
-        headers: uploadHeaders,
-        body: JSON.stringify(snapshotEnvelope),
-      });
-      if (!overwriteResponse.ok) throw new Error(`Google Drive sync failed: ${overwriteResponse.status} ${await overwriteResponse.text()}`);
-      const overwriteResult = await overwriteResponse.json();
+      const overwriteResult = await uploadDriveBackup(existing.id, wrapLearningTracksBackup(localBackup), existing);
       await recordSyncSummary(overwriteResult);
-      googleAuthStatus.textContent = `Drive backup replaced with ${vocabularyItems.length} local word(s).`;
+      googleAuthStatus.textContent = [
+        `Drive backup replaced with your current WordFan data (${lastSyncInfo.mergedCount} word(s)).`,
+        syncEncryptionNotice(),
+      ].filter(Boolean).join(" ");
       driveSyncState = "synced";
       syncStatus.textContent = "Synced";
       return overwriteResult;
     }
-    lastSyncInfo.remoteCount = Array.isArray(remoteSnapshot.vocabularyItems) ? remoteSnapshot.vocabularyItems.length : 0;
-    googleAuthStatus.textContent = "Merging Drive backup with local data...";
-    mergedSnapshotToApply = mergeSnapshots(buildUserDataSnapshot(), remoteSnapshot);
-    snapshotToUpload = mergedSnapshotToApply;
-    lastSyncInfo.mergedCount = Array.isArray(mergedSnapshotToApply.vocabularyItems) ? mergedSnapshotToApply.vocabularyItems.length : 0;
+    lastSyncInfo.remoteCount = totalTrackVocabCount(remoteBackup);
+    googleAuthStatus.textContent = "Merging Drive backup with local tracks...";
+    lastSyncInfo.stage = "merge";
+    mergedBackupToApply = mergeLearningTracksBackups(localBackup, remoteBackup);
+    backupToUpload = mergedBackupToApply;
+    lastSyncInfo.mergedCount = totalTrackVocabCount(mergedBackupToApply);
   } else {
-    snapshotToUpload = buildUserDataSnapshot();
-    lastSyncInfo.mergedCount = vocabularyItems.length;
+    lastSyncInfo.mergedCount = totalTrackVocabCount(localBackup);
   }
 
-  googleAuthStatus.textContent = "Uploading merged snapshot...";
+  googleAuthStatus.textContent = "Uploading learning-tracks backup...";
   lastSyncInfo.stage = "upload";
-  const snapshotEnvelope = await encryptSnapshotPayload(snapshotToUpload);
+  const envelope = wrapLearningTracksBackup(backupToUpload);
+
   if (existing?.id) {
     lastSyncInfo.stage = "revision-check";
     const latestMetadata = await getGoogleDriveSnapshotMetadata(existing.id);
     assertDriveRevisionUnchanged(existing, latestMetadata);
     lastSyncInfo.stage = "upload";
-    const uploadHeaders = { "Content-Type": "application/json" };
-    if (latestMetadata.etag) uploadHeaders["If-Match"] = latestMetadata.etag;
-    const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}/${existing.id}?uploadType=media&fields=id,name,modifiedTime,size,headRevisionId`, {
-      method: "PATCH",
-      headers: uploadHeaders,
-      body: JSON.stringify(snapshotEnvelope),
-    });
-    if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
-    const resultData = await response.json();
-    if (mergedSnapshotToApply) {
+    const resultData = await uploadDriveBackup(existing.id, envelope, latestMetadata);
+    if (mergedBackupToApply) {
       googleAuthStatus.textContent = "Checkpointing before applying merged Drive data...";
       lastSyncInfo.stage = "checkpoint";
       await createCheckpoint("pre-sync-merge");
       googleAuthStatus.textContent = "Applying merged Drive data locally...";
       lastSyncInfo.stage = "apply";
-      await applyUserDataSnapshot(mergedSnapshotToApply, { createPreRestoreCheckpoint: false });
+      await applyLearningTracksBackup(mergedBackupToApply, { createPreRestoreCheckpoint: false });
     }
     await recordSyncSummary(resultData);
-    const notice = syncEncryptionNotice();
+    const trackCount = Object.keys(backupToUpload.tracks ?? {}).length;
     googleAuthStatus.textContent = [
-      `Synced. Found ${lastSyncInfo.filesFound} Drive backup(s); it had ${lastSyncInfo.remoteCount} word(s). After merge you have ${lastSyncInfo.mergedCount} word(s).`,
-      notice,
+      `Synced. Found ${lastSyncInfo.filesFound} Drive backup(s) with ${lastSyncInfo.remoteCount} word(s). After merge you have ${lastSyncInfo.mergedCount} word(s) across ${trackCount} track(s).`,
+      syncEncryptionNotice(),
     ].filter(Boolean).join(" ");
     driveSyncState = "synced";
     syncStatus.textContent = "Synced";
     return resultData;
   }
-  const metadata = {
-    name: fileName,
-    parents: ["appDataFolder"],
-    mimeType: "application/json",
-  };
+
+  // First backup for this account: multipart create.
+  const metadata = { name: fileName, parents: ["appDataFolder"], mimeType: "application/json" };
   const boundary = `wordlover-${Date.now()}`;
   const body = [
     `--${boundary}`,
@@ -6178,7 +6222,7 @@ async function syncToGoogleDriveInner() {
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
     "",
-    JSON.stringify(snapshotEnvelope),
+    JSON.stringify(envelope),
     `--${boundary}--`,
   ].join("\r\n");
   const response = await googleFetch(`${GOOGLE_DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size,headRevisionId`, {
@@ -6189,11 +6233,10 @@ async function syncToGoogleDriveInner() {
   if (!response.ok) throw new Error(`Google Drive sync failed: ${response.status} ${await response.text()}`);
   const resultData = await response.json();
   await recordSyncSummary(resultData);
-  const uploadMessage = lastSyncInfo.localCountBefore === 0
+  const uploadMessage = lastSyncInfo.localCountBefore === 0 && lastSyncInfo.mergedCount === 0
     ? `No existing Drive backup found in this account, and this device has 0 words — nothing to sync yet. Add words (or Sync on the device that has them) first. If the other device IS signed into the same Google account here, check both devices use the SAME OAuth client ID.`
-    : `No existing Drive backup found — uploaded your ${lastSyncInfo.localCountBefore} local word(s) as the first backup.`;
-  const notice = syncEncryptionNotice();
-  googleAuthStatus.textContent = [uploadMessage, notice].filter(Boolean).join(" ");
+    : `No existing Drive backup found — uploaded your ${lastSyncInfo.mergedCount} word(s) as the first backup.`;
+  googleAuthStatus.textContent = [uploadMessage, syncEncryptionNotice()].filter(Boolean).join(" ");
   driveSyncState = "synced";
   syncStatus.textContent = "Synced";
   return resultData;
@@ -6516,7 +6559,7 @@ async function restoreFromGoogleDrive() {
   }
   const confirmed = await showModal({
     title: "Restore Google Drive backup?",
-    body: `Backup modified ${latest.modifiedTime ?? "recently"}. This replaces local vocabulary and study progress after an atomic write.`,
+    body: `Backup modified ${latest.modifiedTime ?? "recently"}. This merges the Drive learning tracks into your local tracks (matched by track id) after an atomic write. A pre-restore checkpoint is created first; unrelated local tracks are kept.`,
     submitText: "Restore",
     cancelText: "Cancel",
   });
@@ -6527,9 +6570,9 @@ async function restoreFromGoogleDrive() {
   const response = await googleFetch(`${GOOGLE_DRIVE_FILES_URL}/${latest.id}?alt=media`);
   if (!response.ok) throw new Error(`Google Drive restore failed: ${response.status} ${await response.text()}`);
   const envelope = await response.json();
-  let snapshot;
+  let remoteBackup;
   try {
-    snapshot = await decryptSnapshotPayload(envelope);
+    remoteBackup = unwrapDriveBackup(envelope);
   } catch (error) {
     if (error?.legacyEncryptedBackup) {
       googleAuthStatus.textContent = "This Drive backup is a legacy encrypted backup from an older version and can no longer be restored automatically. Use Sync now to replace it with your current local data.";
@@ -6537,10 +6580,13 @@ async function restoreFromGoogleDrive() {
     }
     throw error;
   }
-  await applyUserDataSnapshot(snapshot, { allowDuringDecryptBlock: true });
-  googleAuthStatus.textContent = `Restored Drive backup from ${latest.modifiedTime ?? "Google Drive"}.`;
+  // Merge the remote registry into the local one so no local track is lost, then apply the union.
+  const localBackup = await buildLearningTracksBackup();
+  const merged = mergeLearningTracksBackups(localBackup, remoteBackup);
+  const result = await applyLearningTracksBackup(merged, { allowDuringDecryptBlock: true });
+  googleAuthStatus.textContent = `Restored Drive backup from ${latest.modifiedTime ?? "Google Drive"} (${result.trackCount} track(s)).`;
   syncStatus.textContent = navigator.onLine ? "Synced" : "Offline";
-  return snapshot;
+  return merged;
 }
 
 async function requestGeminiDetails(data) {
@@ -7611,8 +7657,6 @@ async function init() {
   // Refresh the free-tier model list and auto-migrate off a deprecated saved model.
   void refreshGeminiModelChoices({ persist: true });
   googleGrantGranted = Boolean(await loadValue("googleGrant", false));
-  const savedBackupPassphrase = await loadValue("backupPassphrasePersisted", null);
-  if (savedBackupPassphrase) backupPassphraseSession = savedBackupPassphrase;
   lastSyncSummary = await loadValue("lastSyncSummary", null);
   const savedAuth = await loadValue("googleAuth", null);
   if (savedAuth && typeof savedAuth === "object") {
@@ -8533,11 +8577,12 @@ googleSignOutButton.addEventListener("click", async () => {
   }
   googleAuth = { accessToken: null, expiresAt: 0, profile: null, scopes: [] };
   googleGrantGranted = false;
-  backupPassphraseSession = null;
   await saveValue("googleProfile", null);
   await saveValue("googleAuth", null);
   await saveValue("googleGrant", false);
+  // Clear any obsolete cloud-backup passphrase artifacts left by older versions.
   await saveValue("backupPassphrasePersisted", null);
+  await saveValue("backupPassphraseVerifier", null);
   stopAutoSync();
   renderAppMenu();
 });
@@ -9453,39 +9498,29 @@ window.WordLoverApp = {
     restore: restoreFromGoogleDrive,
     lastInfo: () => lastSyncInfo,
     lastSummary: () => lastSyncSummary,
-    backupEncryption: {
-      status: async () => {
-        const hasVerifier = Boolean(await loadValue("backupPassphraseVerifier", null));
-        const hasSessionPassphrase = Boolean(backupPassphraseSession);
-        const developmentOverride = CONFIG.allowDefaultCloudBackupPassphrase === true;
-        return {
-          hasSessionPassphrase,
-          hasVerifier,
-          developmentOverride,
-          notice: "Cloud backups are stored as plain JSON; no backup passphrase is used.",
-        };
-      },
-      setPassphraseForTest: setBackupPassphraseForTest,
-      clearPassphraseForTest: clearBackupPassphraseForTest,
-      setPromptForTest: (handler) => {
-        backupPassphrasePromptForTest = typeof handler === "function" ? handler : null;
-      },
-      validatePassphraseForTest: (passphrase, confirm, opts) => validateBackupPassphrase(passphrase, confirm, opts),
-      encryptForTest: (snapshot) => encryptSnapshotPayload(snapshot, { purpose: "cloud" }),
-      decryptForTest: (envelope) => decryptSnapshotPayload(envelope, { purpose: "cloud", allowLegacyDefault: true }),
-      decryptWithPassphraseForTest: (envelope, passphrase) => decryptJsonWithPassphrase(envelope, passphrase),
-      encryptLegacyForTest: async (snapshot) => {
-        const encrypted = await encryptJsonWithPassphrase(snapshot, DEFAULT_LOCAL_PASSPHRASE);
-        return {
-          app: "wordlover",
-          format: "wordlover-user-data-aes-gcm-v1",
-          appVersion: APP_VERSION,
-          userDataFormatVersion: USER_DATA_FORMAT_VERSION,
-          encryptedAt: nowIso(),
-          passphraseSource: "default-local-development-passphrase",
-          ...encrypted,
-        };
-      },
+    // Drive backup is plain JSON learning-tracks data — no passphrase, no encryption anywhere.
+    backup: {
+      status: () => ({
+        format: LEARNING_TRACKS_BACKUP_FORMAT,
+        encrypted: false,
+        passphrase: false,
+        notice: "Cloud backups are stored as plain JSON; no backup passphrase is used.",
+      }),
+      buildForTest: buildLearningTracksBackup,
+      wrapForTest: wrapLearningTracksBackup,
+      unwrapForTest: unwrapDriveBackup,
+      mergeForTest: (localBackup, remoteBackup) => mergeLearningTracksBackups(localBackup, remoteBackup),
+      applyForTest: (backup) => applyLearningTracksBackup(backup, { createPreRestoreCheckpoint: false }),
+      // Build a legacy AES-GCM-shaped envelope WITHOUT encrypting anything (unwrap only inspects
+      // `.format`), so tests can assert it is rejected as legacy without prompting.
+      makeLegacyEncryptedEnvelopeForTest: (format = "wordlover-user-data-aes-gcm-v1") => ({
+        app: "wordlover",
+        format,
+        appVersion: APP_VERSION,
+        data: "bGVnYWN5LWNpcGhlcnRleHQ=",
+        iv: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        salt: [1, 2, 3, 4, 5, 6, 7, 8],
+      }),
     },
   },
   getState: () => ({

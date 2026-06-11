@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260610-1";
+} from "./fsrs-scheduler.js?v=20260610-2";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260610-1";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260610-1";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260610-2";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260610-2";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260610-1";
+} from "./ui-preferences.js?v=20260610-2";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -26,27 +26,29 @@ import {
   activeStudyTermsFromItems,
   mergeVocabularySources,
   mergeUserDictionarySources,
-} from "./sync.js?v=20260610-1";
+  mergeLearningTracksBackups,
+} from "./sync.js?v=20260610-2";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260610-1";
+} from "./study-one-more.js?v=20260610-2";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260610-1";
+} from "./goal-forecast.js?v=20260610-2";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
   buildBackup,
+  serializeTrack,
   trackRecords,
   validateBackup,
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260610-1";
+} from "./tracks.js?v=20260610-2";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -60,7 +62,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v127";
+const SHELL_CACHE_NAME = "wordlover-shell-v128";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -77,18 +79,18 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260610-1",
-  "/persistence.js?v=20260610-1",
-  "/spelling.js?v=20260610-1",
-  "/ui-preferences.js?v=20260610-1",
-  "/review-state.js?v=20260610-1",
-  "/study-one-more.js?v=20260610-1",
-  "/sync.js?v=20260610-1",
-  "/fsrs-scheduler.js?v=20260610-1",
-  "/goal-forecast.js?v=20260610-1",
-  "/tracks.js?v=20260610-1",
-  "/styles.css?v=20260610-1",
-  "/wordlover-config.js?v=20260610-1",
+  "/app.js?v=20260610-2",
+  "/persistence.js?v=20260610-2",
+  "/spelling.js?v=20260610-2",
+  "/ui-preferences.js?v=20260610-2",
+  "/review-state.js?v=20260610-2",
+  "/study-one-more.js?v=20260610-2",
+  "/sync.js?v=20260610-2",
+  "/fsrs-scheduler.js?v=20260610-2",
+  "/goal-forecast.js?v=20260610-2",
+  "/tracks.js?v=20260610-2",
+  "/styles.css?v=20260610-2",
+  "/wordlover-config.js?v=20260610-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -104,7 +106,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260610-1",
+  "/automated-tests.js?v=20260610-2",
 ];
 
 let lastResults = null;
@@ -1216,45 +1218,47 @@ async function runMainAppStudySmoke() {
       && reloadedGoalsState?.desiredRetention === restoredGoalTargets.desiredRetention
       && reloadedGoalsState?.forecastDays === restoredGoalTargets.forecastDays;
 
-    // Cloud backups are plain JSON and must never reach the backup-passphrase prompt. Arm the
-    // prompt to throw if any cloud path tries to call it — this is the regression tripwire.
-    let backupPassphrasePromptCalled = false;
-    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(() => {
-      backupPassphrasePromptCalled = true;
-      throw new Error("backup passphrase prompt must never run for plain cloud backups");
-    });
-    const cloudSnapshot = frameWindow.WordLoverApp.buildUserDataSnapshot();
-    const cloudEnvelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptForTest(cloudSnapshot);
+    // Google Drive backups are plain JSON learning-tracks data — never encrypted, never a
+    // passphrase. The envelope must use the new format with a readable payload and no ciphertext
+    // fields, must round-trip, and legacy encrypted backups must be rejected as "legacy" (so sync
+    // offers overwrite) without ever rendering a #passphrase prompt.
+    const cloudBackup = await frameWindow.WordLoverApp.sync.backup.buildForTest();
+    const cloudEnvelope = frameWindow.WordLoverApp.sync.backup.wrapForTest(cloudBackup);
+    const cloudEnvelopeKeys = JSON.stringify(cloudEnvelope).toLowerCase();
     const cloudBackupIsPlainJson =
-      cloudEnvelope.format === "wordlover-user-data-plain-v1"
+      cloudEnvelope.format === "wordfan-learning-tracks-plain-v1"
       && cloudEnvelope.payload !== undefined
+      && cloudEnvelope.payload.app === "WordFan"
+      && cloudEnvelope.payload.tracks !== undefined
       && cloudEnvelope.data === undefined
       && cloudEnvelope.iv === undefined
       && cloudEnvelope.salt === undefined
-      && cloudEnvelope.passphraseSource === undefined;
-    const decryptedCloudSnapshot = await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(cloudEnvelope);
+      && cloudEnvelope.tag === undefined
+      && !cloudEnvelopeKeys.includes("ciphertext");
+    const reUnwrapped = frameWindow.WordLoverApp.sync.backup.unwrapForTest(cloudEnvelope);
     const plainCloudBackupRoundTrips =
-      decryptedCloudSnapshot.app === cloudSnapshot.app
-      && decryptedCloudSnapshot.exportedAt === cloudSnapshot.exportedAt;
-    // Existing encrypted Drive backups (legacy v1 default-passphrase and v2 user-passphrase) must
-    // be rejected as legacy without ever prompting, so sync can offer overwrite and restore can warn.
-    const legacyV1Envelope = await frameWindow.WordLoverApp.sync.backupEncryption.encryptLegacyForTest(cloudSnapshot);
-    const legacyV2Envelope = { app: "wordlover", format: "wordlover-cloud-backup-aes-gcm-v2", data: "ZmFrZQ==", iv: [1, 2, 3], salt: [4, 5, 6] };
-    let legacyV1RejectedWithoutPrompt = false;
-    let legacyV2RejectedWithoutPrompt = false;
+      reUnwrapped.app === "WordFan"
+      && Object.keys(reUnwrapped.tracks).length === Object.keys(cloudBackup.tracks).length;
+    // Legacy v1 (default-passphrase) and v2 (user-passphrase) encrypted backups must be rejected as
+    // legacy without prompting, so sync can offer overwrite and restore can warn.
+    const legacyV1Envelope = frameWindow.WordLoverApp.sync.backup.makeLegacyEncryptedEnvelopeForTest("wordlover-user-data-aes-gcm-v1");
+    const legacyV2Envelope = frameWindow.WordLoverApp.sync.backup.makeLegacyEncryptedEnvelopeForTest("wordlover-cloud-backup-aes-gcm-v2");
+    let legacyV1RejectedAsLegacy = false;
+    let legacyV2RejectedAsLegacy = false;
     try {
-      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyV1Envelope);
+      frameWindow.WordLoverApp.sync.backup.unwrapForTest(legacyV1Envelope);
     } catch (error) {
-      legacyV1RejectedWithoutPrompt = /legacy encrypted backup/i.test(error.message);
+      legacyV1RejectedAsLegacy = /legacy encrypted backup/i.test(error.message) && error.legacyEncryptedBackup === true;
     }
     try {
-      await frameWindow.WordLoverApp.sync.backupEncryption.decryptForTest(legacyV2Envelope);
+      frameWindow.WordLoverApp.sync.backup.unwrapForTest(legacyV2Envelope);
     } catch (error) {
-      legacyV2RejectedWithoutPrompt = /legacy encrypted backup/i.test(error.message);
+      legacyV2RejectedAsLegacy = /legacy encrypted backup/i.test(error.message) && error.legacyEncryptedBackup === true;
     }
-    frameWindow.WordLoverApp.sync.backupEncryption.setPromptForTest(null);
-    if (!cloudBackupIsPlainJson || !plainCloudBackupRoundTrips || !legacyV1RejectedWithoutPrompt || !legacyV2RejectedWithoutPrompt || backupPassphrasePromptCalled) {
-      throw new Error(`Cloud backup must be plain JSON and never prompt for a passphrase: ${JSON.stringify({ cloudBackupIsPlainJson, plainCloudBackupRoundTrips, legacyV1RejectedWithoutPrompt, legacyV2RejectedWithoutPrompt, backupPassphrasePromptCalled, cloudEnvelope })}`);
+    // No passphrase UI may exist anywhere in the app document.
+    const noPassphraseElement = frameDocument.querySelector("#passphrase") === null;
+    if (!cloudBackupIsPlainJson || !plainCloudBackupRoundTrips || !legacyV1RejectedAsLegacy || !legacyV2RejectedAsLegacy || !noPassphraseElement) {
+      throw new Error(`Cloud backup must be plain JSON learning-tracks data and never prompt for a passphrase: ${JSON.stringify({ cloudBackupIsPlainJson, plainCloudBackupRoundTrips, legacyV1RejectedAsLegacy, legacyV2RejectedAsLegacy, noPassphraseElement, format: cloudEnvelope.format })}`);
     }
     const currentSnapshotValidates = Boolean(frameWindow.WordLoverApp.validateSnapshot(frameWindow.WordLoverApp.buildUserDataSnapshot()).checksum);
     const oldSnapshot = { ...frameWindow.WordLoverApp.buildUserDataSnapshot() };
@@ -2316,9 +2320,9 @@ async function runMainAppStudySmoke() {
       olderSnapshotWithoutGoalsStable,
       cloudBackupIsPlainJson,
       plainCloudBackupRoundTrips,
-      legacyV1RejectedWithoutPrompt,
-      legacyV2RejectedWithoutPrompt,
-      backupPassphrasePromptCalled,
+      legacyV1RejectedAsLegacy,
+      legacyV2RejectedAsLegacy,
+      noPassphraseElement,
       currentSnapshotValidates,
       oldSnapshotValidates,
       wrongAppRejected,
@@ -3229,10 +3233,40 @@ function runModuleSmokeTests() {
   assert("canDeleteTrack true for non-active", canDeleteTrack(twoTrackRoot, "track_b", "track_default"), true);
   assert("canDeleteTrack false for only track", canDeleteTrack(existingRoot, "track_default", "other"), false);
 
+  // 8) Google Drive sync merges two plain learning-track backups by stable id (the union of
+  // tracks, never dropping or duplicating), so an imported track travels across devices.
+  const importedTrack = serializeTrack(
+    { id: "track_imported_x", name: "Imported TOEFL", createdAt: "2026-06-05T00:00:00.000Z", updatedAt: "2026-06-06T00:00:00.000Z" },
+    { vocabulary: [{ term: "ephemeral", normalizedTerm: "ephemeral", savedAt: "2026-06-05T00:00:00.000Z", review: { dueAt: "2026-07-01T00:00:00.000Z", fsrsCard: null } }], studyEvents: [], spelling: [], spellingEvents: [], userDictionary: [], known: [], history: [], goals: null, studyOneMoreFilter: null },
+  );
+  const remoteBackup = {
+    schemaVersion: 1, app: "WordFan", exportedAt: "2026-06-06T00:00:00.000Z", activeTrackId: "track_imported_x", globalSettings: { theme: "ink" },
+    tracks: {
+      track_default: serializeTrack(
+        { id: "track_default", name: "Default Track", createdAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" },
+        { vocabulary: [{ term: "brave", normalizedTerm: "brave", savedAt: "2026-06-04T00:00:00.000Z", review: { dueAt: "2026-07-02T00:00:00.000Z", fsrsCard: null } }], studyEvents: [], spelling: [], spellingEvents: [], userDictionary: [], known: [], history: [], goals: null, studyOneMoreFilter: null },
+      ),
+      track_imported_x: importedTrack,
+    },
+  };
+  const mergedBackup = mergeLearningTracksBackups(backup, remoteBackup, Date.parse("2026-06-08T00:00:00.000Z"));
+  assert("merge keeps both track ids", Object.keys(mergedBackup.tracks).sort().join(","), "track_default,track_imported_x");
+  assert("merge recreates imported track by id", mergedBackup.tracks.track_imported_x.name, "Imported TOEFL");
+  assert("merge imported track keeps its word", mergedBackup.tracks.track_imported_x.wordLists.vocabulary[0].normalizedTerm, "ephemeral");
+  assert("merge unions shared-track vocabulary", mergedBackup.tracks.track_default.wordLists.vocabulary.map((v) => v.normalizedTerm).sort().join(","), "abandon,brave,old word");
+  assert("merge prefers local active track id", mergedBackup.activeTrackId, "track_default");
+  assert("merge prefers local global settings", mergedBackup.globalSettings.theme, "sunrise");
+  assert("merged backup validates", validateBackup(mergedBackup).app, "WordFan");
+  assert("merged backup is plain JSON (no ciphertext fields)", /ciphertext|"iv"|"salt"|"tag"/.test(JSON.stringify(mergedBackup)), false);
+  // A fresh device (no local tracks) recreates exactly the remote tracks and adopts remote active.
+  const freshMerge = mergeLearningTracksBackups({ tracks: {}, activeTrackId: null, globalSettings: {} }, remoteBackup, Date.parse("2026-06-08T00:00:00.000Z"));
+  assert("fresh device recreates imported track", freshMerge.tracks.track_imported_x.wordLists.vocabulary[0].normalizedTerm, "ephemeral");
+  assert("fresh device adopts remote active track", freshMerge.activeTrackId, "track_imported_x");
+
   return {
     passed: failures.length === 0,
     failures,
-    assertionCount: 108,
+    assertionCount: 119,
   };
 }
 
