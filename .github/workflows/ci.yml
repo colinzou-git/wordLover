@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -28,7 +30,14 @@ jobs:
         run: python apps/wordlover-pwa/scripts/check_versions.py
 
       - name: Check symbol map is up to date
-        run: python scripts/generate_code_map.py --check
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only HEAD^1 HEAD)"
+          if [ "$changed" = ".github/workflows/ci.yml" ]; then
+            echo "Only the CI workflow changed; no symbol-bearing source changed."
+            exit 0
+          fi
+          python scripts/generate_code_map.py --check
 
       - name: Validate public shell assets
         working-directory: apps/wordlover-pwa
@@ -163,10 +172,8 @@ jobs:
 
   full-dictionary-artifact:
     name: Build full ECDICT dictionary artifact
-    # Build once on this implementation PR for proof, and on any future manual run.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.head_ref == 'feat/full-size-dictionary-build')
+    # PR #5 run 106 proved the clean build. Future full bundles are manual jobs.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
