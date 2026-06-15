@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260610-3";
+} from "./fsrs-scheduler.js?v=20260615-1";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260610-3";
+} from "./persistence.js?v=20260615-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260610-3";
+} from "./spelling.js?v=20260615-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260610-3";
+} from "./ui-preferences.js?v=20260615-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260610-3";
+} from "./review-state.js?v=20260615-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -57,7 +57,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260610-3";
+} from "./study-one-more.js?v=20260615-1";
 
 import {
   studyEventTrack,
@@ -69,11 +69,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260610-3";
+} from "./sync.js?v=20260615-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260610-3";
+} from "./goal-forecast.js?v=20260615-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -85,7 +85,7 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260610-3";
+} from "./tracks.js?v=20260615-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -222,9 +222,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260610-3-v129";
+const APP_VERSION = "0.6.2-product.20260615-1-v130";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v129";
+const SHELL_CACHE_VERSION = "wordlover-shell-v130";
 const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
 const MEMORY_TARGET_NOTE =
   "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
@@ -7622,7 +7622,92 @@ async function showLoginGateIfNeeded() {
   }
 }
 
+// --- Offline shell registration ---------------------------------------------
+// Registration runs early in init() and never blocks rendering or local data
+// load. Readiness is reported asynchronously and meaningfully (not just because
+// register() resolved), and the controllerchange reload is guarded so a worker
+// takeover refreshes the page at most once per shell-cache version.
+let offlineReadyChecked = false;
+let lastOfflineReadyReport = null;
+
+function setPwaStatus(text) {
+  if (pwaStatus) pwaStatus.textContent = text;
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    setPwaStatus("Service worker unavailable");
+    return;
+  }
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    const key = `wordfan-controller-reload:${SHELL_CACHE_VERSION}`;
+    try {
+      if (sessionStorage.getItem(key)) return; // already reloaded for this shell version
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* sessionStorage unavailable: still cap at the single reload below */
+    }
+    window.location.reload();
+  });
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    reflectRegistrationState(registration);
+    registration.addEventListener("updatefound", () => {
+      const incoming = registration.installing;
+      if (incoming) incoming.addEventListener("statechange", () => reflectRegistrationState(registration));
+    });
+    void navigator.serviceWorker.ready.then(() => verifyOfflineReady());
+    if (navigator.serviceWorker.controller) void verifyOfflineReady();
+  } catch (error) {
+    setPwaStatus(`Service-worker installation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function reflectRegistrationState(registration) {
+  if (registration.installing) setPwaStatus("Installing offline shell");
+  else if (registration.waiting) setPwaStatus("Waiting to activate");
+  else if (registration.active && !navigator.serviceWorker.controller) setPwaStatus("Active but not yet controlling this page");
+  else if (registration.active) void verifyOfflineReady();
+}
+
+// Ask the active worker whether every required shell asset is actually cached.
+// Registration success alone does not prove the shell can serve offline.
+async function verifyOfflineReady() {
+  const controller = navigator.serviceWorker.controller;
+  if (!controller || offlineReadyChecked) return lastOfflineReadyReport;
+  offlineReadyChecked = true;
+  try {
+    const report = await requestOfflineReady(controller, 3000);
+    lastOfflineReadyReport = report;
+    if (report && report.ready) setPwaStatus("Offline ready");
+    else setPwaStatus(`Offline shell incomplete (${report && report.missing ? report.missing.length : "?"} missing)`);
+    return report;
+  } catch {
+    offlineReadyChecked = false; // transient: allow a later retry
+    return null;
+  }
+}
+
+function requestOfflineReady(controller, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => {
+      channel.port1.close();
+      reject(new Error("offline-ready check timed out"));
+    }, timeoutMs);
+    channel.port1.onmessage = (event) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(event.data);
+    };
+    controller.postMessage({ type: "CHECK_OFFLINE_READY" }, [channel.port2]);
+  });
+}
+
 async function init() {
+  // Register the offline shell first and never block local startup on it; the
+  // service worker reports readiness asynchronously.
+  void registerServiceWorker();
   renderInstallContext();
   await getDeviceId();
   const previousOpenedAt = await loadValue("lastOpenedAt", null);
@@ -7749,19 +7834,8 @@ async function init() {
   loadButton.hidden = canAutoLoad;
   if (canAutoLoad) setSearchLoading(true);
 
-  if ("serviceWorker" in navigator) {
-    try {
-      await navigator.serviceWorker.register("/sw.js");
-      pwaStatus.textContent = "Offline shell registered";
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        window.location.reload();
-      });
-    } catch (error) {
-      pwaStatus.textContent = `Service worker failed: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  } else {
-    pwaStatus.textContent = "Service worker unavailable";
-  }
+  // The service worker is registered early in init() via registerServiceWorker();
+  // offline readiness is reported asynchronously and does not gate startup.
 
   if ("storage" in navigator && "persist" in navigator.storage) {
     await navigator.storage.persist();
@@ -9192,6 +9266,12 @@ for (const tab of goalsPeriodTabs) {
 
 window.WordLoverApp = {
   ensureDictionaryLoaded,
+  // Offline-readiness probe for tests: asks the active worker which required shell
+  // assets are cached. Resolves null when no worker controls the page.
+  checkOfflineReady: () =>
+    navigator.serviceWorker && navigator.serviceWorker.controller
+      ? requestOfflineReady(navigator.serviceWorker.controller)
+      : Promise.resolve(null),
   lookupTerm,
   suggestTerms,
   normalizeTerm,
@@ -9536,6 +9616,7 @@ window.WordLoverApp = {
     appVersion: APP_VERSION,
     userDataFormatVersion: USER_DATA_FORMAT_VERSION,
     shellCacheVersion: SHELL_CACHE_VERSION,
+    offlineReady: lastOfflineReadyReport,
     aiChatCacheSize: aiChatCache.size,
     geminiModel: getGeminiModel(),
     encryptedUserStore: true,

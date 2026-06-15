@@ -74,6 +74,9 @@ jobs:
           --base http://127.0.0.1:4173
           --report apps/wordlover-pwa/test-results/browser-report.json
 
+      - name: Run offline / cold-start regression suite
+        run: python apps/wordlover-pwa/scripts/smoke-offline-dictionary.py http://127.0.0.1:4173
+
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()

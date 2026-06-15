@@ -103,15 +103,46 @@ Use the HTTPS server:
 
 If you are already in `apps\wordlover-pwa\public`, the local `start-iphone-https.ps1` wrapper works from there too.
 
-## Offline Dictionary Fallback Test
+## Offline startup contract
 
-The app saves the dictionary into IndexedDB after a successful online load. If `/dictionary.sqlite` cannot be fetched later, **Load local SQLite dictionary** falls back to the saved copy and shows:
+After WordFan has been opened successfully online **once** (so the service worker
+finishes installing the shell), it works offline:
 
-```text
-source indexedDB offline copy
-```
+- **Bounded startup fetches.** Every startup-critical service-worker request uses
+  network-first with a short timeout (≈2.5s for navigation/document/script/style,
+  ≈5s for other runtime requests, ≈10–15s for required assets during install), then
+  falls back to the cached shell. This is the fix for the iOS hang where a
+  "connected but useless" network (no internet, stalled DNS/TLS, captive portal)
+  left an unbounded `fetch()` pending forever and the cached fallback was never
+  reached. Startup never waits indefinitely on the network.
+- **Offline reload and cold launch.** Reloading offline, and launching the installed
+  PWA from the Home Screen while offline, both load the cached shell promptly.
+- **Local dictionary stays local.** `dictionary.sqlite` / `.zst` / the manifest are
+  never shell-cached; an installed dictionary opens from IndexedDB (OPFS optional),
+  and `source indexedDB offline copy` is shown.
+- **Local study features work offline:** lookup, vocabulary, review, spelling,
+  history, goals, known words, and learning tracks.
+- **Online-only features degrade gracefully.** Google sign-in/sync, Gemini, remote
+  update checks, and remote dictionary downloads report that the network is
+  unavailable but never block startup or rendering.
+- **No correct-asset substitution.** A missing script/style is never answered with
+  `/` or `index.html` (which would break as JS/CSS); it fails cleanly. A required
+  asset that fails during install aborts the install — the incomplete shell is never
+  activated and the previous valid shell cache is preserved.
+- **Before the first successful online install** the app cannot work offline; the
+  service worker returns a small 503 page explaining that WordFan must be opened
+  online once.
 
-Windows fallback automation verified this by stopping the local server, reloading the app from the service worker cache, loading the dictionary from IndexedDB, and searching `take off` successfully.
+The service worker exposes a `CHECK_OFFLINE_READY` message that reports whether every
+required shell asset is cached; the app reports meaningful states (Installing offline
+shell / Waiting to activate / Active but not yet controlling this page / Offline ready
+/ Offline shell incomplete / Service-worker installation failed) instead of declaring
+success just because `register()` resolved. A service-worker takeover reloads the page
+at most once per shell-cache version (a `sessionStorage` guard prevents reload loops).
+
+`scripts/smoke-offline-dictionary.py` exercises this contract end to end: offline
+reload, true cold offline launch, hanging-network timeout fallback, missing-JS clean
+failure, incomplete-install rejection, reload-loop prevention, and reconnect.
 
 ## Pass Criteria
 
