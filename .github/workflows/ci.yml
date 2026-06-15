@@ -160,3 +160,97 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             gh-pages
           echo "Pushed to gh-pages — GitHub Pages will rebuild https://$(cat CNAME)/"
+
+  full-dictionary-artifact:
+    name: Build full ECDICT dictionary artifact
+    # Build once on this implementation PR for proof, and on any future manual run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feat/full-size-dictionary-build')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dictionary packaging dependency
+        run: python -m pip install --upgrade zstandard
+
+      - name: Download ECDICT source
+        run: |
+          set -euo pipefail
+          mkdir -p data/sources
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output data/sources/ecdict.csv \
+            https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv
+          test -s data/sources/ecdict.csv
+
+      - name: Build and enrich the complete dictionary
+        run: |
+          set -euo pipefail
+          python scripts/build_dictionary.py \
+            --source data/sources/ecdict.csv \
+            --output data/dictionary.sqlite \
+            --report data/dictionary-report.json
+          python scripts/augment_dictionary_wordnet.py \
+            --database data/dictionary.sqlite
+          python scripts/augment_dictionary_opted.py \
+            --database data/dictionary.sqlite
+          python scripts/import_ap_stem_dictionary.py \
+            --db data/dictionary.sqlite
+
+      - name: Validate full database and search index
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          path = Path("data/dictionary.sqlite")
+          with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+              quick_check = conn.execute("PRAGMA quick_check").fetchone()[0]
+              rows = conn.execute("SELECT count(*) FROM dictionary_entries").fetchone()[0]
+              fts_rows = conn.execute("SELECT count(*) FROM dictionary_search_fts").fetchone()[0]
+              stem_rows = conn.execute(
+                  "SELECT count(*) FROM dictionary_entries "
+                  "WHERE tag LIKE '%k12_%' OR tag LIKE '%ap_%'"
+              ).fetchone()[0]
+          if quick_check != "ok":
+              raise SystemExit(f"SQLite quick_check failed: {quick_check}")
+          if rows < 700_000:
+              raise SystemExit(f"Expected at least 700,000 dictionary rows, got {rows}")
+          if fts_rows != rows:
+              raise SystemExit(f"FTS row mismatch: entries={rows}, fts={fts_rows}")
+          if stem_rows < 1:
+              raise SystemExit("K-12/AP STEM enrichment is missing")
+          print(f"Validated full dictionary: {rows:,} rows, {fts_rows:,} FTS rows, {stem_rows:,} STEM-tagged rows")
+          PY
+
+      - name: Package raw SQLite and zstd variants
+        run: |
+          set -euo pipefail
+          VERSION="$(date -u +%Y.%m.%d).full.${GITHUB_RUN_NUMBER}"
+          mkdir -p full-dictionary
+          python scripts/package_dictionary_web.py \
+            --input data/dictionary.sqlite \
+            --output-dir full-dictionary \
+            --version "$VERSION" \
+            --zstd-level 9 \
+            --copy-sqlite
+          cp data/dictionary-report.json full-dictionary/
+          cp data/wordnet-augmentation-report.json full-dictionary/
+          cp data/opted-augmentation-report.json full-dictionary/
+          sqlite3 data/dictionary.sqlite "PRAGMA quick_check; SELECT count(*) FROM dictionary_entries;" \
+            > full-dictionary/validation.txt
+
+      - name: Upload full dictionary bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordfan-full-dictionary-${{ github.run_number }}
+          path: full-dictionary/
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
