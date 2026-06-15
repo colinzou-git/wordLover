@@ -1,114 +1,11 @@
-name: Apply full dictionary runtime integration
+name: Apply full dictionary runtime integration (archived)
 
 on:
-  push:
-    branches:
-      - feat/full-dictionary-runtime
-    paths:
-      - scripts/apply_full_dictionary_runtime.py
-      - .github/workflows/apply-full-dictionary-runtime.yml
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
-concurrency:
-  group: apply-full-dictionary-runtime
-  cancel-in-progress: true
-
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  archived:
+    if: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feat/full-dictionary-runtime
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Narrow the strict runLookup anchor
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("scripts/apply_full_dictionary_runtime.py")
-          value = path.read_text(encoding="utf-8")
-          old = '''    value = replace_once(
-                  value,
-                  "    const data = lookupTerm(value);\\n    renderResult(data);",
-                  "    const data = await lookupTermWithFullFallback(value);\\n    renderResult(data);",
-                  label="async search fallback",
-              )'''
-          new = '''    value = replace_once(
-                  value,
-                  "  try {\\n    const data = lookupTerm(value);\\n    renderResult(data);\\n    if (commit && data.status === \\\"found\\\") {",
-                  "  try {\\n    const data = await lookupTermWithFullFallback(value);\\n    renderResult(data);\\n    if (commit && data.status === \\\"found\\\") {",
-                  label="async search fallback",
-              )'''
-          if old not in value:
-              raise SystemExit("Expected async search patch block was not found")
-          path.write_text(value.replace(old, new, 1), encoding="utf-8")
-          PY
-
-      - name: Apply strict source patch
-        run: |
-          set -o pipefail
-          python scripts/apply_full_dictionary_runtime.py 2>&1 | tee patch-diagnostics.log
-          # Workflow files require separate repository credentials. The same validated
-          # CI changes are committed by the GitHub connector after this runtime commit.
-          git checkout -- .github/workflows/ci.yml
-
-      - name: Upload patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-dictionary-patch-diagnostics-${{ github.run_number }}
-          path: patch-diagnostics.log
-          if-no-files-found: warn
-
-      - name: Generate current symbol map
-        run: python scripts/generate_code_map.py
-
-      - name: Validate generated source
-        run: |
-          set -euo pipefail
-          node --check apps/wordlover-pwa/public/app.js
-          node --check apps/wordlover-pwa/public/full-dictionary.js
-          node --check apps/wordlover-pwa/public/sw.js
-          python -m unittest scripts.tests.test_package_dictionary_shards
-          node apps/wordlover-pwa/scripts/test-full-dictionary.mjs
-          python apps/wordlover-pwa/scripts/check_versions.py
-          (cd apps/wordlover-pwa && npm run validate:shell-assets)
-          git diff --check
-
-      - name: Commit integrated runtime
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No integration changes to commit."
-            exit 0
-          fi
-          git commit -m "feat: integrate sharded full dictionary runtime"
-          git push origin HEAD:feat/full-dictionary-runtime 2>&1 | tee commit-diagnostics.log
-
-      - name: Upload commit diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-dictionary-commit-diagnostics-${{ github.run_number }}
-          path: commit-diagnostics.log
-          if-no-files-found: warn
+      - run: echo "The sharded full dictionary runtime has already been integrated."
