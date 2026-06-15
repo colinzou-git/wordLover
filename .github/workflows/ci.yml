@@ -29,6 +29,11 @@ jobs:
       - name: Verify cache-version lockstep
         run: python apps/wordlover-pwa/scripts/check_versions.py
 
+      - name: Test full dictionary package and client
+        run: |
+          python -m unittest scripts.tests.test_package_dictionary_shards
+          node apps/wordlover-pwa/scripts/test-full-dictionary.mjs
+
       - name: Check symbol map is up to date
         run: |
           set -euo pipefail
@@ -83,6 +88,12 @@ jobs:
           --base http://127.0.0.1:4173
           --report apps/wordlover-pwa/test-results/browser-report.json
 
+      - name: Run full dictionary browser smoke
+        run: >
+          python apps/wordlover-pwa/scripts/smoke-full-dictionary.py
+          --base http://127.0.0.1:4173
+          --report apps/wordlover-pwa/test-results/full-dictionary-report.json
+
       - name: Run offline / cold-start regression suite
         run: python apps/wordlover-pwa/scripts/smoke-offline-dictionary.py http://127.0.0.1:4173
 
@@ -123,12 +134,15 @@ jobs:
             --exclude='*.pem' --exclude='*.cer' --exclude='certs/' \
             "$SRC"/ "$SITE"/
 
-          # The ~32 MB dictionary is gitignored on main and lives only on gh-pages.
-          # Carry the already-published binary forward so code-only pushes deploy
-          # without rebuilding it (CI has no source to rebuild the 100k-entry set).
+          # The ~32 MB ranked core dictionary is gitignored on main and lives on gh-pages.
           git fetch --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
           git show origin/gh-pages:dictionary.sqlite     > "$SITE/dictionary.sqlite"
           git show origin/gh-pages:dictionary.sqlite.zst > "$SITE/dictionary.sqlite.zst"
+
+          # Preserve the separately-published sharded full dictionary across shell-only deploys.
+          if git ls-tree -d --name-only origin/gh-pages dictionary-full | grep -q '^dictionary-full$'; then
+            git archive origin/gh-pages dictionary-full | tar -x -C "$SITE"
+          fi
 
           # GitHub Pages config.
           tr -d '\n' < CNAME > "$SITE/CNAME"
@@ -145,7 +159,7 @@ jobs:
             got=$(sha256sum "$SITE/$file" | cut -d' ' -f1)
             if [ "$want" != "$got" ]; then
               echo "::error::$file sha256 mismatch: manifest on main expects $want, dictionary on gh-pages is $got."
-              echo "The dictionary content changed but CI cannot rebuild the full set."
+              echo "The dictionary content changed but CI cannot rebuild the ranked core set."
               echo "Publish the new binary once from the Windows box, then re-push:"
               echo "  powershell -File apps/wordlover-pwa/scripts/deploy-github-pages.ps1"
               exit 1
@@ -166,8 +180,7 @@ jobs:
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -q -m "Deploy WordFan from ${GITHUB_SHA:0:7}"
-          # Single orphan commit (force) keeps the gh-pages branch from accumulating
-          # 32 MB dictionary blobs in history; the local deploy script stays compatible.
+          # Single orphan commit (force) prevents dictionary history from accumulating.
           git push -q --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             gh-pages
@@ -175,8 +188,11 @@ jobs:
 
   full-dictionary-artifact:
     name: Build full ECDICT dictionary artifact
-    # PR #5 run 106 proved the clean build. Future full bundles are manual jobs.
-    if: github.event_name == 'workflow_dispatch'
+    # Build on this implementation PR, its merge commit, or a manual refresh.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feat/full-dictionary-runtime') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'full 770k dictionary runtime'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -239,7 +255,7 @@ jobs:
           print(f"Validated full dictionary: {rows:,} rows, {fts_rows:,} FTS rows, {stem_rows:,} STEM-tagged rows")
           PY
 
-      - name: Package raw SQLite and zstd variants
+      - name: Package raw SQLite, zstd, and web shard variants
         run: |
           set -euo pipefail
           VERSION="$(date -u +%Y.%m.%d).full.${GITHUB_RUN_NUMBER}"
@@ -255,6 +271,12 @@ jobs:
           cp data/opted-augmentation-report.json full-dictionary/
           sqlite3 data/dictionary.sqlite "PRAGMA quick_check; SELECT count(*) FROM dictionary_entries;" \
             > full-dictionary/validation.txt
+          python scripts/package_dictionary_shards.py \
+            --input data/dictionary.sqlite \
+            --output-dir full-dictionary-web \
+            --version "$VERSION.sharded" \
+            --shard-count 128 \
+            --gzip-level 9
 
       - name: Upload full dictionary bundle
         uses: actions/upload-artifact@v4
@@ -264,3 +286,50 @@ jobs:
           compression-level: 0
           retention-days: 30
           if-no-files-found: error
+
+      - name: Upload deployable sharded dictionary
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordfan-full-dictionary-web-${{ github.run_number }}
+          path: full-dictionary-web/
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+
+  publish-full-dictionary:
+    name: Publish sharded full dictionary to GitHub Pages
+    needs: [full-dictionary-artifact, deploy]
+    if: >-
+      always() &&
+      needs.full-dictionary-artifact.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: deploy-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wordfan-full-dictionary-web-${{ github.run_number }}
+          path: dictionary-full
+
+      - name: Overlay full dictionary onto published site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          git clone --depth=1 --branch gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$SITE"
+          rm -rf "$SITE/dictionary-full"
+          cp -a dictionary-full "$SITE/dictionary-full"
+          cd "$SITE"
+          git add dictionary-full
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "Publish full dictionary from ${GITHUB_SHA:0:7}"
+          git push origin gh-pages
