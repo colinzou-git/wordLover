@@ -7,6 +7,10 @@ on:
     paths:
       - scripts/apply_full_dictionary_runtime.py
       - .github/workflows/apply-full-dictionary-runtime.yml
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
