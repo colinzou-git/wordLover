@@ -204,8 +204,8 @@ async function lookupTermWithFullFallback(input) {
     )
     value = replace_once(
         value,
-        "    const data = lookupTerm(value);\n    renderResult(data);",
-        "    const data = await lookupTermWithFullFallback(value);\n    renderResult(data);",
+        "  try {\n    const data = lookupTerm(value);\n    renderResult(data);\n    if (commit && data.status === \"found\") {",
+        "  try {\n    const data = await lookupTermWithFullFallback(value);\n    renderResult(data);\n    if (commit && data.status === \"found\") {",
         label="async search fallback",
     )
 

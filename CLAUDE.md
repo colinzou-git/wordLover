@@ -98,7 +98,7 @@ Service-worker cache replacement may delete old shell caches **only** — it mus
 
 ### Dictionary engine
 
-Current production path: `sql.js` loads the 32 MB slim SQLite file into WASM memory. The `wa-sqlite` + OPFS engine is vendored at `public/vendor/wa-sqlite/` and tested via a smoke worker (`public/wa-sqlite-opfs-worker.js`) but is not yet the default — it's the production target when iPhone memory validation runs. Route all dictionary access through the abstraction in `app.js` (not directly to `sql.js`) to keep the engine swappable.
+Current production path is hybrid: `sql.js` keeps the 32 MB / 100k ranked core for prefix/fuzzy suggestions, Chinese reverse lookup, and Study One More. Exact English lookup falls through to the complete 770k dataset in deterministic gzip JSON shards under `dictionary-full/`; one small shard is opened per lookup and cached on demand, while Settings can download every shard for complete offline use. Rebuild those assets with `scripts/package_dictionary_shards.py`. The vendored `wa-sqlite` worker remains experimental and is not required by the production full-dictionary path.
 
 ### Google Drive sync
 

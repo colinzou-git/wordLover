@@ -2651,3 +2651,14 @@ li button {
     width: min(1280px, 100%);
   }
 }
+
+.full-dictionary-progress {
+  display: block;
+  width: 100%;
+  height: 0.7rem;
+  margin: 0.6rem 0;
+}
+
+.full-dictionary-progress[hidden] {
+  display: none;
+}

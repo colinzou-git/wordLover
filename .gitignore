@@ -19,3 +19,5 @@ apps/wordlover-pwa/received-results/
 apps/wordlover-pwa/test-results/
 __pycache__/
 *.pyc
+
+apps/wordlover-pwa/public/dictionary-full/
