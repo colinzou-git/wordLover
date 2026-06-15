@@ -3,6 +3,13 @@ name: Apply full dictionary runtime integration (archived)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-full-dictionary-runtime-archived
+  cancel-in-progress: true
+
 jobs:
   archived:
     if: false
