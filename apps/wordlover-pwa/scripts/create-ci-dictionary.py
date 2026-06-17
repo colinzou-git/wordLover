@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.build_slim_dictionary import SCHEMA_SQL, populate_fts  # noqa: E402
 from scripts.package_dictionary_web import compress_zstd, sha256_file  # noqa: E402
+from scripts.package_dictionary_shards import package as package_full_dictionary_shards  # noqa: E402
 
 
 DEFAULT_OUTPUT_DIR = ROOT / "apps/wordlover-pwa/public"
@@ -232,6 +233,20 @@ FIXTURE_ROWS = [
 ]
 
 
+
+FULL_ONLY_ROW = {
+    "word": "fullsizeonlyword",
+    "phonetic": "/fʊl/",
+    "definition": "a term present only in the full dictionary fixture",
+    "definition_source": "CI full fixture",
+    "translation": "仅存在于完整词典中的词",
+    "pos": "n",
+    "tag": "rare",
+    "exchange": "s:fullsizeonlywords",
+    "detail": "This entry verifies the supplemental full dictionary fallback.",
+    "source": "CI full fixture",
+}
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -330,6 +345,19 @@ def build_fixture_sqlite(path: Path, version: str) -> int:
         return int(conn.execute("SELECT count(*) FROM dictionary_entries").fetchone()[0])
 
 
+
+def build_full_fixture_sqlite(source: Path, target: Path) -> None:
+    shutil.copy2(source, target)
+    placeholders = ",".join("?" for _ in COLUMNS)
+    with sqlite3.connect(target) as conn:
+        next_id = int(conn.execute("SELECT COALESCE(max(id), 0) + 1 FROM dictionary_entries").fetchone()[0])
+        conn.execute(
+            f"INSERT INTO dictionary_entries ({','.join(COLUMNS)}) VALUES ({placeholders})",
+            row_values(next_id, FULL_ONLY_ROW),
+        )
+        conn.commit()
+
+
 def write_manifest(output_dir: Path, sqlite_path: Path, zst_path: Path, row_count: int, version: str) -> None:
     manifest = {
         "app": "wordlover",
@@ -362,6 +390,16 @@ def main() -> None:
 
     work_sqlite = args.work_dir / "dictionary-ci-fixture.sqlite"
     row_count = build_fixture_sqlite(work_sqlite, args.version)
+    full_work_sqlite = args.work_dir / "dictionary-full-ci-fixture.sqlite"
+    build_full_fixture_sqlite(work_sqlite, full_work_sqlite)
+    package_full_dictionary_shards(argparse.Namespace(
+        input=full_work_sqlite,
+        output_dir=args.output_dir / "dictionary-full",
+        version=f"{args.version}.full",
+        shard_count=4,
+        gzip_level=9,
+        skip_validation=False,
+    ))
 
     sqlite_path = args.output_dir / "dictionary.sqlite"
     zst_path = args.output_dir / "dictionary.sqlite.zst"

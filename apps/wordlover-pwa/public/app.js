@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260615-1";
+} from "./fsrs-scheduler.js?v=20260615-2";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260615-1";
+} from "./persistence.js?v=20260615-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260615-1";
+} from "./spelling.js?v=20260615-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260615-1";
+} from "./ui-preferences.js?v=20260615-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260615-1";
+} from "./review-state.js?v=20260615-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -57,7 +57,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260615-1";
+} from "./study-one-more.js?v=20260615-2";
 
 import {
   studyEventTrack,
@@ -69,11 +69,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260615-1";
+} from "./sync.js?v=20260615-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260615-1";
+} from "./goal-forecast.js?v=20260615-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -85,7 +85,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260615-1";
+} from "./tracks.js?v=20260615-2";
+
+import {
+  createFullDictionaryClient,
+} from "./full-dictionary.js?v=20260615-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -151,6 +155,10 @@ const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
 const onReturnSelect = document.querySelector("#onReturnSelect");
 const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
+const fullDictionaryStatus = document.querySelector("#fullDictionaryStatus");
+const fullDictionaryProgress = document.querySelector("#fullDictionaryProgress");
+const fullDictionaryInstallButton = document.querySelector("#fullDictionaryInstall");
+const fullDictionaryRemoveButton = document.querySelector("#fullDictionaryRemove");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
@@ -222,13 +230,17 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260615-1-v130";
+const APP_VERSION = "0.6.2-product.20260615-2-v131";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v130";
-const DICTIONARY_ENGINE = "Slim 100k-entry dictionary in OPFS; sql.js read engine; wa-sqlite OPFS engine pending bundle install";
+const SHELL_CACHE_VERSION = "wordlover-shell-v131";
+const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
-  "Memory target: iPhone normal-use DRAM <= 50 MB. This build ships the slim 100k-entry dictionary (~32 MB) so sql.js can hold it in memory; the wa-sqlite OPFS engine remains the production gate for a fuller dictionary.";
+  "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
+const fullDictionary = createFullDictionaryClient({
+  baseUrl: "/dictionary-full",
+  onStateChange: (state) => renderFullDictionarySettings(state),
+});
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
 const DEFAULT_THEME = "sunrise";
 const DEBUG_DAY_MS = 20 * 1000;
@@ -1182,6 +1194,76 @@ function renderMetrics() {
   dictionarySource.textContent = lastMetrics?.source ?? "Online setup needed";
 }
 
+
+function renderFullDictionarySettings(state = fullDictionary.status()) {
+  if (!fullDictionaryStatus) return;
+  const count = Number(state.rowCount ?? 0).toLocaleString();
+  const size = state.totalBytes ? formatBytes(state.totalBytes) : "";
+  if (state.busy && state.progress) {
+    fullDictionaryStatus.textContent = `Downloading full dictionary: ${state.progress.completed} / ${state.progress.total} shards (${state.progress.percent}%).`;
+  } else if (state.offlineInstalled) {
+    fullDictionaryStatus.textContent = `${count} entries are available offline (${size} compressed).`;
+  } else if (state.available) {
+    fullDictionaryStatus.textContent = `${count} entries are available online. Looked-up shards cache automatically; download ${size} for complete offline lookup.`;
+  } else if (state.lastError) {
+    fullDictionaryStatus.textContent = `Full dictionary package unavailable: ${state.lastError}`;
+  } else {
+    fullDictionaryStatus.textContent = "Checking full dictionary package…";
+  }
+  if (fullDictionaryProgress) {
+    fullDictionaryProgress.hidden = !state.busy;
+    fullDictionaryProgress.value = Number(state.progress?.percent ?? 0);
+  }
+  if (fullDictionaryInstallButton) {
+    fullDictionaryInstallButton.hidden = !state.available || state.offlineInstalled;
+    fullDictionaryInstallButton.disabled = Boolean(state.busy);
+  }
+  if (fullDictionaryRemoveButton) {
+    fullDictionaryRemoveButton.hidden = !state.offlineInstalled;
+    fullDictionaryRemoveButton.disabled = Boolean(state.busy);
+  }
+}
+
+async function refreshFullDictionaryStatus(force = false) {
+  await fullDictionary.ensureManifest({ force });
+  renderFullDictionarySettings();
+  return fullDictionary.status();
+}
+
+async function installFullDictionaryOffline() {
+  if (fullDictionaryInstallButton) fullDictionaryInstallButton.disabled = true;
+  try {
+    const state = await fullDictionary.installAll({
+      onProgress: (progress) => renderFullDictionarySettings({ ...fullDictionary.status(), busy: true, progress }),
+    });
+    renderFullDictionarySettings(state);
+    if (updateStatus) updateStatus.textContent = "Full dictionary downloaded for offline use.";
+    return state;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (fullDictionaryStatus) fullDictionaryStatus.textContent = `Full dictionary download failed: ${message}`;
+    return fullDictionary.status();
+  } finally {
+    renderFullDictionarySettings();
+  }
+}
+
+async function removeFullDictionaryOffline() {
+  try {
+    const state = await fullDictionary.removeOfflineCopy();
+    renderFullDictionarySettings(state);
+    if (updateStatus) updateStatus.textContent = "Full dictionary offline copy removed. Online lookup remains available.";
+    return state;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (fullDictionaryStatus) fullDictionaryStatus.textContent = `Could not remove the offline copy: ${message}`;
+    return fullDictionary.status();
+  }
+}
+
+fullDictionaryInstallButton?.addEventListener("click", () => { void installFullDictionaryOffline(); });
+fullDictionaryRemoveButton?.addEventListener("click", () => { void removeFullDictionaryOffline(); });
+
 function renderAppMenu() {
   appVersion.textContent = APP_VERSION;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
@@ -1220,6 +1302,7 @@ function renderAppMenu() {
     }
   }
   memoryNote.textContent = MEMORY_TARGET_NOTE;
+  renderFullDictionarySettings();
   googleStatus.textContent = `This device's web origin is ${window.location.origin} — it must be listed under "Authorized JavaScript origins" on your Google OAuth client for sign-in to work. Offline dictionary and study features stay local.`;
   googleAccount.textContent = googleAuth.profile?.email ?? "Not signed in";
   googleAuthStatus.textContent = googleAuth.accessToken
@@ -1485,6 +1568,7 @@ function renderResult(data) {
         ${renderAiChatButton(data.term)}
       </div>
       <p class="result-entry-type">${escapeHtml(data.entryType)}</p>
+      ${data.dictionaryCoverage === "full" ? `<p class="small muted">Full 770,770-entry dictionary</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
     <div class="meaning-grid">
@@ -1751,6 +1835,7 @@ async function ensureDictionaryLoaded() {
     loadButton.hidden = true;
     setSearchLoading(false);
     renderMetrics();
+    void refreshFullDictionaryStatus();
     return true;
   } catch (error) {
     loadButton.disabled = false;
@@ -1807,6 +1892,16 @@ function lookupTerm(input) {
   } finally {
     statement.free();
   }
+}
+
+
+async function lookupTermWithFullFallback(input) {
+  const primary = lookupTerm(input);
+  if (primary.status !== "not_found" || isChineseInput(input)) return primary;
+  const full = await fullDictionary.lookup(input);
+  if (full?.status === "found") return full;
+  if (full?.status === "unavailable") primary.fullDictionaryUnavailable = full.reason;
+  return primary;
 }
 
 function parseExchangeForms(exchange) {
@@ -5072,7 +5167,7 @@ async function runLookup({ commit = false } = {}) {
     if (!ready) return;
   }
   try {
-    const data = lookupTerm(value);
+    const data = await lookupTermWithFullFallback(value);
     renderResult(data);
     if (commit && data.status === "found") {
       const at = nowIso();
@@ -5085,10 +5180,10 @@ async function runLookup({ commit = false } = {}) {
   }
 }
 
-function runLoadedLookupForReturn() {
+async function runLoadedLookupForReturn() {
   const value = termInput.value;
   try {
-    const data = lookupTerm(value);
+    const data = await lookupTermWithFullFallback(value);
     renderResult(data);
     if (data.status === "found") {
       const at = nowIso();
@@ -5115,7 +5210,7 @@ async function handleReturnKey() {
   let data = null;
   let spokeDuringKeypress = false;
   if (loaded) {
-    data = runLoadedLookupForReturn();
+    data = await runLoadedLookupForReturn();
     if (speakOnReturn && data?.status === "found") {
       speakTerm(data.term);
       spokeDuringKeypress = true;
@@ -9273,10 +9368,18 @@ window.WordLoverApp = {
       ? requestOfflineReady(navigator.serviceWorker.controller)
       : Promise.resolve(null),
   lookupTerm,
+  lookupTermWithFullFallback,
   suggestTerms,
   normalizeTerm,
   isValidEnglishTerm,
   lookupChineseTerm,
+  fullDictionary: {
+    status: () => fullDictionary.status(),
+    refresh: (force = false) => refreshFullDictionaryStatus(force),
+    lookup: (term) => fullDictionary.lookup(term),
+    install: () => installFullDictionaryOffline(),
+    remove: () => removeFullDictionaryOffline(),
+  },
   saveVocabularyItem,
   saveManualVocabularyItem,
   showUnknownTermDialog,
