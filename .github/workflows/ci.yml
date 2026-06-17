@@ -29,9 +29,9 @@ jobs:
       - name: Verify cache-version lockstep
         run: python apps/wordlover-pwa/scripts/check_versions.py
 
-      - name: Test full dictionary package and client
+      - name: Test dictionary build, package, and client code
         run: |
-          python -m unittest scripts.tests.test_package_dictionary_shards
+          python -m unittest discover -s scripts/tests -p 'test_*.py'
           node apps/wordlover-pwa/scripts/test-full-dictionary.mjs
 
       - name: Check symbol map is up to date
@@ -139,9 +139,10 @@ jobs:
           git show origin/gh-pages:dictionary.sqlite     > "$SITE/dictionary.sqlite"
           git show origin/gh-pages:dictionary.sqlite.zst > "$SITE/dictionary.sqlite.zst"
 
-          # Preserve the separately-published sharded full dictionary across shell-only deploys.
+          # Preserve and revalidate the separately-published sharded full dictionary.
           if git ls-tree -d --name-only origin/gh-pages dictionary-full | grep -q '^dictionary-full$'; then
             git archive origin/gh-pages dictionary-full | tar -x -C "$SITE"
+            python scripts/validate_dictionary_shards.py "$SITE/dictionary-full"
           fi
 
           # GitHub Pages config.
@@ -188,11 +189,15 @@ jobs:
 
   full-dictionary-artifact:
     name: Build full ECDICT dictionary artifact
-    # Build on this implementation PR, its merge commit, or a manual refresh.
+    # Build on dictionary-runtime implementation/audit PRs, their merge commits, or a manual refresh.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.head_ref == 'feat/full-dictionary-runtime') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'full 770k dictionary runtime'))
+      (github.event_name == 'pull_request' &&
+        (github.head_ref == 'feat/full-dictionary-runtime' ||
+         github.head_ref == 'fix/post-merge-full-dictionary-audit')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+        (contains(github.event.head_commit.message, 'full 770k dictionary runtime') ||
+         contains(github.event.head_commit.message, 'full dictionary runtime after merge audit')))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -277,6 +282,7 @@ jobs:
             --version "$VERSION.sharded" \
             --shard-count 128 \
             --gzip-level 9
+          python scripts/validate_dictionary_shards.py full-dictionary-web
 
       - name: Upload full dictionary bundle
         uses: actions/upload-artifact@v4
@@ -312,6 +318,8 @@ jobs:
       group: deploy-gh-pages
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: wordfan-full-dictionary-web-${{ github.run_number }}
@@ -327,6 +335,7 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$SITE"
           rm -rf "$SITE/dictionary-full"
           cp -a dictionary-full "$SITE/dictionary-full"
+          python scripts/validate_dictionary_shards.py "$SITE/dictionary-full"
           cd "$SITE"
           git add dictionary-full
           git -c user.name='github-actions[bot]' \
