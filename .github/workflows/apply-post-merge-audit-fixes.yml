@@ -32,6 +32,19 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Correct one-shot generator closure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply_post_merge_audit_fixes.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'replace_between(text, "  async removeOfflineCopy()", "}\\n\\nexport function createFullDictionaryClient", remove_fn + "\\n}", "offline removal")'
+          new = 'replace_between(text, "  async removeOfflineCopy()", "}\\n\\nexport function createFullDictionaryClient", remove_fn, "offline removal")'
+          if old not in text:
+              raise SystemExit("Expected closure generator line was not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Apply strict audit patch
         run: python scripts/apply_post_merge_audit_fixes.py
 
