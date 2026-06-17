@@ -1,11 +1,10 @@
 name: Apply post-merge audit fixes
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/post-merge-full-dictionary-audit
-    paths:
-      - .github/workflows/apply-post-merge-audit-fixes.yml
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
