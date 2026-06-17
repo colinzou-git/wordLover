@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.package_dictionary_shards import fnv1a32, package, shard_index
+from scripts.package_dictionary_shards import fnv1a32, normalize_word, package, shard_index
 
 
 SCHEMA = """
@@ -106,6 +106,32 @@ class PackageDictionaryShardsTests(unittest.TestCase):
                 ))
                 hashes.append([item["sha256"] for item in manifest["shards"]])
             self.assertEqual(hashes[0], hashes[1])
+
+
+    def test_all_apostrophe_variants_share_one_normalized_key(self) -> None:
+        variants = ["they‘re", "they’re", "theyʼre", "they`re", "they＇re"]
+        self.assertEqual({normalize_word(value) for value in variants}, {"they're"})
+        self.assertEqual({shard_index(value, 128) for value in variants}, {shard_index("they're", 128)})
+
+    def test_validation_detects_changed_shard_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            database = root / "dictionary.sqlite"
+            output = root / "shards"
+            self.build_database(database)
+            manifest = package(argparse.Namespace(
+                input=database,
+                output_dir=output,
+                version="test.full.1",
+                shard_count=4,
+                gzip_level=9,
+                skip_validation=False,
+            ))
+            shard_path = output / manifest["shards"][0]["path"]
+            shard_path.write_bytes(shard_path.read_bytes() + b"corrupt")
+            from scripts.package_dictionary_shards import validate_package
+            with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+                validate_package(output, manifest)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ DEFAULT_REPORT = Path("data/dictionary-report.json")
 DEFAULT_CSV_NAME = "ecdict.csv"
 SINGLE_WORD_RE = re.compile(r"^[A-Za-z]+$")
 SHORT_TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
+APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +68,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_word(word: str) -> str:
-    word = word.strip().replace("’", "'").replace("`", "'")
+    word = word.strip().translate(APOSTROPHE_TRANSLATION)
     word = re.sub(r"\s+", " ", word)
     return word.casefold()
 

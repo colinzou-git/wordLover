@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260615-2";
+} from "./fsrs-scheduler.js?v=20260617-1";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260615-2";
+} from "./persistence.js?v=20260617-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260615-2";
+} from "./spelling.js?v=20260617-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260615-2";
+} from "./ui-preferences.js?v=20260617-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260615-2";
+} from "./review-state.js?v=20260617-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -57,7 +57,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260615-2";
+} from "./study-one-more.js?v=20260617-1";
 
 import {
   studyEventTrack,
@@ -69,11 +69,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260615-2";
+} from "./sync.js?v=20260617-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260615-2";
+} from "./goal-forecast.js?v=20260617-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -85,11 +85,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260615-2";
+} from "./tracks.js?v=20260617-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260615-2";
+} from "./full-dictionary.js?v=20260617-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -230,9 +230,9 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260615-2-v131";
+const APP_VERSION = "0.6.2-product.20260617-1-v132";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v131";
+const SHELL_CACHE_VERSION = "wordlover-shell-v132";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
@@ -299,6 +299,7 @@ let loaded = false;
 let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
+let lookupRequestSequence = 0;
 let suggestionHandle = 0;
 let autosaveHandle = 0;
 let dbPromise = null;
@@ -5155,19 +5156,21 @@ async function addHistory(item) {
   if (normalizedItem?.term) prefetchAiChat(normalizedItem.term);
 }
 
-async function runLookup({ commit = false } = {}) {
+async function runLookup({ commit = false, allowFull = commit } = {}) {
   const value = termInput.value;
+  const requestId = ++lookupRequestSequence;
   if (!value.trim()) {
     result.innerHTML = `<p class="muted">Type a term to test local lookup.</p>`;
     renderSuggestions([]);
-    return;
+    return null;
   }
   if (!loaded) {
     const ready = await ensureDictionaryLoaded();
-    if (!ready) return;
+    if (!ready || requestId !== lookupRequestSequence || termInput.value !== value) return null;
   }
   try {
-    const data = await lookupTermWithFullFallback(value);
+    const data = allowFull ? await lookupTermWithFullFallback(value) : lookupTerm(value);
+    if (requestId !== lookupRequestSequence || termInput.value !== value) return null;
     renderResult(data);
     if (commit && data.status === "found") {
       const at = nowIso();
@@ -5175,25 +5178,14 @@ async function runLookup({ commit = false } = {}) {
     }
     return data;
   } catch (error) {
+    if (requestId !== lookupRequestSequence || termInput.value !== value) return null;
     result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
     return null;
   }
 }
 
 async function runLoadedLookupForReturn() {
-  const value = termInput.value;
-  try {
-    const data = await lookupTermWithFullFallback(value);
-    renderResult(data);
-    if (data.status === "found") {
-      const at = nowIso();
-      void addHistory({ term: data.term, searchedAt: at, queriedAt: at, queryMs: data.queryMs ?? 0 });
-    }
-    return data;
-  } catch (error) {
-    result.innerHTML = `<p class="error">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
-    return null;
-  }
+  return runLookup({ commit: true, allowFull: true });
 }
 
 let invalidFlagHandle = 0;
@@ -7972,10 +7964,11 @@ loadButton.addEventListener("click", async () => {
 const DISALLOWED_TERM_CHARS = /[^A-Za-z0-9 '\-㐀-鿿]/g;
 function sanitizeTermInput() {
   const before = termInput.value;
-  const cleaned = before.replace(DISALLOWED_TERM_CHARS, "");
+  const normalized = normalizeApostrophes(before);
+  const cleaned = normalized.replace(DISALLOWED_TERM_CHARS, "");
   if (cleaned === before) return;
   const caret = termInput.selectionStart ?? cleaned.length;
-  const keptBeforeCaret = before.slice(0, caret).replace(DISALLOWED_TERM_CHARS, "").length;
+  const keptBeforeCaret = normalizeApostrophes(before.slice(0, caret)).replace(DISALLOWED_TERM_CHARS, "").length;
   termInput.value = cleaned;
   try {
     termInput.setSelectionRange(keptBeforeCaret, keptBeforeCaret);
@@ -8003,6 +7996,7 @@ function sanitizeSpellingInput(input) {
 let lastReturnValue = null;
 
 function clearSearchField() {
+  lookupRequestSequence += 1;
   termInput.value = "";
   renderSuggestions([]);
   currentResult = null;
@@ -8017,6 +8011,7 @@ function clearSearchField() {
 }
 
 termInput.addEventListener("input", () => {
+  lookupRequestSequence += 1;
   sanitizeTermInput();
   termInput.classList.remove("input-invalid");
   lastReturnValue = null; // any edit re-arms first-Return (save) behavior

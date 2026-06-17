@@ -6,6 +6,7 @@ import {
   createFullDictionaryClient,
   fnv1a32,
   fullDictionaryShardIndex,
+  validateFullDictionaryManifest,
 } from "../public/full-dictionary.js";
 
 class MemoryStorage {
@@ -21,11 +22,11 @@ class MemoryCache {
     const response = this.#responses.get(String(key));
     return response ? response.clone() : undefined;
   }
-  async put(key, response) {
-    this.#responses.set(String(key), response.clone());
-  }
-  async delete(key) {
-    return this.#responses.delete(String(key));
+  async put(key, response) { this.#responses.set(String(key), response.clone()); }
+  async delete(key) { return this.#responses.delete(String(key)); }
+  clearOne() {
+    const first = this.#responses.keys().next().value;
+    if (first) this.#responses.delete(first);
   }
 }
 
@@ -37,42 +38,28 @@ class MemoryCaches {
   }
   async keys() { return [...this.#caches.keys()]; }
   async delete(name) { return this.#caches.delete(name); }
+  async clearOne(name) { (await this.open(name)).clearOne(); }
 }
 
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
+function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+function gzipPayload(payload) { return gzipSync(Buffer.from(JSON.stringify(payload)), { level: 9, mtime: 0 }); }
 
 assert.equal(fnv1a32("abandon"), 3402497766);
 assert.equal(fullDictionaryShardIndex("abandon", 128), 102);
-assert.equal(fullDictionaryShardIndex("they're", 128), 113);
+for (const value of ["they‘re", "they’re", "theyʼre", "they`re", "they＇re"]) {
+  assert.equal(fullDictionaryShardIndex(value, 128), fullDictionaryShardIndex("they're", 128));
+}
 
 const payload = {
   v: 1,
   e: {
-    fullsizeonlyword: [
-      "fullsizeonlyword",
-      "/fʊl/",
-      "a term present only in the full dictionary fixture",
-      "CI full fixture",
-      "仅存在于完整词典中的词",
-      "rare",
-    ],
+    fullsizeonlyword: ["fullsizeonlyword", "/fʊl/", "a term present only in the full dictionary fixture", "CI full fixture", "仅存在于完整词典中的词", "rare"],
   },
   a: {
-    fullsizeonlywords: [
-      "/fʊl/",
-      "a term present only in the full dictionary fixture",
-      "CI full fixture",
-      "仅存在于完整词典中的词",
-      "rare",
-      "fullsizeonlyword",
-      "plural",
-      "fullsizeonlyword",
-    ],
+    fullsizeonlywords: ["/fʊl/", "a term present only in the full dictionary fixture", "CI full fixture", "仅存在于完整词典中的词", "rare", "fullsizeonlyword", "plural", "fullsizeonlyword"],
   },
 };
-const compressed = gzipSync(Buffer.from(JSON.stringify(payload)), { level: 9, mtime: 0 });
+const compressed = gzipPayload(payload);
 const manifest = {
   app: "wordlover",
   formatVersion: 1,
@@ -85,71 +72,33 @@ const manifest = {
   hash: "fnv1a32-utf8-mod",
   compression: "gzip",
   totalCompressedBytes: compressed.byteLength,
-  shards: [
-    {
-      id: "00",
-      path: "shard-00.json.gz",
-      bytes: compressed.byteLength,
-      sha256: sha256(compressed),
-      entries: 1,
-      aliases: 1,
-    },
-  ],
+  shards: [{ id: "00", path: "shard-00.json.gz", bytes: compressed.byteLength, sha256: sha256(compressed), entries: 1, aliases: 1 }],
 };
+validateFullDictionaryManifest(manifest);
+for (const mutate of [
+  (copy) => { copy.shards[0].path = "../shard-00.json.gz"; },
+  (copy) => { copy.shards[0].sha256 = "bad"; },
+  (copy) => { copy.totalCompressedBytes += 1; },
+  (copy) => { copy.rowCount += 1; },
+]) {
+  const invalid = structuredClone(manifest);
+  mutate(invalid);
+  assert.throws(() => validateFullDictionaryManifest(invalid));
+}
 
 let online = true;
 const calls = [];
 const fetchFn = async (url) => {
   calls.push(String(url));
   if (!online) throw new Error("offline");
-  if (String(url).endsWith("manifest.json")) {
-    return new Response(JSON.stringify(manifest), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  if (String(url).endsWith("shard-00.json.gz")) {
-    return new Response(compressed, {
-      status: 200,
-      headers: { "Content-Type": "application/gzip" },
-    });
-  }
+  if (String(url).endsWith("manifest.json")) return new Response(JSON.stringify(manifest), { status: 200, headers: { "Content-Type": "application/json" } });
+  if (String(url).endsWith("shard-00.json.gz")) return new Response(compressed, { status: 200, headers: { "Content-Type": "application/gzip" } });
   return new Response("not found", { status: 404 });
 };
 
 const storage = new MemoryStorage();
 const cachesApi = new MemoryCaches();
-const client = createFullDictionaryClient({
-  baseUrl: "/dictionary-full",
-  fetchFn,
-  cachesApi,
-  storage,
-  storageManager: {
-    async estimate() {
-      return { quota: 100 * 1024 * 1024, usage: 0 };
-    },
-  },
-  cryptoApi: webcrypto,
-  DecompressionStreamCtor: globalThis.DecompressionStream,
-});
-
-const exact = await client.lookup("FullSizeOnlyWord");
-assert.equal(exact.status, "found");
-assert.equal(exact.term, "fullsizeonlyword");
-assert.equal(exact.dictionaryCoverage, "full");
-assert.deepEqual(exact.chineseMeanings, ["仅存在于完整词典中的词"]);
-
-const alias = await client.lookup("fullsizeonlywords");
-assert.equal(alias.status, "found");
-assert.equal(alias.baseTerm, "fullsizeonlyword");
-assert.equal(alias.inflectionLabel, "plural");
-
-assert.equal(calls.filter((url) => url.endsWith("shard-00.json.gz")).length, 1);
-const installed = await client.installAll();
-assert.equal(installed.offlineInstalled, true);
-
-online = false;
-const offlineClient = createFullDictionaryClient({
+const options = {
   baseUrl: "/dictionary-full",
   fetchFn,
   cachesApi,
@@ -157,12 +106,44 @@ const offlineClient = createFullDictionaryClient({
   storageManager: { async estimate() { return { quota: 100 * 1024 * 1024, usage: 0 }; } },
   cryptoApi: webcrypto,
   DecompressionStreamCtor: globalThis.DecompressionStream,
-});
-const offline = await offlineClient.lookup("fullsizeonlyword");
-assert.equal(offline.status, "found");
-assert.equal(offlineClient.status().offlineInstalled, true);
+};
+const client = createFullDictionaryClient({ ...options, maxParsedShards: Number.NaN });
+assert.equal(client.maxParsedShards, 4);
 
-await offlineClient.removeOfflineCopy();
-assert.equal(offlineClient.status().offlineInstalled, false);
+const exact = await client.lookup("FullSizeOnlyWord");
+assert.equal(exact.status, "found");
+assert.equal(exact.dictionaryCoverage, "full");
+assert.deepEqual(exact.chineseMeanings, ["仅存在于完整词典中的词"]);
+const alias = await client.lookup("fullsizeonlywords");
+assert.equal(alias.status, "found");
+assert.equal(alias.baseTerm, "fullsizeonlyword");
+assert.equal(calls.filter((url) => url.endsWith("shard-00.json.gz")).length, 1);
+
+const installed = await client.installAll();
+assert.equal(installed.offlineInstalled, true);
+const cacheName = (await cachesApi.keys()).find((name) => name.startsWith("wordfan-full-dictionary-v1-"));
+await cachesApi.clearOne(cacheName);
+online = false;
+const evictedClient = createFullDictionaryClient(options);
+await evictedClient.ensureManifest();
+assert.equal(evictedClient.status().offlineInstalled, false, "cache eviction must clear the stale installed marker");
+const unavailable = await evictedClient.lookup("fullsizeonlyword");
+assert.equal(unavailable.status, "unavailable");
+
+online = true;
+await evictedClient.installAll();
+await cachesApi.open("wordfan-full-dictionary-v1-old-version");
+assert((await cachesApi.keys()).length >= 2);
+await evictedClient.removeOfflineCopy();
+assert.equal(evictedClient.status().offlineInstalled, false);
+assert.deepEqual((await cachesApi.keys()).filter((name) => name.startsWith("wordfan-full-dictionary-v1-")), []);
+
+const noCacheClient = createFullDictionaryClient({ ...options, cachesApi: null });
+await assert.rejects(() => noCacheClient.installAll(), /cannot store/i);
+
+const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: {}, cachesApi: new MemoryCaches(), storage: new MemoryStorage() });
+const noCrypto = await noCryptoClient.lookup("fullsizeonlyword");
+assert.equal(noCrypto.status, "unavailable");
+assert.match(noCrypto.reason, /cannot verify/i);
 
 console.log("full dictionary client tests passed");
