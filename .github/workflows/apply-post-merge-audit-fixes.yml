@@ -99,6 +99,10 @@ jobs:
       - name: Commit fixes and tests
         run: |
           set -euo pipefail
+          # The patch removes this one-shot workflow, but GITHUB_TOKEN cannot push
+          # workflow-file changes. Restore it for this bot commit; the connector
+          # deletes it immediately afterward in a normal user-authored commit.
+          git restore --source=HEAD -- .github/workflows/apply-post-merge-audit-fixes.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
