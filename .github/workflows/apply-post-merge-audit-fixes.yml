@@ -48,6 +48,19 @@ jobs:
       - name: Apply strict audit patch
         run: python scripts/apply_post_merge_audit_fixes.py
 
+      - name: Align Python shard routing with browser normalization
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/package_dictionary_shards.py")
+          text = path.read_text(encoding="utf-8")
+          old = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(value) % shard_count\n"
+          new = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(normalize_word(value)) % shard_count\n"
+          if old not in text:
+              raise SystemExit("Expected Python shard router was not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Regenerate symbol map
         run: python scripts/generate_code_map.py
 
