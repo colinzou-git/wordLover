@@ -98,13 +98,23 @@ jobs:
 
       - name: Commit fixes and tests
         run: |
-          set -euo pipefail
-          # The patch removes this one-shot workflow, but GITHUB_TOKEN cannot push
-          # workflow-file changes. Restore it for this bot commit; the connector
-          # deletes it immediately afterward in a normal user-authored commit.
-          git restore --source=HEAD -- .github/workflows/apply-post-merge-audit-fixes.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: harden full dictionary runtime after merge audit"
-          git push origin HEAD:fix/post-merge-full-dictionary-audit
+          set -o pipefail
+          {
+            set -euo pipefail
+            git restore --source=HEAD -- .github/workflows/apply-post-merge-audit-fixes.yml
+            git status --short
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git diff --cached --stat
+            git commit -m "fix: harden full dictionary runtime after merge audit"
+            git push origin HEAD:fix/post-merge-full-dictionary-audit
+          } 2>&1 | tee post-merge-audit-commit.log
+
+      - name: Upload commit diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-audit-commit-${{ github.run_number }}
+          path: post-merge-audit-commit.log
+          if-no-files-found: warn
