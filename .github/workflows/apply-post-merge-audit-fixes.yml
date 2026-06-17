@@ -48,17 +48,26 @@ jobs:
       - name: Apply strict audit patch
         run: python scripts/apply_post_merge_audit_fixes.py
 
-      - name: Align Python shard routing with browser normalization
+      - name: Align generated audit fixes
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path("scripts/package_dictionary_shards.py")
-          text = path.read_text(encoding="utf-8")
-          old = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(value) % shard_count\n"
-          new = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(normalize_word(value)) % shard_count\n"
-          if old not in text:
+
+          shard_path = Path("scripts/package_dictionary_shards.py")
+          shard_text = shard_path.read_text(encoding="utf-8")
+          old_router = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(value) % shard_count\n"
+          new_router = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(normalize_word(value)) % shard_count\n"
+          if old_router not in shard_text:
               raise SystemExit("Expected Python shard router was not found")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          shard_path.write_text(shard_text.replace(old_router, new_router, 1), encoding="utf-8")
+
+          test_path = Path("apps/wordlover-pwa/scripts/test-full-dictionary.mjs")
+          test_text = test_path.read_text(encoding="utf-8")
+          old_crypto = "const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: null, cachesApi: new MemoryCaches(), storage: new MemoryStorage() });"
+          new_crypto = "const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: {}, cachesApi: new MemoryCaches(), storage: new MemoryStorage() });"
+          if old_crypto not in test_text:
+              raise SystemExit("Expected no-WebCrypto test setup was not found")
+          test_path.write_text(test_text.replace(old_crypto, new_crypto, 1), encoding="utf-8")
           PY
 
       - name: Regenerate symbol map
