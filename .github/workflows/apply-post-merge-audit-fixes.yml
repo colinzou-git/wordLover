@@ -101,7 +101,13 @@ jobs:
           set -o pipefail
           {
             set -euo pipefail
-            git restore --source=HEAD -- .github/workflows/apply-post-merge-audit-fixes.yml
+            # GitHub App tokens cannot push workflow-file changes. Restore both
+            # workflow files here; the connector applies the validated CI diff
+            # and removes this temporary workflow after the bot commit lands.
+            git restore --source=HEAD -- \
+              .github/workflows/apply-post-merge-audit-fixes.yml \
+              .github/workflows/ci.yml
+            rm -f post-merge-audit-tests.log post-merge-audit-commit.log
             git status --short
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
