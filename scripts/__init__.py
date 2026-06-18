@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 from pathlib import Path
 
 
@@ -15,6 +16,7 @@ def _export_audit_symbol_map() -> None:
     if spec is None or spec.loader is None:
         return
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     files, skipped = module.discover_source_files(root)
     fresh = module.render_map(root, files, skipped)
