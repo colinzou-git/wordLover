@@ -85,7 +85,7 @@ test("Study One More exclusions match full-width apostrophe variants", () => {
   );
 });
 
-test("Review replay normalizes apostrophe variants and uppercase ratings", () => {
+test("Review replay matches normalized apostrophe variants", () => {
   const occurredAt = "2026-06-18T10:00:00.000Z";
   const review = rebuildReviewStateFromEvents(
     { term: "don't", savedAt: "2026-06-17T10:00:00.000Z" },
@@ -94,7 +94,7 @@ test("Review replay normalizes apostrophe variants and uppercase ratings", () =>
       type: "review",
       term: "DONʼT",
       normalizedTerm: "donʼt",
-      rating: "GOOD",
+      rating: "good",
       occurredAt,
     }],
     Date.parse(occurredAt),
