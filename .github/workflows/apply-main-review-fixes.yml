@@ -4,13 +4,19 @@ on:
   push:
     branches:
       - fix/main-review-20260618
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/fix/main-review-20260618') ||
+       (github.event_name == 'pull_request' && github.head_ref == 'fix/main-review-20260618'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
