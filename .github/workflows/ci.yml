@@ -49,8 +49,9 @@ jobs:
         run: npm run validate:shell-assets
 
   smoke:
-    name: Headless app-shell smoke test
+    name: Browser and app-shell smoke tests
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -58,11 +59,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Playwright (Chromium)
+      - name: Install Playwright (Chromium + WebKit)
         run: |
           python -m pip install --upgrade pip
           python -m pip install playwright zstandard
-          python -m playwright install --with-deps chromium
+          python -m playwright install --with-deps chromium webkit
 
       - name: Prepare lightweight CI dictionary
         run: python apps/wordlover-pwa/scripts/create-ci-dictionary.py --force
@@ -76,11 +77,209 @@ jobs:
             sleep 1
           done
 
-      - name: Run headless smoke test
+      - name: Run Chromium touch smoke test
         run: >
           python apps/wordlover-pwa/scripts/smoke-headless.py
           --base http://127.0.0.1:4173
           --report apps/wordlover-pwa/test-results/smoke-report.json
+
+      - name: Run WebKit touch smoke test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("apps/wordlover-pwa/scripts/smoke-headless.py").read_text(encoding="utf-8")
+          chromium_launch = "browser = p.chromium.launch(headless=True)"
+          if chromium_launch not in source:
+              raise SystemExit("smoke-headless.py launch line changed; update the WebKit CI adapter.")
+          Path("/tmp/smoke-headless-webkit.py").write_text(
+              source.replace(chromium_launch, "browser = p.webkit.launch(headless=True)", 1),
+              encoding="utf-8",
+          )
+          PY
+          python /tmp/smoke-headless-webkit.py \
+            --base http://127.0.0.1:4173 \
+            --report apps/wordlover-pwa/test-results/smoke-webkit-report.json
+
+      - name: Run visible user flows in Chromium and WebKit
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import time
+          from pathlib import Path
+
+          from playwright.sync_api import Page, sync_playwright
+
+          BASE = "http://127.0.0.1:4173"
+          ARTIFACTS = Path("apps/wordlover-pwa/test-results/user-flows")
+          ARTIFACTS.mkdir(parents=True, exist_ok=True)
+
+          def dismiss_modal(page: Page) -> None:
+              for _ in range(8):
+                  overlay = page.locator(".modal-overlay")
+                  if not overlay.count() or not overlay.first.is_visible():
+                      return
+                  passphrase = page.locator(".modal-overlay #passphrase")
+                  cancel = page.locator(".modal-overlay [data-modal-cancel]")
+                  submit = page.locator(".modal-overlay [data-modal-submit]")
+                  if passphrase.count():
+                      passphrase.fill("wordlover-localhost-development-passphrase")
+                      submit.click()
+                  elif cancel.count():
+                      cancel.click()
+                  else:
+                      page.keyboard.press("Escape")
+                  page.wait_for_timeout(200)
+
+          def wait_for_ready(page: Page) -> None:
+              last_error = None
+              for _ in range(3):
+                  try:
+                      page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                      page.wait_for_function("window.WordLoverApp != null", timeout=15_000)
+                      dismiss_modal(page)
+                      page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
+                      page.wait_for_function(
+                          "window.WordLoverApp?.getState?.().loaded === true",
+                          timeout=60_000,
+                      )
+                      dismiss_modal(page)
+                      page.locator("#termInput").wait_for(state="visible", timeout=10_000)
+                      return
+                  except Exception as exc:  # navigation can occur when a service worker takes control
+                      last_error = exc
+                      page.wait_for_timeout(500)
+              raise last_error
+
+          def run_case(playwright, browser_name: str, mobile: bool) -> dict:
+              label = f"{browser_name}-{'iphone' if mobile else 'desktop'}"
+              browser_type = getattr(playwright, browser_name)
+              browser = browser_type.launch(headless=True)
+              context_args = {
+                  "viewport": {"width": 390, "height": 844} if mobile else {"width": 1280, "height": 900},
+                  "has_touch": mobile,
+                  "is_mobile": mobile,
+              }
+              if mobile:
+                  context_args["user_agent"] = (
+                      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                      "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                      "Mobile/15E148 Safari/604.1"
+                  )
+              context = browser.new_context(**context_args)
+              context.tracing.start(screenshots=True, snapshots=True, sources=True)
+              page = context.new_page()
+              console_errors: list[str] = []
+              page_errors: list[str] = []
+              page.on(
+                  "console",
+                  lambda message: console_errors.append(message.text)
+                  if message.type == "error"
+                  else None,
+              )
+              page.on("pageerror", lambda error: page_errors.append(str(error)))
+              trace_path = ARTIFACTS / f"{label}-trace.zip"
+              screenshot_path = ARTIFACTS / f"{label}.png"
+              report = {"browser": browser_name, "profile": "iphone" if mobile else "desktop"}
+              try:
+                  page.goto(
+                      f"{BASE}/?fresh=ci-visible-{label}-{int(time.time())}",
+                      wait_until="domcontentloaded",
+                  )
+                  wait_for_ready(page)
+
+                  search = page.locator("#termInput")
+                  search.fill("abandon")
+                  search.press("Enter")
+                  page.wait_for_function(
+                      """() => {
+                          const text = document.querySelector("#result")?.textContent?.toLowerCase() ?? "";
+                          return text.includes("abandon") && !text.includes("invalid input");
+                      }""",
+                      timeout=15_000,
+                  )
+                  report["searchResult"] = page.locator("#result").inner_text()[:500]
+
+                  page.locator("#clearSearch").click()
+                  if search.input_value() != "":
+                      raise AssertionError("Clear search did not empty the search field.")
+
+                  page.locator("#appMenuButton").click()
+                  page.locator("#appMenu").wait_for(state="visible", timeout=5_000)
+                  page.locator("#themeSelect").select_option("ink")
+                  page.wait_for_function(
+                      "document.documentElement.dataset.theme === 'ink'",
+                      timeout=5_000,
+                  )
+
+                  page.locator("#appMenuBack").click()
+                  page.locator("#appMenu").wait_for(state="hidden", timeout=5_000)
+
+                  page.locator("#studyOneMoreFilterButton").click()
+                  page.locator("#studyOneMoreFilterPopup").wait_for(state="visible", timeout=5_000)
+                  page.locator("#filterIncludeFreqMin").fill("1")
+                  page.locator("#filterIncludeFreqMax").fill("5000")
+                  page.locator("#studyOneMoreFilterClose").click()
+                  page.locator("#studyOneMoreFilterPopup").wait_for(state="hidden", timeout=5_000)
+
+                  overflow = page.evaluate(
+                      """() => ({
+                          viewportWidth: window.innerWidth,
+                          documentWidth: document.documentElement.scrollWidth,
+                          bodyWidth: document.body.scrollWidth,
+                      })"""
+                  )
+                  report["layout"] = overflow
+                  if max(overflow["documentWidth"], overflow["bodyWidth"]) > overflow["viewportWidth"] + 2:
+                      raise AssertionError(f"Horizontal overflow detected: {overflow}")
+
+                  page.screenshot(path=str(screenshot_path), full_page=True)
+                  report["consoleErrors"] = console_errors
+                  report["pageErrors"] = page_errors
+                  if page_errors:
+                      raise AssertionError(f"Uncaught page errors: {page_errors}")
+                  return report
+              except Exception as exc:
+                  page.screenshot(path=str(screenshot_path), full_page=True)
+                  report["error"] = str(exc)
+                  report["consoleErrors"] = console_errors
+                  report["pageErrors"] = page_errors
+                  raise
+              finally:
+                  context.tracing.stop(path=str(trace_path))
+                  context.close()
+                  browser.close()
+                  (ARTIFACTS / f"{label}-report.json").write_text(
+                      json.dumps(report, indent=2, ensure_ascii=False),
+                      encoding="utf-8",
+                  )
+
+          results = []
+          failures = []
+          with sync_playwright() as playwright:
+              for browser_name, mobile in (("chromium", False), ("webkit", True)):
+                  try:
+                      results.append(run_case(playwright, browser_name, mobile))
+                  except Exception as exc:
+                      failures.append(
+                          {
+                              "browser": browser_name,
+                              "profile": "iphone" if mobile else "desktop",
+                              "error": str(exc),
+                          }
+                      )
+
+          summary = {"results": results, "failures": failures}
+          (ARTIFACTS / "summary.json").write_text(
+              json.dumps(summary, indent=2, ensure_ascii=False),
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, indent=2, ensure_ascii=False))
+          if failures:
+              raise SystemExit(1)
+          PY
 
       - name: Run browser automated suite
         run: >
