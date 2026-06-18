@@ -1,4 +1,4 @@
-name: Apply post-merge audit fixes
+name: Finalize post-merge dictionary audit
 
 on:
   pull_request:
@@ -11,12 +11,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: apply-post-merge-audit-fixes
+  group: finalize-post-merge-dictionary-audit
   cancel-in-progress: true
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  finalize:
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'workflow_dispatch' || github.head_ref == 'fix/post-merge-full-dictionary-audit')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,53 +32,175 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Correct one-shot generator closure when patch is pending
+      - name: Apply remaining concurrency and manifest fixes
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path("scripts/apply_post_merge_audit_fixes.py")
-          if not path.exists():
-              print("Audit patch is already applied.")
-              raise SystemExit(0)
+
+          path = Path("apps/wordlover-pwa/public/full-dictionary.js")
           text = path.read_text(encoding="utf-8")
-          old = 'replace_between(text, "  async removeOfflineCopy()", "}\\n\\nexport function createFullDictionaryClient", remove_fn + "\\n}", "offline removal")'
-          new = 'replace_between(text, "  async removeOfflineCopy()", "}\\n\\nexport function createFullDictionaryClient", remove_fn, "offline removal")'
-          if old in text:
-              path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          elif new not in text:
-              raise SystemExit("Unexpected audit generator closure state")
-          PY
 
-      - name: Apply strict audit patch when pending
-        run: |
-          if [ -f scripts/apply_post_merge_audit_fixes.py ]; then
-            python scripts/apply_post_merge_audit_fixes.py
-          else
-            echo "Audit patch is already applied."
-          fi
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count == 0 and new in text:
+                  return
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, found {count}")
+              text = text.replace(old, new, 1)
 
-      - name: Align generated audit fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
+          replace_once(
+              '    this.DecompressionStreamCtor = options.DecompressionStreamCtor ?? globalThis.DecompressionStream;\n    this.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;',
+              '    this.DecompressionStreamCtor = options.DecompressionStreamCtor ?? globalThis.DecompressionStream;\n    this.isOnline = typeof options.isOnline === "function"\n      ? options.isOnline\n      : () => globalThis.navigator?.onLine !== false;\n    this.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;',
+              "injectable online state",
+          )
+          replace_once(
+              '    this.parsedShards = new Map();\n    this.busy = false;',
+              '    this.parsedShards = new Map();\n    this.shardBytePromises = new Map();\n    this.shardParsePromises = new Map();\n    this.busy = false;',
+              "in-flight maps",
+          )
+          replace_once(
+              '  _isOnline() {\n    return globalThis.navigator?.onLine !== false;\n  }',
+              '  _isOnline() {\n    return this.isOnline() !== false;\n  }',
+              "online method",
+          )
+          replace_once(
+              '  async ensureManifest({ force = false } = {}) {\n    if (!force && this.manifest && Date.now() - this.manifestCheckedAt < 5 * 60 * 1000) return this.manifest;',
+              '  async ensureManifest({ force = false } = {}) {\n    if (!force && this.manifest && Date.now() - this.manifestCheckedAt < 5 * 60 * 1000) {\n      await this._refreshOfflineInstalledState();\n      return this.manifest;\n    }',
+              "cached manifest verification",
+          )
+          replace_once(
+              '          this._markOfflineIncomplete();\n          this.parsedShards.clear();\n          await this.cleanupOldCaches();',
+              '          this._markOfflineIncomplete();\n          this.parsedShards.clear();\n          this.shardBytePromises.clear();\n          this.shardParsePromises.clear();\n          await this.cleanupOldCaches();',
+              "version reset",
+          )
+          replace_once(
+              '    if (ids.has(shard.id)) throw new Error(`Full dictionary shard id ${shard.id} is duplicated.`);\n    ids.add(shard.id);\n    if (typeof shard.path !== "string" || !SHARD_PATH_RE.test(shard.path)) {',
+              '    if (ids.has(shard.id)) throw new Error(`Full dictionary shard id ${shard.id} is duplicated.`);\n    if (Number.parseInt(shard.id, 16) !== index) {\n      throw new Error(`Full dictionary shard ${index} is out of order.`);\n    }\n    ids.add(shard.id);\n    if (typeof shard.path !== "string" || !SHARD_PATH_RE.test(shard.path) || shard.path !== `shard-${shard.id}.json.gz`) {',
+              "manifest order",
+          )
 
-          shard_path = Path("scripts/package_dictionary_shards.py")
-          shard_text = shard_path.read_text(encoding="utf-8")
-          old_router = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(value) % shard_count\n"
-          new_router = "def shard_index(value: str, shard_count: int) -> int:\n    return fnv1a32(normalize_word(value)) % shard_count\n"
-          if old_router in shard_text:
-              shard_path.write_text(shard_text.replace(old_router, new_router, 1), encoding="utf-8")
-          elif new_router not in shard_text:
-              raise SystemExit("Unexpected Python shard router state")
+          old_bytes = '''  async _getShardBytes(shard, { cacheResult = true } = {}) {
+              if (!this.manifest) throw new Error("Full dictionary manifest is not loaded.");
+              const url = this._shardUrl(shard);
+              const cache = this.cachesApi?.open ? await this.cachesApi.open(this._cacheName()) : null;
+              const cached = await this._readCachedShard(cache, url, shard);
+              if (cached) return cached;
+              if (this.offlineInstalled) this._markOfflineIncomplete();
+              if (!this.fetchFn || !this._isOnline()) {
+                throw new Error("This full dictionary shard is not available offline yet.");
+              }
+              const response = await fetchWithTimeout(this.fetchFn, url, { cache: "no-store" }, 45000);
+              if (!response.ok) throw new Error(`Full dictionary shard request failed: ${response.status}`);
+              const bytes = new Uint8Array(await response.arrayBuffer());
+              await this._verifyShardBytes(bytes, shard);
+              if (cacheResult && cache?.put) {
+                await cache.put(
+                  url,
+                  new Response(bytes, {
+                    headers: {
+                      "Content-Type": "application/gzip",
+                      "X-WordFan-Dictionary-Version": this.manifest.dictionaryDataVersion,
+                    },
+                  }),
+                );
+              }
+              return bytes;
+            }
+          '''.replace("          ", "")
+          new_bytes = '''  async _loadShardBytes(shard, { cacheResult = true } = {}) {
+              if (!this.manifest) throw new Error("Full dictionary manifest is not loaded.");
+              const url = this._shardUrl(shard);
+              const cache = this.cachesApi?.open ? await this.cachesApi.open(this._cacheName()) : null;
+              const cached = await this._readCachedShard(cache, url, shard);
+              if (cached) return cached;
+              if (this.offlineInstalled) this._markOfflineIncomplete();
+              if (!this.fetchFn || !this._isOnline()) {
+                throw new Error("This full dictionary shard is not available offline yet.");
+              }
+              const response = await fetchWithTimeout(this.fetchFn, url, { cache: "no-store" }, 45000);
+              if (!response.ok) throw new Error(`Full dictionary shard request failed: ${response.status}`);
+              const bytes = new Uint8Array(await response.arrayBuffer());
+              await this._verifyShardBytes(bytes, shard);
+              if (cacheResult && cache?.put) {
+                await cache.put(
+                  url,
+                  new Response(bytes, {
+                    headers: {
+                      "Content-Type": "application/gzip",
+                      "X-WordFan-Dictionary-Version": this.manifest.dictionaryDataVersion,
+                    },
+                  }),
+                );
+              }
+              return bytes;
+            }
 
-          test_path = Path("apps/wordlover-pwa/scripts/test-full-dictionary.mjs")
-          test_text = test_path.read_text(encoding="utf-8")
-          old_crypto = "const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: null, cachesApi: new MemoryCaches(), storage: new MemoryStorage() });"
-          new_crypto = "const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: {}, cachesApi: new MemoryCaches(), storage: new MemoryStorage() });"
-          if old_crypto in test_text:
-              test_path.write_text(test_text.replace(old_crypto, new_crypto, 1), encoding="utf-8")
-          elif new_crypto not in test_text:
-              raise SystemExit("Unexpected no-WebCrypto test state")
+            async _getShardBytes(shard, options = {}) {
+              const key = `${this.manifest?.dictionaryDataVersion ?? "unknown"}:${shard.path}`;
+              if (this.shardBytePromises.has(key)) return this.shardBytePromises.get(key);
+              const promise = this._loadShardBytes(shard, options);
+              this.shardBytePromises.set(key, promise);
+              try {
+                return await promise;
+              } finally {
+                this.shardBytePromises.delete(key);
+              }
+            }
+          '''.replace("          ", "")
+          replace_once(old_bytes, new_bytes, "shard byte deduplication")
+
+          old_parsed = '''  async _getParsedShard(index) {
+              const shard = this.manifest?.shards?.[index];
+              if (!shard) throw new Error(`Full dictionary shard ${index} is missing from the manifest.`);
+              if (this.parsedShards.has(shard.id)) {
+                const payload = this.parsedShards.get(shard.id);
+                this._rememberParsedShard(shard.id, payload);
+                return payload;
+              }
+              const bytes = await this._getShardBytes(shard);
+              const payload = await decodeFullDictionaryShard(bytes, this.DecompressionStreamCtor);
+              this._rememberParsedShard(shard.id, payload);
+              return payload;
+            }
+          '''.replace("          ", "")
+          new_parsed = '''  async _getParsedShard(index) {
+              const shard = this.manifest?.shards?.[index];
+              if (!shard) throw new Error(`Full dictionary shard ${index} is missing from the manifest.`);
+              if (this.parsedShards.has(shard.id)) {
+                const payload = this.parsedShards.get(shard.id);
+                this._rememberParsedShard(shard.id, payload);
+                return payload;
+              }
+              const key = `${this.manifest.dictionaryDataVersion}:${shard.id}`;
+              if (this.shardParsePromises.has(key)) return this.shardParsePromises.get(key);
+              const promise = (async () => {
+                const bytes = await this._getShardBytes(shard);
+                const payload = await decodeFullDictionaryShard(bytes, this.DecompressionStreamCtor);
+                this._rememberParsedShard(shard.id, payload);
+                return payload;
+              })();
+              this.shardParsePromises.set(key, promise);
+              try {
+                return await promise;
+              } finally {
+                this.shardParsePromises.delete(key);
+              }
+            }
+          '''.replace("          ", "")
+          replace_once(old_parsed, new_parsed, "parsed shard deduplication")
+          replace_once(
+              '      if (hasOwn(payload.e, normalized)) return fullDictionaryEntryToResult(input, payload.e[normalized], queryMs);',
+              '      this.lastError = null;\n      if (hasOwn(payload.e, normalized)) return fullDictionaryEntryToResult(input, payload.e[normalized], queryMs);',
+              "successful lookup state",
+          )
+          replace_once(
+              '      this._markOfflineIncomplete();\n      this.parsedShards.clear();\n      this.progress = null;',
+              '      this._markOfflineIncomplete();\n      this.parsedShards.clear();\n      this.shardBytePromises.clear();\n      this.shardParsePromises.clear();\n      this.progress = null;',
+              "offline removal reset",
+          )
+
+          path.write_text(text, encoding="utf-8")
           PY
 
       - name: Regenerate symbol map
@@ -94,13 +216,11 @@ jobs:
           node apps/wordlover-pwa/scripts/test-full-dictionary.mjs
           python apps/wordlover-pwa/scripts/check_versions.py
           (cd apps/wordlover-pwa && npm run validate:shell-assets)
-          python scripts/validate_dictionary_shards.py apps/wordlover-pwa/public/dictionary-full 2>/dev/null || true
           git diff --check
 
       - name: Commit generated updates when needed
         run: |
           set -euo pipefail
-          rm -f post-merge-audit-tests.log post-merge-audit-commit.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -108,5 +228,5 @@ jobs:
             echo "Audit branch is already current."
             exit 0
           fi
-          git commit -m "docs: refresh generated files after dictionary audit"
+          git commit -m "fix: finish full dictionary post-merge audit"
           git push origin HEAD:fix/post-merge-full-dictionary-audit
