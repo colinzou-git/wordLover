@@ -76,7 +76,7 @@ const manifest = {
 };
 validateFullDictionaryManifest(manifest);
 for (const mutate of [
-  (copy) => { copy.shards[0].path = "../shard-00.json.gz"; },
+  (copy) => { copy.shards[0].path = "invalid/shard-00.json.gz"; },
   (copy) => { copy.shards[0].sha256 = "bad"; },
   (copy) => { copy.totalCompressedBytes += 1; },
   (copy) => { copy.rowCount += 1; },
@@ -145,5 +145,52 @@ const noCryptoClient = createFullDictionaryClient({ ...options, cryptoApi: {}, c
 const noCrypto = await noCryptoClient.lookup("fullsizeonlyword");
 assert.equal(noCrypto.status, "unavailable");
 assert.match(noCrypto.reason, /cannot verify/i);
+
+const concurrentCalls = [];
+const concurrentFetch = async (url) => {
+  concurrentCalls.push(String(url));
+  if (String(url).endsWith("manifest.json")) {
+    return new Response(JSON.stringify(manifest), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  if (String(url).endsWith("shard-00.json.gz")) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return new Response(compressed, { status: 200, headers: { "Content-Type": "application/gzip" } });
+  }
+  return new Response("not found", { status: 404 });
+};
+const concurrentClient = createFullDictionaryClient({
+  ...options,
+  fetchFn: concurrentFetch,
+  cachesApi: new MemoryCaches(),
+  storage: new MemoryStorage(),
+  isOnline: () => true,
+});
+const [concurrentExact, concurrentAlias] = await Promise.all([
+  concurrentClient.lookup("fullsizeonlyword"),
+  concurrentClient.lookup("fullsizeonlywords"),
+]);
+assert.equal(concurrentExact.status, "found");
+assert.equal(concurrentAlias.status, "found");
+assert.equal(
+  concurrentCalls.filter((url) => url.endsWith("shard-00.json.gz")).length,
+  1,
+  "concurrent lookups should share one shard fetch and parse",
+);
+
+const reordered = structuredClone(manifest);
+reordered.shards[0].id = "01";
+reordered.shards[0].path = "shard-01.json.gz";
+assert.throws(() => validateFullDictionaryManifest(reordered), /out of order/i);
+
+const offlineClient = createFullDictionaryClient({
+  ...options,
+  fetchFn: async () => { throw new Error("network should not be called"); },
+  cachesApi: new MemoryCaches(),
+  storage: new MemoryStorage(),
+  isOnline: () => false,
+});
+const offlineMissing = await offlineClient.lookup("fullsizeonlyword");
+assert.equal(offlineMissing.status, "unavailable");
+assert.match(offlineMissing.reason, /not available offline/i);
 
 console.log("full dictionary client tests passed");
