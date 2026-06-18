@@ -6,13 +6,17 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260606-2";
+} from "./fsrs-scheduler.js?v=20260618-1";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const FSRS_RATINGS = ["again", "hard", "good", "easy"];
 
 function normalizeTerm(term) {
-  return term.trim().replace(/[’`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return String(term ?? "")
+    .trim()
+    .replace(/[‘’ʼ`＇]/g, "'")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function isValidFsrsRating(rating) {
@@ -55,7 +59,7 @@ export function rebuildReviewStateFromEvents(item, events = [], nowMs = Date.now
   const normalizedTerm = item?.normalizedTerm ?? normalizeTerm(item?.term ?? "");
   if (!normalizedTerm) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? new Date(nowMs).toISOString() }, nowMs);
   const reviewEvents = (events ?? [])
-    .filter((event) => event?.type === "review" && event.normalizedTerm === normalizedTerm && event.rating && event.occurredAt)
+    .filter((event) => event?.type === "review" && normalizeTerm(event.normalizedTerm ?? event.term ?? "") === normalizedTerm && event.rating && event.occurredAt)
     .slice()
     .sort((left, right) => (left.occurredAt ?? "").localeCompare(right.occurredAt ?? ""));
   if (!reviewEvents.length) return normalizeReviewState(item?.review ?? { dueAt: item?.savedAt ?? new Date(nowMs).toISOString() }, nowMs);
@@ -70,10 +74,11 @@ export function rebuildReviewStateFromEvents(item, events = [], nowMs = Date.now
       console.warn(`Skipping invalid FSRS review rating for "${normalizedTerm}": ${event.rating}`);
       continue;
     }
-    const schedule = scheduleWithFsrs(review, event.rating, event.occurredAt);
+    const rating = String(event.rating).toLowerCase();
+    const schedule = scheduleWithFsrs(review, rating, event.occurredAt);
     review = {
       ...review,
-      lastRating: event.rating,
+      lastRating: rating,
       intervalDays: schedule.intervalDays,
       dueAt: schedule.dueAt,
       masteredAt: schedule.masteredAt,

@@ -11,9 +11,8 @@
 import {
   getCardRetrievability,
   scheduleForecastReview,
-} from "./fsrs-scheduler.js?v=20260607-4";
+} from "./fsrs-scheduler.js?v=20260618-1";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 // Per-item study-time estimates (seconds). New words cost more than reviews.
 const NEW_WORD_SECONDS = { low: 30, high: 60 };
 const REVIEW_SECONDS = { low: 8, high: 15 };
@@ -51,7 +50,11 @@ function localDateKey(ms) {
 }
 
 export function normalizeForecastInput(input = {}) {
-  const dailyNewWords = clamp(Math.round(Number(input.dailyNewWords)) || DEFAULTS.dailyNewWords, 0, 100);
+  const dailyNewWordsRaw = Number(input.dailyNewWords);
+  const hasDailyNewWords = input.dailyNewWords !== "" && input.dailyNewWords != null;
+  const dailyNewWords = hasDailyNewWords && Number.isFinite(dailyNewWordsRaw)
+    ? clamp(Math.round(dailyNewWordsRaw), 0, 100)
+    : DEFAULTS.dailyNewWords;
   const desiredRetentionRaw = Number(input.desiredRetention);
   const desiredRetention = Number.isFinite(desiredRetentionRaw) && desiredRetentionRaw > 0 && desiredRetentionRaw <= 1
     ? clamp(desiredRetentionRaw, 0.7, 0.99)
@@ -113,15 +116,20 @@ function simulate(input, existingCards, userStats) {
   const { dailyNewWords, desiredRetention, forecastDays, maxStudyMinutesPerDay, startMs } = input;
   const dayZero = new Date(startMs);
   dayZero.setHours(0, 0, 0, 0);
-  const startOfTodayMs = dayZero.getTime();
 
   const cards = (existingCards ?? []).map(cloneSimCard);
   const daily = [];
   let todayDueReviews = 0;
 
   for (let dayIndex = 0; dayIndex < forecastDays; dayIndex += 1) {
-    const dayStartMs = startOfTodayMs + dayIndex * DAY_MS;
-    const dayEndMs = dayStartMs + DAY_MS;
+    // Advance by local calendar days rather than fixed 24-hour blocks. DST days
+    // can be 23 or 25 hours, and fixed arithmetic can duplicate or skip dates.
+    const dayStart = new Date(dayZero);
+    dayStart.setDate(dayStart.getDate() + dayIndex);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const dayStartMs = dayStart.getTime();
+    const dayEndMs = dayEnd.getTime();
     let reviews = 0;
 
     for (const card of cards) {
