@@ -27,6 +27,21 @@ def main() -> int:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
+        shard_requests: list[str] = []
+        delayed_first_shard = {"pending": True}
+
+        def observe_request(request) -> None:
+            if "/dictionary-full/shard-" in request.url:
+                shard_requests.append(request.url)
+
+        def delay_first_shard(route) -> None:
+            if delayed_first_shard["pending"]:
+                delayed_first_shard["pending"] = False
+                page.wait_for_timeout(300)
+            route.continue_()
+
+        page.on("request", observe_request)
+        page.route("**/dictionary-full/shard-*.json.gz", delay_first_shard)
         page.goto(f"{args.base}/?fresh=full-dictionary", wait_until="domcontentloaded")
         page.wait_for_function("window.WordLoverApp != null", timeout=20_000)
         page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
@@ -36,6 +51,29 @@ def main() -> int:
         report["steps"]["manifest"] = status
         if status.get("rowCount", 0) < 1:
             raise AssertionError(f"Full dictionary manifest did not load: {status}")
+
+
+        page.locator("#termInput").fill("they’re")
+        normalized_input = page.locator("#termInput").input_value()
+        report["steps"]["smartApostrophe"] = normalized_input
+        if normalized_input != "they're":
+            raise AssertionError(f"Smart apostrophe was not normalized in the input: {normalized_input!r}")
+
+        page.locator("#termInput").fill("fullsizeonlyword")
+        page.wait_for_timeout(350)
+        report["steps"]["lazyShardRequests"] = len(shard_requests)
+        if shard_requests:
+            raise AssertionError(f"Typing triggered full dictionary downloads before Enter: {shard_requests}")
+
+        page.locator("#termInput").press("Enter")
+        page.wait_for_timeout(50)
+        page.locator("#termInput").fill("abandon")
+        page.locator("#termInput").press("Enter")
+        page.wait_for_timeout(500)
+        current_result = page.locator("#result").inner_text()
+        report["steps"]["staleLookupProtection"] = current_result
+        if "abandon" not in current_result.lower() or "fullsizeonlyword" in current_result.lower():
+            raise AssertionError(f"A stale full-dictionary response replaced the newer lookup: {current_result}")
 
         exact = page.evaluate(
             "async () => window.WordLoverApp.lookupTermWithFullFallback('fullsizeonlyword')"

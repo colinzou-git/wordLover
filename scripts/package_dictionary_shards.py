@@ -20,6 +20,7 @@ DEFAULT_INPUT = Path("data/dictionary.sqlite")
 DEFAULT_OUTPUT_DIR = Path("apps/wordlover-pwa/public/dictionary-full")
 DEFAULT_SHARD_COUNT = 128
 DEFAULT_VERSION = f"{time.strftime('%Y.%m.%d')}.full-shards"
+APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 
 ENTRY_FIELDS = ["word", "phonetic", "definition", "definitionSource", "translation", "tag"]
 ALIAS_FIELDS = [
@@ -46,7 +47,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_word(value: str) -> str:
-    return " ".join(value.strip().replace("’", "'").replace("`", "'").split()).casefold()
+    return " ".join(value.strip().translate(APOSTROPHE_TRANSLATION).split()).casefold()
 
 
 def fnv1a32(value: str) -> int:
@@ -58,7 +59,7 @@ def fnv1a32(value: str) -> int:
 
 
 def shard_index(value: str, shard_count: int) -> int:
-    return fnv1a32(value) % shard_count
+    return fnv1a32(normalize_word(value)) % shard_count
 
 
 def exchange_code_label(code: str) -> str:
@@ -261,6 +262,12 @@ def validate_package(output_dir: Path, manifest: dict) -> None:
     aliases = 0
     for shard in manifest["shards"]:
         path = output_dir / shard["path"]
+        if not path.is_file():
+            raise RuntimeError(f"Missing shard file: {path}")
+        if path.stat().st_size != shard["bytes"]:
+            raise RuntimeError(f"Shard size mismatch: {path}")
+        if sha256_file(path) != shard["sha256"]:
+            raise RuntimeError(f"Shard checksum mismatch: {path}")
         with gzip.open(path, "rt", encoding="utf-8") as handle:
             payload = json.load(handle)
         if payload.get("v") != 1 or not isinstance(payload.get("e"), dict) or not isinstance(payload.get("a"), dict):
