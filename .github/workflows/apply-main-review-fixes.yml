@@ -49,7 +49,7 @@ jobs:
 
       - name: Install JavaScript dependencies
         working-directory: apps/wordlover-pwa
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Run PWA static and regression tests
         working-directory: apps/wordlover-pwa
