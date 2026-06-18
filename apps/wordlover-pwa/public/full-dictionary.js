@@ -73,6 +73,10 @@ function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0;
 }
 
+function monotonicNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
 async function sha256Hex(bytes, cryptoApi = globalThis.crypto) {
   if (!cryptoApi?.subtle?.digest) return null;
   const digest = await cryptoApi.subtle.digest("SHA-256", bytes);
@@ -121,7 +125,7 @@ export function validateFullDictionaryManifest(manifest) {
   if (!isNonNegativeInteger(manifest.rowCount) || !isNonNegativeInteger(manifest.aliasCount)) {
     throw new Error("Full dictionary manifest has invalid entry totals.");
   }
-  if (!isNonNegativeInteger(manifest.totalCompressedBytes)) {
+  if (!Number.isInteger(manifest.totalCompressedBytes) || manifest.totalCompressedBytes < 1) {
     throw new Error("Full dictionary manifest has an invalid compressed size.");
   }
   if (!Array.isArray(manifest.shards) || manifest.shards.length !== manifest.shardCount) {
@@ -138,8 +142,15 @@ export function validateFullDictionaryManifest(manifest) {
       throw new Error(`Full dictionary shard ${index} has an invalid id.`);
     }
     if (ids.has(shard.id)) throw new Error(`Full dictionary shard id ${shard.id} is duplicated.`);
+    if (Number.parseInt(shard.id, 16) !== index) {
+      throw new Error(`Full dictionary shard ${index} is out of order.`);
+    }
     ids.add(shard.id);
-    if (typeof shard.path !== "string" || !SHARD_PATH_RE.test(shard.path)) {
+    if (
+      typeof shard.path !== "string" ||
+      !SHARD_PATH_RE.test(shard.path) ||
+      shard.path !== `shard-${shard.id}.json.gz`
+    ) {
       throw new Error(`Full dictionary shard ${index} has an invalid path.`);
     }
     if (paths.has(shard.path)) throw new Error(`Full dictionary shard path ${shard.path} is duplicated.`);
@@ -226,6 +237,9 @@ export class FullDictionaryClient {
     this.storageManager = options.storageManager ?? globalThis.navigator?.storage;
     this.cryptoApi = options.cryptoApi ?? globalThis.crypto;
     this.DecompressionStreamCtor = options.DecompressionStreamCtor ?? globalThis.DecompressionStream;
+    this.isOnline = typeof options.isOnline === "function"
+      ? options.isOnline
+      : () => globalThis.navigator?.onLine !== false;
     this.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;
     const requestedParsedShards = Number(options.maxParsedShards ?? MAX_PARSED_SHARDS);
     this.maxParsedShards = Number.isInteger(requestedParsedShards) && requestedParsedShards > 0
@@ -235,6 +249,8 @@ export class FullDictionaryClient {
     this.manifestPromise = null;
     this.manifestCheckedAt = 0;
     this.parsedShards = new Map();
+    this.shardBytePromises = new Map();
+    this.shardParsePromises = new Map();
     this.busy = false;
     this.progress = null;
     this.lastError = null;
@@ -243,7 +259,7 @@ export class FullDictionaryClient {
   }
 
   _isOnline() {
-    return globalThis.navigator?.onLine !== false;
+    return this.isOnline() !== false;
   }
 
   _manifestUrl() {
@@ -286,14 +302,23 @@ export class FullDictionaryClient {
     }
   }
 
+  _markOfflineIncomplete() {
+    safeStorageRemove(this.storage, INSTALLED_VERSION_KEY);
+    this.offlineInstalled = false;
+    this.offlineVerificationVersion = null;
+  }
+
   async ensureManifest({ force = false } = {}) {
-    if (!force && this.manifest && Date.now() - this.manifestCheckedAt < 5 * 60 * 1000) return this.manifest;
+    if (!force && this.manifest && Date.now() - this.manifestCheckedAt < 5 * 60 * 1000) {
+      await this._refreshOfflineInstalledState();
+      return this.manifest;
+    }
     if (this.manifestPromise) return this.manifestPromise;
     this.manifestPromise = (async () => {
       const stored = this._storedManifest();
       if (!this.manifest && stored) this.manifest = stored;
       let remote = null;
-      if (this.fetchFn && (force || this._isOnline() || !stored)) {
+      if (this.fetchFn && this._isOnline()) {
         try {
           const response = await fetchWithTimeout(
             this.fetchFn,
@@ -304,8 +329,10 @@ export class FullDictionaryClient {
           if (!response.ok) throw new Error(`Full dictionary manifest request failed: ${response.status}`);
           remote = validateFullDictionaryManifest(await response.json());
         } catch (error) {
-          if (!stored) this.lastError = error instanceof Error ? error.message : String(error);
+          if (!stored && !this.manifest) this.lastError = error instanceof Error ? error.message : String(error);
         }
+      } else if (!stored && !this.manifest) {
+        this.lastError = "The full dictionary package is not available offline yet.";
       }
       if (remote) {
         const previousVersion = this.manifest?.dictionaryDataVersion ?? stored?.dictionaryDataVersion ?? null;
@@ -314,6 +341,8 @@ export class FullDictionaryClient {
         if (previousVersion && previousVersion !== remote.dictionaryDataVersion) {
           this._markOfflineIncomplete();
           this.parsedShards.clear();
+          this.shardBytePromises.clear();
+          this.shardParsePromises.clear();
           await this.cleanupOldCaches();
         }
         this.lastError = null;
@@ -330,25 +359,19 @@ export class FullDictionaryClient {
     }
   }
 
-  async cleanupOldCaches() {
+  async cleanupOldCaches({ includeCurrent = false } = {}) {
     if (!this.cachesApi?.keys) return;
     const current = this.manifest ? this._cacheName() : null;
     const names = await this.cachesApi.keys();
     await Promise.all(
       names
-        .filter((name) => name.startsWith(CACHE_PREFIX) && name !== current)
+        .filter((name) => name.startsWith(CACHE_PREFIX) && (includeCurrent || name !== current))
         .map((name) => this.cachesApi.delete(name)),
     );
   }
 
   _shardUrl(shard) {
     return `${this.baseUrl}/${shard.path}`;
-  }
-
-  _markOfflineIncomplete() {
-    safeStorageRemove(this.storage, INSTALLED_VERSION_KEY);
-    this.offlineInstalled = false;
-    this.offlineVerificationVersion = null;
   }
 
   async _openCurrentCache() {
@@ -409,7 +432,7 @@ export class FullDictionaryClient {
       throw new Error(`Full dictionary shard size mismatch for ${shard.path}.`);
     }
     const digest = await sha256Hex(bytes, this.cryptoApi);
-    if (shard.sha256 && !digest) {
+    if (!digest) {
       throw new Error("This browser cannot verify full dictionary checksums.");
     }
     if (digest !== String(shard.sha256).toLowerCase()) {
@@ -432,7 +455,7 @@ export class FullDictionaryClient {
     }
   }
 
-  async _getShardBytes(shard, { cacheResult = true } = {}) {
+  async _loadShardBytes(shard, { cacheResult = true } = {}) {
     if (!this.manifest) throw new Error("Full dictionary manifest is not loaded.");
     const url = this._shardUrl(shard);
     const cache = this.cachesApi?.open ? await this.cachesApi.open(this._cacheName()) : null;
@@ -460,6 +483,18 @@ export class FullDictionaryClient {
     return bytes;
   }
 
+  async _getShardBytes(shard, options = {}) {
+    const key = `${this.manifest?.dictionaryDataVersion ?? "unknown"}:${shard.path}`;
+    if (this.shardBytePromises.has(key)) return this.shardBytePromises.get(key);
+    const promise = this._loadShardBytes(shard, options);
+    this.shardBytePromises.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.shardBytePromises.delete(key);
+    }
+  }
+
   _rememberParsedShard(id, payload) {
     if (this.parsedShards.has(id)) this.parsedShards.delete(id);
     this.parsedShards.set(id, payload);
@@ -477,14 +512,24 @@ export class FullDictionaryClient {
       this._rememberParsedShard(shard.id, payload);
       return payload;
     }
-    const bytes = await this._getShardBytes(shard);
-    const payload = await decodeFullDictionaryShard(bytes, this.DecompressionStreamCtor);
-    this._rememberParsedShard(shard.id, payload);
-    return payload;
+    const key = `${this.manifest.dictionaryDataVersion}:${shard.id}`;
+    if (this.shardParsePromises.has(key)) return this.shardParsePromises.get(key);
+    const promise = (async () => {
+      const bytes = await this._getShardBytes(shard);
+      const payload = await decodeFullDictionaryShard(bytes, this.DecompressionStreamCtor);
+      this._rememberParsedShard(shard.id, payload);
+      return payload;
+    })();
+    this.shardParsePromises.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.shardParsePromises.delete(key);
+    }
   }
 
   async lookup(input) {
-    const started = performance.now();
+    const started = monotonicNow();
     const normalized = normalizeLookupTerm(input);
     if (!normalized) return null;
     const manifest = await this.ensureManifest();
@@ -494,7 +539,8 @@ export class FullDictionaryClient {
     try {
       const index = fullDictionaryShardIndex(normalized, manifest.shardCount);
       const payload = await this._getParsedShard(index);
-      const queryMs = performance.now() - started;
+      const queryMs = monotonicNow() - started;
+      this.lastError = null;
       if (hasOwn(payload.e, normalized)) return fullDictionaryEntryToResult(input, payload.e[normalized], queryMs);
       if (hasOwn(payload.a, normalized)) return fullDictionaryAliasToResult(input, payload.a[normalized], queryMs);
       return null;
@@ -556,7 +602,7 @@ export class FullDictionaryClient {
       }
     };
     try {
-      const workerCount = Math.max(1, Math.min(8, Number(concurrency) || 4));
+      const workerCount = Math.max(1, Math.min(8, Math.trunc(Number(concurrency)) || 4));
       await Promise.all(Array.from({ length: workerCount }, worker));
       if (!await this._cacheHasAllShardResponses(manifest)) {
         throw new Error("The full dictionary download finished, but one or more shards were not stored.");
@@ -582,16 +628,11 @@ export class FullDictionaryClient {
     this.lastError = null;
     this._notify();
     try {
-      if (this.cachesApi?.keys && this.cachesApi?.delete) {
-        const names = await this.cachesApi.keys();
-        await Promise.all(
-          names.filter((name) => name.startsWith(CACHE_PREFIX)).map((name) => this.cachesApi.delete(name)),
-        );
-      } else if (this.cachesApi?.delete && this.manifest) {
-        await this.cachesApi.delete(this._cacheName());
-      }
+      await this.cleanupOldCaches({ includeCurrent: true });
       this._markOfflineIncomplete();
       this.parsedShards.clear();
+      this.shardBytePromises.clear();
+      this.shardParsePromises.clear();
       this.progress = null;
       return this.status();
     } finally {
@@ -599,7 +640,6 @@ export class FullDictionaryClient {
       this._notify();
     }
   }
-
 }
 
 export function createFullDictionaryClient(options = {}) {
