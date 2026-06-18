@@ -1,18 +1,22 @@
 // Pure snapshot merge helpers for Google Drive sync.
 // No globals, no DOM, no IndexedDB. All time-sensitive helpers accept nowMs.
 
-import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260606-2";
-import { normalizeTrack } from "./ui-preferences.js?v=20260606-2";
+import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260618-1";
+import { normalizeTrack } from "./ui-preferences.js?v=20260618-1";
 import {
   BACKUP_SCHEMA_VERSION,
   BACKUP_APP,
   DEFAULT_TRACK_ID,
   serializeTrack,
   trackRecords,
-} from "./tracks.js?v=20260615-1";
+} from "./tracks.js?v=20260618-1";
 
 function normalizeTerm(term) {
-  return term.trim().replace(/['`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return String(term ?? "")
+    .trim()
+    .replace(/[‘’ʼ`＇]/g, "'")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 export function studyEventTrack(event = {}) {
@@ -23,7 +27,7 @@ export function studyEventTrack(event = {}) {
 export function computeStudyEventKey(event = {}) {
   const track = normalizeTrack(studyEventTrack(event));
   const type = event.type ?? "event";
-  const normalizedTerm = event.normalizedTerm ?? normalizeTerm(event.term ?? "");
+  const normalizedTerm = normalizeTerm(event.normalizedTerm ?? event.term ?? "");
   const occurredAt = event.occurredAt ?? "";
   const rating = event.rating ?? "";
   const source = event.source ?? event.practiceMode ?? "";
@@ -36,7 +40,7 @@ export function mergeStudyEventSources(recordEvents, legacyEvents) {
   for (const event of [...(legacyEvents ?? []), ...(recordEvents ?? [])]) {
     if (!event) continue;
     const id = event.id ?? `${event.type ?? "event"}-${event.normalizedTerm ?? event.term ?? "unknown"}-${event.occurredAt ?? new Date().toISOString()}`;
-    const normalizedTerm = event.normalizedTerm ?? normalizeTerm(event.term ?? "");
+    const normalizedTerm = normalizeTerm(event.normalizedTerm ?? event.term ?? "");
     const normalized = {
       ...event,
       id,
@@ -52,15 +56,22 @@ export function mergeHistoryItems(localItems, remoteItems) {
   const byTerm = new Map();
   const timeOf = (item) => Date.parse(item?.queriedAt ?? item?.searchedAt ?? 0) || 0;
   for (const item of [...(remoteItems ?? []), ...(localItems ?? [])]) {
-    if (!item?.term) continue;
+    if (!item?.term && !item?.normalizedTerm) continue;
+    const normalizedTerm = normalizeTerm(item.normalizedTerm ?? item.term);
+    if (!normalizedTerm) continue;
     const at = item.queriedAt ?? item.searchedAt ?? null;
-    const normalizedItem = at ? { ...item, queriedAt: item.queriedAt ?? at, searchedAt: item.searchedAt ?? at } : item;
-    const existing = byTerm.get(item.term);
+    const normalizedItem = {
+      ...item,
+      term: item.term ?? normalizedTerm,
+      normalizedTerm,
+      ...(at ? { queriedAt: item.queriedAt ?? at, searchedAt: item.searchedAt ?? at } : {}),
+    };
+    const existing = byTerm.get(normalizedTerm);
     if (!existing) {
-      byTerm.set(item.term, normalizedItem);
+      byTerm.set(normalizedTerm, normalizedItem);
       continue;
     }
-    if (timeOf(normalizedItem) >= timeOf(existing)) byTerm.set(item.term, normalizedItem);
+    if (timeOf(normalizedItem) >= timeOf(existing)) byTerm.set(normalizedTerm, normalizedItem);
   }
   return [...byTerm.values()]
     .sort((left, right) => timeOf(right) - timeOf(left))
@@ -71,7 +82,7 @@ export function mergeKnownSources(localKnown, remoteKnown, activeTerms = new Set
   const byTerm = new Map();
   for (const record of [...(remoteKnown ?? []), ...(localKnown ?? [])]) {
     if (!record?.term && !record?.normalizedTerm) continue;
-    const normalizedTerm = record.normalizedTerm ?? normalizeTerm(record.term);
+    const normalizedTerm = normalizeTerm(record.normalizedTerm ?? record.term);
     if (!normalizedTerm || activeTerms.has(normalizedTerm)) continue;
     const knownAt = record.knownAt ?? record.updatedAt ?? new Date().toISOString();
     const incoming = {
@@ -97,7 +108,8 @@ export function mergeKnownSources(localKnown, remoteKnown, activeTerms = new Set
 export function activeStudyTermsFromItems(vocabulary = [], spelling = []) {
   const terms = new Set();
   for (const item of [...(vocabulary ?? []), ...(spelling ?? [])]) {
-    if (item?.normalizedTerm && !item.archivedAt) terms.add(item.normalizedTerm);
+    const normalizedTerm = normalizeTerm(item?.normalizedTerm ?? item?.term ?? "");
+    if (normalizedTerm && !item?.archivedAt) terms.add(normalizedTerm);
   }
   return terms;
 }
@@ -106,7 +118,7 @@ export function mergeVocabularySources(recordItems, legacyItems, nowMs = Date.no
   const byTerm = new Map();
   for (const item of [...(legacyItems ?? []), ...(recordItems ?? [])]) {
     if (!item?.term) continue;
-    const normalizedTerm = item.normalizedTerm ?? normalizeTerm(item.term);
+    const normalizedTerm = normalizeTerm(item.normalizedTerm ?? item.term);
     const normalizedItem = {
       ...item,
       normalizedTerm,
@@ -128,7 +140,7 @@ export function mergeUserDictionarySources(localEntries, remoteEntries) {
   const byTerm = new Map();
   for (const entry of [...(remoteEntries ?? []), ...(localEntries ?? [])]) {
     if (!entry?.normalizedTerm && !entry?.word) continue;
-    const normalizedTerm = entry.normalizedTerm ?? normalizeTerm(entry.word);
+    const normalizedTerm = normalizeTerm(entry.normalizedTerm ?? entry.word);
     const incoming = { ...entry, normalizedTerm };
     const existing = byTerm.get(normalizedTerm);
     if (!existing) {

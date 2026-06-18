@@ -5,13 +5,17 @@ import {
   STUDY_ONE_MORE_LEVELS,
   STUDY_ONE_MORE_TAGS,
   normalizeStudyOneMoreLevel,
-} from "./ui-preferences.js?v=20260607-2";
+} from "./ui-preferences.js?v=20260618-1";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
 
 function normalizeTerm(term) {
-  return term.trim().replace(/['`]/g, "'").replace(/\s+/g, " ").toLowerCase();
+  return String(term ?? "")
+    .trim()
+    .replace(/[‘’ʼ`＇]/g, "'")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function localDateKey(ms) {
@@ -87,13 +91,13 @@ export function buildStudyOneMoreExclusionSets({
   const spellingTerms = new Set();
   const archivedIgnoredOrMastered = new Set();
   for (const item of vocabulary ?? []) {
-    const term = item?.normalizedTerm;
+    const term = normalizeTerm(item?.normalizedTerm ?? item?.term ?? "");
     if (!term) continue;
     if (!item.archivedAt) memorizeTerms.add(term);
     if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
   }
   for (const item of spelling ?? []) {
-    const term = item?.normalizedTerm;
+    const term = normalizeTerm(item?.normalizedTerm ?? item?.term ?? "");
     if (!term) continue;
     if (!item.archivedAt) spellingTerms.add(term);
     if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
@@ -103,16 +107,17 @@ export function buildStudyOneMoreExclusionSets({
   const skippedRecently = new Set();
   const skipCutoffMs = nowMs - STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS * NORMAL_DAY_MS;
   for (const event of events ?? []) {
-    if (!event?.normalizedTerm) continue;
-    if (event.type === "new-word-first-pass") firstTryPassed.add(event.normalizedTerm);
-    if (introducedByStudyOneMore(event) && isSameDay(event.occurredAt, nowMs)) introducedToday.add(event.normalizedTerm);
+    const normalizedTerm = normalizeTerm(event?.normalizedTerm ?? event?.term ?? "");
+    if (!normalizedTerm) continue;
+    if (event.type === "new-word-first-pass") firstTryPassed.add(normalizedTerm);
+    if (introducedByStudyOneMore(event) && isSameDay(event.occurredAt, nowMs)) introducedToday.add(normalizedTerm);
     if (event.type === "study-one-more-skipped" && Date.parse(event.occurredAt) >= skipCutoffMs) {
-      skippedRecently.add(event.normalizedTerm);
+      skippedRecently.add(normalizedTerm);
     }
   }
   const knownTerms = new Set(
     (known ?? [])
-      .map((record) => record?.normalizedTerm)
+      .map((record) => normalizeTerm(record?.normalizedTerm ?? record?.term ?? ""))
       .filter(Boolean)
       .filter((term) => !memorizeTerms.has(term) && !spellingTerms.has(term)),
   );
@@ -120,7 +125,7 @@ export function buildStudyOneMoreExclusionSets({
 }
 
 export function studyOneMoreExclusionReason(candidate, exclusions) {
-  const term = candidate?.normalizedTerm;
+  const term = normalizeTerm(candidate?.normalizedTerm ?? candidate?.term ?? candidate?.word ?? "");
   if (!term) return "invalid";
   if (exclusions.memorizeTerms?.has(term)) return "memorize";
   if (exclusions.spellingTerms?.has(term)) return "spelling";

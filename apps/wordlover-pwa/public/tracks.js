@@ -134,7 +134,7 @@ function normalizeBackupTerm(value) {
   return String(value ?? "")
     .trim()
     .toLowerCase()
-    .replace(/[’`]/g, "'")
+    .replace(/[‘’ʼ`＇]/g, "'")
     .replace(/\s+/g, " ");
 }
 
