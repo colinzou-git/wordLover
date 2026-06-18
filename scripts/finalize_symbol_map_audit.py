@@ -27,6 +27,17 @@ def main() -> int:
     }
 
     try:
+        if subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip() == "true":
+            subprocess.run(["git", "fetch", "--unshallow", "origin"], cwd=root, check=True)
+        else:
+            subprocess.run(["git", "fetch", "origin"], cwd=root, check=True)
+
         final_workflow = subprocess.check_output(
             ["git", "cat-file", "-p", FINAL_CI_BLOB],
             cwd=root,
