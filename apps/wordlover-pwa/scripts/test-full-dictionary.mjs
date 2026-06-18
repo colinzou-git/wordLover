@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
 import { gzipSync } from "node:zlib";
 
+// Synchronize trigger after hardening the one-shot audit finalizer.
 import {
   createFullDictionaryClient,
   fnv1a32,
