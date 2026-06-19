@@ -32,4 +32,4 @@ await new Promise(queueMicrotask);
 assert.equal(input.value, "of ");
 assert.equal(input.selectionStart, 3);
 
-console.log("PASS spelling input preserves phrase spaces and apostrophes");
+console.log("PASS spelling input preserves phrase spaces, apostrophes, and caret position");
