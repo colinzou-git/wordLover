@@ -1,58 +1,20 @@
-name: Apply online dictionary fallback once
+name: Validate full dictionary symbol map
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/apply-full-dictionary-runtime.yml
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: apply-online-dictionary-fallback
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+          ref: feat/full-dictionary-runtime
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Apply focused source changes
-        run: |
-          python scripts/apply_online_dictionary_app.py
-          python scripts/apply_online_dictionary_shell.py
-          python scripts/apply_online_dictionary_release.py
-          python scripts/generate_code_map.py
-      - name: Remove one-time patch machinery
-        run: |
-          rm scripts/apply_online_dictionary_app.py
-          rm scripts/apply_online_dictionary_shell.py
-          rm scripts/apply_online_dictionary_release.py
-          rm scripts/patches/online-dictionary-app-block-1.txt
-          rm scripts/patches/online-dictionary-app-block-2.txt
-      - name: Run WordFan checks
-        working-directory: apps/wordlover-pwa
-        run: |
-          npm ci
-          npm test
-      - name: Commit verified implementation
-        run: |
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: add grounded online dictionary fallback"
-          git push origin HEAD:main
+      - name: Check symbol map
+        run: python scripts/generate_code_map.py --check
