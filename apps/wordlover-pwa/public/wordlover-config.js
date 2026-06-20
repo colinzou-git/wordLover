@@ -9,3 +9,7 @@ window.WORDLOVER_CONFIG = {
   geminiModel: "gemini-2.5-flash",
   localDevelopmentPassphrase: "",
 };
+
+// The fallback waits for WordFan's local and full dictionary lookups to finish,
+// then reuses the existing Gemini settings dialog and native Add-to-dictionary flow.
+void import("/online-dictionary-bridge.js?v=20260620-1");
