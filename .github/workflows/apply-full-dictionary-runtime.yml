@@ -1,9 +1,9 @@
-name: Refresh full dictionary symbol map
+name: Apply online dictionary fallback once
 
 on:
   push:
     branches:
-      - feat/full-dictionary-runtime
+      - main
     paths:
       - .github/workflows/apply-full-dictionary-runtime.yml
   workflow_dispatch:
@@ -12,35 +12,47 @@ permissions:
   contents: write
 
 concurrency:
-  group: refresh-full-dictionary-symbol-map
-  cancel-in-progress: true
+  group: apply-online-dictionary-fallback
+  cancel-in-progress: false
 
 jobs:
-  refresh:
+  apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feat/full-dictionary-runtime
+          ref: main
           fetch-depth: 0
-
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Regenerate symbol map from exact PR head
-        run: python scripts/generate_code_map.py
-
-      - name: Commit refreshed symbol map
+      - name: Apply focused source changes
         run: |
-          set -euo pipefail
+          python scripts/apply_online_dictionary_app.py
+          python scripts/apply_online_dictionary_shell.py
+          python scripts/apply_online_dictionary_release.py
+          python scripts/generate_code_map.py
+      - name: Remove one-time patch machinery
+        run: |
+          rm scripts/apply_online_dictionary_app.py
+          rm scripts/apply_online_dictionary_shell.py
+          rm scripts/apply_online_dictionary_release.py
+          rm scripts/patches/online-dictionary-app-block-1.txt
+          rm scripts/patches/online-dictionary-app-block-2.txt
+      - name: Run WordFan checks
+        working-directory: apps/wordlover-pwa
+        run: |
+          npm ci
+          npm test
+      - name: Commit verified implementation
+        run: |
+          git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/ai/AUTO_SYMBOL_MAP.md
-          if git diff --cached --quiet; then
-            echo "Symbol map is already current."
-            exit 0
-          fi
-          git commit -m "docs: refresh symbol map for full dictionary runtime"
-          git push origin HEAD:feat/full-dictionary-runtime
+          git add -A
+          git commit -m "feat: add grounded online dictionary fallback"
+          git push origin HEAD:main
