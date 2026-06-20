@@ -26,124 +26,133 @@ export const ONLINE_DICTIONARY_SCHEMA = {
     chineseMeanings: { type: "array", items: { type: "string" } },
     tags: { type: "array", items: { type: "string" } },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
-    evidenceSummary: { type: "string" },
   },
-  required: ["status", "canonicalWord", "englishMeanings", "chineseMeanings", "confidence"],
+  required: [
+    "status",
+    "canonicalWord",
+    "suggestedWord",
+    "phonetic",
+    "entryType",
+    "partsOfSpeech",
+    "englishMeanings",
+    "chineseMeanings",
+    "tags",
+    "confidence",
+  ],
 };
 
 export function normalizeOnlineTerm(value) {
   return String(value ?? "")
     .normalize("NFKC")
-    .replace(/[‘’‛`´]/g, "'")
+    .replace(/[\u2018\u2019\u02bc\uff07]/g, "'")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
 }
 
-function cleanText(value, maxLength = 700) {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+export function cleanOnlineString(value, maxLength = 500) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, maxLength);
 }
 
-function cleanStringList(value, { limit = MAX_MEANING_COUNT, maxLength = 700 } = {}) {
-  if (!Array.isArray(value)) return [];
+function cleanList(values, { maxItems = MAX_MEANING_COUNT, maxLength = 500 } = {}) {
   const seen = new Set();
-  const output = [];
-  for (const item of value) {
-    const clean = cleanText(item, maxLength);
+  const result = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const clean = cleanOnlineString(value, maxLength);
     const key = clean.toLowerCase();
     if (!clean || seen.has(key)) continue;
     seen.add(key);
-    output.push(clean);
-    if (output.length >= limit) break;
+    result.push(clean);
+    if (result.length >= maxItems) break;
   }
-  return output;
+  return result;
 }
 
-function safeHttpUrl(value) {
-  try {
-    const url = new URL(String(value ?? ""));
-    return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
-  } catch {
-    return "";
-  }
-}
-
-export function extractGroundingSources(groundingMetadata) {
-  const chunks = groundingMetadata?.groundingChunks;
-  if (!Array.isArray(chunks)) return [];
-  const seen = new Set();
+export function extractGroundingSources(metadata) {
   const sources = [];
-  for (const chunk of chunks) {
-    const url = safeHttpUrl(chunk?.web?.uri);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    sources.push({
-      title: cleanText(chunk?.web?.title, 180) || new URL(url).hostname,
-      url,
-    });
+  const seen = new Set();
+  for (const chunk of metadata?.groundingChunks ?? []) {
+    const uri = cleanOnlineString(chunk?.web?.uri, 2048);
+    const title = cleanOnlineString(chunk?.web?.title || "Web source", 200);
+    if (!uri || seen.has(uri)) continue;
+    try {
+      const parsed = new URL(uri);
+      if (!["http:", "https:"].includes(parsed.protocol)) continue;
+    } catch {
+      continue;
+    }
+    seen.add(uri);
+    sources.push({ title, url: uri });
     if (sources.length >= MAX_SOURCE_COUNT) break;
   }
   return sources;
 }
 
-function correctionResult(input, suggestedWord, onlineSources, queryMs) {
-  const suggestion = cleanText(suggestedWord, 120);
+export function normalizeOnlineDictionaryResult({
+  input,
+  structured,
+  groundingMetadata,
+  model,
+  queryMs = 0,
+}) {
+  const inputTerm = cleanOnlineString(input, 120);
+  const canonicalWord = cleanOnlineString(structured?.canonicalWord || inputTerm, 120);
+  const suggestedWord = cleanOnlineString(structured?.suggestedWord, 120);
+  const englishMeanings = cleanList(structured?.englishMeanings);
+  const chineseMeanings = cleanList(structured?.chineseMeanings);
+  const partsOfSpeech = cleanList(structured?.partsOfSpeech, { maxItems: 8, maxLength: 80 });
+  const tags = cleanList(structured?.tags, { maxItems: 10, maxLength: 80 });
+  const sourceUrls = extractGroundingSources(groundingMetadata);
+  const searchQueries = cleanList(groundingMetadata?.webSearchQueries, { maxItems: 8, maxLength: 200 });
+  const confidence = ["high", "medium", "low"].includes(structured?.confidence)
+    ? structured.confidence
+    : "low";
+  let status = ["found", "not_found", "correction"].includes(structured?.status)
+    ? structured.status
+    : "not_found";
+
+  const exactSpelling = normalizeOnlineTerm(canonicalWord) === normalizeOnlineTerm(inputTerm);
+  let correction = suggestedWord;
+  if (status === "found" && !exactSpelling) {
+    status = "correction";
+    correction ||= canonicalWord;
+  }
+  if (status === "correction" && !correction && !exactSpelling) correction = canonicalWord;
+
+  if (
+    status === "found"
+    && (
+      !englishMeanings.length
+      || !chineseMeanings.length
+      || !sourceUrls.length
+      || confidence === "low"
+    )
+  ) {
+    status = "not_found";
+  }
+
   return {
-    status: "correction",
-    term: input,
-    suggestedWord: suggestion,
-    alternatives: suggestion ? [{ word: suggestion, preview: "Suggested online correction" }] : [],
-    onlineSources,
+    status,
+    canonicalWord,
+    suggestedWord: correction,
+    phonetic: cleanOnlineString(structured?.phonetic, 160),
+    entryType: cleanOnlineString(structured?.entryType || (inputTerm.includes(" ") ? "phrase" : "word"), 80),
+    partsOfSpeech,
+    englishMeanings,
+    chineseMeanings,
+    tags,
+    confidence,
+    sourceUrls,
+    searchQueries,
+    model,
     queryMs,
   };
 }
 
-export function normalizeOnlineDictionaryResult({ input, structured, groundingMetadata, model, queryMs = 0 }) {
-  const original = String(input ?? "").trim();
-  const normalizedInput = normalizeOnlineTerm(original);
-  const canonicalWord = cleanText(structured?.canonicalWord, 120);
-  const normalizedCanonical = normalizeOnlineTerm(canonicalWord);
-  const status = cleanText(structured?.status, 32).toLowerCase();
-  const onlineSources = extractGroundingSources(groundingMetadata);
-
-  if (status === "correction") {
-    return correctionResult(original, structured?.suggestedWord || canonicalWord, onlineSources, queryMs);
-  }
-  if (status !== "found") {
-    return { status: "not_found", term: original, alternatives: [], onlineSources, queryMs };
-  }
-  if (!normalizedCanonical || normalizedCanonical !== normalizedInput) {
-    return correctionResult(original, structured?.suggestedWord || canonicalWord, onlineSources, queryMs);
-  }
-
-  const englishMeanings = cleanStringList(structured?.englishMeanings);
-  const chineseMeanings = cleanStringList(structured?.chineseMeanings, { maxLength: 350 });
-  const confidence = ["high", "medium", "low"].includes(structured?.confidence)
-    ? structured.confidence
-    : "low";
-  if (!englishMeanings.length || !chineseMeanings.length || confidence === "low" || !onlineSources.length) {
-    return { status: "not_found", term: original, alternatives: [], onlineSources, queryMs };
-  }
-
-  const partsOfSpeech = cleanStringList(structured?.partsOfSpeech, { limit: 8, maxLength: 80 });
-  const tags = cleanStringList(structured?.tags, { limit: 10, maxLength: 80 });
-  return {
-    status: "found",
-    term: original,
-    entryType: cleanText(structured?.entryType, 80) || (original.includes(" ") ? "phrase" : "word"),
-    phonetic: cleanText(structured?.phonetic, 160),
-    englishMeanings,
-    englishMeaningSource: "Google Search grounded",
-    chineseMeanings,
-    tags: [...new Set(["online", ...tags])],
-    partsOfSpeech,
-    confidence,
-    evidenceSummary: cleanText(structured?.evidenceSummary, 1000),
-    source: "google-search-grounded",
-    onlineSources,
-    lookupProvider: "gemini-google-search",
-    lookupModel: cleanText(model, 120),
-    generatedAt: new Date().toISOString(),
-    queryMs,
-  };
+export function onlineResponseText(payload) {
+  return payload?.candidates?.[0]?.content?.parts
+    ?.map((part) => part?.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim() ?? "";
 }
