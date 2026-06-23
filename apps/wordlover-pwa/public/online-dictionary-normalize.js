@@ -10,6 +10,34 @@ export class OnlineDictionaryRequestError extends Error {
   }
 }
 
+// Turn a Gemini HTTP failure into actionable guidance instead of a bare status
+// code. 429 is the common one: grounded Google-Search lookups have a small
+// free-tier quota that the app cannot raise, so the message must point at the
+// real remedies (switch model, new key) rather than look like a transient glitch.
+export function explainOnlineDictionaryError(status, bodyText = "") {
+  if (status === 429) {
+    let retryHint = "";
+    try {
+      const parsed = JSON.parse(bodyText);
+      const retry = parsed?.error?.details?.find?.((d) => d["@type"]?.includes("RetryInfo"))?.retryDelay;
+      if (retry) retryHint = ` Retry in ~${retry}.`;
+    } catch {}
+    return [
+      "Gemini quota exceeded for this API key, so the online dictionary search could not run.",
+      "Grounded Google Search lookups have a small free-tier quota that resets daily.",
+      "Switch model in the Gemini key dialog (each model has its own quota bucket), or create a new key in Google AI Studio (https://aistudio.google.com/app/apikey) so the project gets fresh free-tier quota.",
+      retryHint,
+    ].filter(Boolean).join(" ");
+  }
+  if (status === 403) {
+    return `Gemini rejected the online lookup (403). Enable the Generative Language API for the Cloud project tied to this key, and allow the generativelanguage.googleapis.com endpoint in any key restrictions. Raw: ${String(bodyText).slice(0, 300)}`;
+  }
+  if (status === 400) {
+    return `Gemini rejected the online lookup request (400). The model name may be invalid for your project, or the request is unsupported. Raw: ${String(bodyText).slice(0, 300)}`;
+  }
+  return `Online dictionary request failed: ${status}`;
+}
+
 export const ONLINE_DICTIONARY_SCHEMA = {
   type: "object",
   properties: {

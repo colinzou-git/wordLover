@@ -2,6 +2,7 @@ import {
   ONLINE_DICTIONARY_SCHEMA,
   OnlineDictionaryRequestError,
   cleanOnlineString,
+  explainOnlineDictionaryError,
   extractGroundingSources,
   normalizeOnlineDictionaryResult,
   onlineResponseText,
@@ -30,7 +31,7 @@ export async function requestOnlineDictionaryEntry({
   apiKey,
   model,
   fetchImpl = fetch,
-  explainError,
+  explainError = explainOnlineDictionaryError,
 }) {
   const cleanTerm = cleanOnlineString(term, 120);
   if (!cleanTerm) throw new Error("A word or phrase is required for online lookup.");
