@@ -1,0 +1,33 @@
+#!/bin/sh
+# WordFan pre-commit guard.
+#
+# Two things have repeatedly turned CI red and silently skipped the GitHub Pages
+# deploy: (1) the per-file ?v= cache-buster / cache-name / APP_VERSION markers
+# drifting out of lockstep, and (2) a stale docs/ai/AUTO_SYMBOL_MAP.md. Both are
+# "edited the source, forgot to run the sync script" mistakes. This hook removes
+# the human step entirely and refuses to create a commit that would fail CI.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+PY=python
+command -v python >/dev/null 2>&1 || PY=python3
+
+# Auto-bump the shell version whenever a shell asset is part of this commit, so
+# every deploy carries a fresh, fully-lockstepped version with no manual editing.
+if git diff --cached --name-only --diff-filter=ACM \
+     | grep -Eq '^apps/wordlover-pwa/public/.*\.(js|mjs|html|css|webmanifest|svg)$'; then
+  "$PY" apps/wordlover-pwa/scripts/bump-shell-version.py
+  git add -u apps/wordlover-pwa/public
+fi
+
+# Keep the AI symbol map fresh (the other recurring CI red).
+"$PY" scripts/generate_code_map.py >/dev/null
+git add docs/ai/AUTO_SYMBOL_MAP.md
+
+# Hard gate: never let an inconsistent shell version or a stale symbol map land.
+"$PY" apps/wordlover-pwa/scripts/check_versions.py
+"$PY" scripts/generate_code_map.py --check

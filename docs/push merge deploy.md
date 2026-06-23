@@ -11,6 +11,20 @@ This means you can edit code, commit, and push from anywhere (including the iPho
 Claude app driving this machine remotely) and the live site updates with no manual
 step on the Windows box.
 
+## Version numbers bump themselves
+
+You no longer hand-edit version strings. `.githooks/pre-commit` (enable once with
+`git config core.hooksPath .githooks`) runs `bump-shell-version.py` whenever a
+`public/` shell asset is part of the commit, advancing `APP_VERSION`, the cache
+name, and every `?v=` cache-buster together, and regenerating the symbol map. So
+each deploy that changes the shell carries a new, fully-lockstepped version with no
+manual step, and the menu's version number moves on every real deploy.
+
+A code-only push that does **not** touch the shell intentionally keeps the same
+version — there is nothing new to cache-bust. If you ever commit on a box without
+the hook and the markers drift, CI's `check_versions.py` goes red and the deploy is
+skipped; run `npm run bump` (in `apps/wordlover-pwa/`) and push to fix it.
+
 What the job does:
 
 1. Copies the web shell from `public/` (excludes dev launchers `*.ps1`, build

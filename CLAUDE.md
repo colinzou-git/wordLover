@@ -64,15 +64,30 @@ Writes a tiny `dictionary.sqlite` + `.zst` + `dictionary-manifest.json` with onl
 
 **The fixture overwrites the same `public/` files the app serves.** To avoid silently replacing the shipped ~100k-entry dictionary (and committing the fixture manifest, as happened once), the script **refuses to overwrite a production manifest** (`variant != "ci-fixture"`) unless `--force` is passed. CI uses `--force` in a throwaway checkout. Locally, prefer `npm run test:browser:ci` (`run-browser-tests-ci.py`), which snapshots and restores the production dictionary around the run. If you ever run with `--force` directly on a dev box, restore production afterward with `python scripts/package_dictionary_web.py --copy-sqlite`.
 
-## Cache versioning — the easiest thing to break
+## Cache versioning — automated; don't hand-edit version strings
 
-**Three things must be bumped together** every time app shell files change:
+**Never hand-edit version markers across files.** A single writer keeps them in
+lockstep, and a git hook runs it for you. This used to be the most common cause of a
+red CI / silently-skipped deploy; it is now automated end-to-end.
 
-1. `CACHE_NAME` / `SHELL_CACHE_VERSION` — in `sw.js` line 1, `app.js` near top, and `automated-tests.js` `SHELL_CACHE_NAME`.
-2. `?v=YYYYMMDD-N` query strings — on every shell asset reference in `index.html`, `automated-tests.html`, `sw.js` `SHELL_ASSETS`, and `automated-tests.js` `SHELL_ASSETS`. All must match.
-3. `APP_VERSION` in `app.js` (user-visible in the menu).
+- **One command bumps everything:** `npm run bump` (in `apps/wordlover-pwa/`) — or
+  `python apps/wordlover-pwa/scripts/bump-shell-version.py`. It advances the release
+  `-vNNN` and the `?v=YYYYMMDD-N` date stamp and rewrites every marker together:
+  `CACHE_NAME` / `SHELL_CACHE_VERSION` (`sw.js`, `app.js`) and `SHELL_CACHE_NAME`
+  (`automated-tests.js`); every `?v=` shell-asset reference; and `APP_VERSION`
+  (user-visible in the menu). `npm run bump:sync` re-stamps to the current
+  `APP_VERSION` without advancing (repairs a partial edit).
+- **The bump happens automatically on commit.** `.githooks/pre-commit` bumps the
+  shell version whenever a `public/` asset is staged, regenerates
+  `docs/ai/AUTO_SYMBOL_MAP.md`, and hard-blocks any commit that would still be
+  inconsistent — so a fresh, lockstepped version ships with every deploy with no
+  manual step. **Enable once per clone:** `git config core.hooksPath .githooks`.
+- `check_versions.py` remains the CI backstop. If a commit ever reaches CI out of
+  lockstep (e.g. made on a box without the hook, or via the GitHub web UI), CI goes
+  red and the deploy is skipped — fix it with `npm run bump` and push.
 
-If only one moves, users see stale shells or the service worker fails to pre-cache. `check_versions.py` enforces this in CI.
+If markers ever disagree, users see stale shells or the service worker fails to
+pre-cache, and the deploy job never runs.
 
 **Never** add `skipWaiting()` to the install handler. The service worker only calls it after the user clicks **Apply update** (via `SKIP_WAITING` message). This is a product requirement.
 
