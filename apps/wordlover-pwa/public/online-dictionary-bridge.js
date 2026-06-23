@@ -1,4 +1,4 @@
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260618-1";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260622-1";
 
 const SOURCE_LABELS = {
   wiktionary: "Wiktionary",
