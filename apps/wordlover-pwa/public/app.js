@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260622-1";
+} from "./fsrs-scheduler.js?v=20260623-1";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260622-1";
+} from "./persistence.js?v=20260623-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260622-1";
+} from "./spelling.js?v=20260623-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260622-1";
+} from "./ui-preferences.js?v=20260623-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260622-1";
+} from "./review-state.js?v=20260623-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -57,7 +57,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260622-1";
+} from "./study-one-more.js?v=20260623-1";
 
 import {
   studyEventTrack,
@@ -69,11 +69,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260622-1";
+} from "./sync.js?v=20260623-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260622-1";
+} from "./goal-forecast.js?v=20260623-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -85,11 +85,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260622-1";
+} from "./tracks.js?v=20260623-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260622-1";
+} from "./full-dictionary.js?v=20260623-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -230,7 +230,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260622-1-v134";
+const APP_VERSION = "0.6.2-product.20260623-1-v134";
 const USER_DATA_FORMAT_VERSION = "0.3";
 const SHELL_CACHE_VERSION = "wordlover-shell-v134";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";

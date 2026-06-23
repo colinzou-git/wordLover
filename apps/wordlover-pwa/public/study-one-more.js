@@ -5,7 +5,7 @@ import {
   STUDY_ONE_MORE_LEVELS,
   STUDY_ONE_MORE_TAGS,
   normalizeStudyOneMoreLevel,
-} from "./ui-preferences.js?v=20260622-1";
+} from "./ui-preferences.js?v=20260623-1";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
