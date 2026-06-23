@@ -1,6 +1,12 @@
-import { lookupWiktionary } from "./wiktionary-lookup.js?v=20260622-1";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260622-1";
 
 const STATUS_ATTRIBUTE = "data-online-dictionary-auto-status";
+const SOURCE_LABELS = {
+  wiktionary: "Wiktionary",
+  "wiktionary+gemini": "Wiktionary + Gemini translation",
+  "gemini-grounded": "Google Search",
+  "gemini-plain": "Gemini unverified fallback",
+};
 const seenTerms = new Set();
 let busyTerm = "";
 let mutationTimer = 0;
@@ -19,6 +25,22 @@ function ui() {
     input: document.querySelector("#termInput"),
     result: document.querySelector("#result"),
   };
+}
+
+function configuredGeminiKey() {
+  return String(window.WORDLOVER_CONFIG?.geminiApiKey ?? "").trim();
+}
+
+function configuredGeminiModel() {
+  return String(window.WORDLOVER_CONFIG?.geminiModel ?? "gemini-2.5-flash").trim() || "gemini-2.5-flash";
+}
+
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] ?? "the online dictionary";
+}
+
+function shouldAutoSubmit(entry) {
+  return entry.status === "found" && entry.confidence !== "low" && entry.source !== "gemini-plain";
 }
 
 function setStatus(message, { error = false } = {}) {
@@ -65,16 +87,16 @@ function waitForAddDialog() {
   });
 }
 
-async function openReviewDialog(miss, wik) {
+async function openReviewDialog(miss, entry, { autoSubmit = false } = {}) {
   const modalPromise = waitForAddDialog();
   miss.addButton.click();
   const modal = await modalPromise;
   if (!modal) throw new Error("WordFan could not open the Add to dictionary form.");
   const values = {
-    term: wik.canonicalWord || miss.term,
-    phonetic: wik.phonetic || "",
-    english: (wik.englishMeanings || []).join("; "),
-    chinese: (wik.chineseMeanings || []).join("; "),
+    term: entry.canonicalWord || miss.term,
+    phonetic: entry.phonetic || "",
+    english: (entry.englishMeanings || []).join("; "),
+    chinese: (entry.chineseMeanings || []).join("; "),
   };
   for (const [field, value] of Object.entries(values)) {
     const control = modal.querySelector(`[data-modal-field="${field}"]`);
@@ -83,6 +105,7 @@ async function openReviewDialog(miss, wik) {
       control.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
+  if (autoSubmit) modal.querySelector("[data-modal-submit]")?.click();
 }
 
 async function runAutoMissLookup() {
@@ -91,18 +114,30 @@ async function runAutoMissLookup() {
   busyTerm = miss.normalized;
   seenTerms.add(miss.normalized);
   try {
-    setStatus(`Not found locally. Checking Wiktionary for “${miss.term}”…`);
-    const wik = await lookupWiktionary(miss.term);
-    const latest = localMiss();
-    if (!latest || latest.normalized !== miss.normalized) return;
-    if (!wik.found) {
-      setStatus("No Wiktionary entry was found for this spelling.", { error: true });
+    if (!navigator.onLine) {
+      setStatus("This term was not found locally. Connect to the internet to look it up online.", { error: true });
       return;
     }
-    setStatus("Found in Wiktionary. Review the filled details, then save if correct.");
-    await openReviewDialog(latest, wik);
+    setStatus(`Not found locally. Looking up “${miss.term}” online…`);
+    const entry = await resolveOnlineDictionaryEntry({
+      term: miss.term,
+      apiKey: configuredGeminiKey(),
+      model: configuredGeminiModel(),
+    });
+    const latest = localMiss();
+    if (!latest || latest.normalized !== miss.normalized) return;
+    if (entry.status !== "found") {
+      const suggestion = entry.suggestedWord ? ` Did you mean “${entry.suggestedWord}”?` : "";
+      setStatus(`No reliable online entry was found for this spelling.${suggestion}`, { error: true });
+      return;
+    }
+    const autoSubmit = shouldAutoSubmit(entry);
+    setStatus(autoSubmit
+      ? `Verified via ${sourceLabel(entry.source)}. Adding this entry to WordFan…`
+      : `Best-effort entry from ${sourceLabel(entry.source)}. Review the filled details, then save if correct.`);
+    await openReviewDialog(latest, entry, { autoSubmit });
   } catch (error) {
-    setStatus(`Wiktionary lookup failed: ${error instanceof Error ? error.message : String(error)}`, { error: true });
+    setStatus(`Online dictionary lookup failed: ${error instanceof Error ? error.message : String(error)}`, { error: true });
   } finally {
     busyTerm = "";
   }
