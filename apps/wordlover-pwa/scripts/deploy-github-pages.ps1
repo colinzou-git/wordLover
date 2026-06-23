@@ -76,6 +76,17 @@ try {
   [System.IO.File]::WriteAllText((Join-Path $work "CNAME"), $Domain)         # custom domain
   [System.IO.File]::WriteAllText((Join-Path $work ".nojekyll"), "")          # serve vendor/ & dotfiles as-is
 
+  # Stamp build identity into the deployed shell so the menu / update check show the
+  # exact commit that is live (parity with the CI deploy job; local time here).
+  $shortSha = (git rev-parse --short HEAD).Trim()
+  $stamp = (Get-Date -Format "yyyyMMdd-HHmm") + "-" + $shortSha
+  $appJsPath = Join-Path $work "app.js"
+  $appJs = [System.IO.File]::ReadAllText($appJsPath)
+  $stamped = [System.Text.RegularExpressions.Regex]::Replace($appJs, 'const BUILD_STAMP = "[^"]*";', "const BUILD_STAMP = `"$stamp`";")
+  if ($stamped -eq $appJs) { throw "BUILD_STAMP marker not found in $appJsPath" }
+  [System.IO.File]::WriteAllText($appJsPath, $stamped)
+  Write-Host "  Stamped BUILD_STAMP = $stamp"
+
   Push-Location $work
   try {
     git add -A

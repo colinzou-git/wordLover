@@ -25,6 +25,23 @@ version — there is nothing new to cache-bust. If you ever commit on a box with
 the hook and the markers drift, CI's `check_versions.py` goes red and the deploy is
 skipped; run `npm run bump` (in `apps/wordlover-pwa/`) and push to fix it.
 
+## Confirming the *exact* commit that is live (BUILD_STAMP)
+
+`APP_VERSION` identifies the shell (and drives the "Apply update" prompt), but it
+only moves when the shell changes. To verify a specific commit actually deployed,
+the **deploy job stamps `BUILD_STAMP`** in the published `app.js` with
+`<YYYYMMDD>-<HHMM>-<shortsha>` (UTC; the commit SHA only exists after the commit, so
+this can only happen at deploy time, not in the pre-commit hook). The menu shows it
+next to the version (`… · 20260623-1807-50a32ac`), and **Check for update** prints
+`Device: … build <stamp>` vs `Server: … build <stamp>` — the *Server* line is
+fetched live (cache-bypassing), so its short SHA is the commit currently on
+`wordfan.app`. Match it against `git rev-parse --short HEAD` on `main` to confirm
+the latest push is live.
+
+Locally `BUILD_STAMP` stays `"dev"` and is hidden, so a dev build is never mistaken
+for a deployed one. The manual `deploy-github-pages.ps1` stamps the same way (local
+time) for dictionary deploys.
+
 What the job does:
 
 1. Copies the web shell from `public/` (excludes dev launchers `*.ps1`, build

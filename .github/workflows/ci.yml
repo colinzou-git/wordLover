@@ -377,6 +377,23 @@ jobs:
           done
           echo "Dictionary matches manifest ($(jq -r .dictionaryDataVersion "$MAN"))."
 
+      - name: Stamp build identity (date-time-commit) into the deployed shell
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          STAMP="$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA:0:7}"
+          python - "$SITE/app.js" "$STAMP" <<'PY'
+          import re, sys
+          path, stamp = sys.argv[1], sys.argv[2]
+          text = open(path, encoding="utf-8").read()
+          new, n = re.subn(r'const BUILD_STAMP = "[^"]*";', f'const BUILD_STAMP = "{stamp}";', text, count=1)
+          if n != 1:
+              raise SystemExit(f"Expected exactly one BUILD_STAMP marker in {path}, found {n}")
+          with open(path, "w", encoding="utf-8", newline="") as handle:
+              handle.write(new)
+          print(f"Stamped BUILD_STAMP = {stamp}")
+          PY
+
       - name: Publish to gh-pages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
