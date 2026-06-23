@@ -55,7 +55,7 @@ EXCLUDED_DIRS = {
 
 # Individual filenames to skip.
 EXCLUDED_FILENAMES = {
-    "dictionary-manifest.json",
+    "dictionary-manifest.json", "online-dictionary-normalize.js", "online-dictionary.js", "online-dictionary-bridge.js", "test-online-dictionary.mjs",
     "AUTO_SYMBOL_MAP.md",   # the generated output itself
 }
 
@@ -172,7 +172,6 @@ def unique(items: list[Symbol]) -> list[Symbol]:
         out.append(item)
     return out
 
-
 # ---------------------------------------------------------------------------
 # Parsers
 # ---------------------------------------------------------------------------
@@ -258,9 +257,9 @@ def parse_css(text: str) -> dict[str, list[Symbol]]:
                 continue
             seen.add(name)
             selectors.append(Symbol(name, ln))
-        if len(selectors) >= CSS_SELECTOR_LIMIT:
-            selectors.append(Symbol(f"… ({len(seen)}+ selectors; truncated at {CSS_SELECTOR_LIMIT})"))
-            return {"selectors": selectors}
+            if len(selectors) >= CSS_SELECTOR_LIMIT:
+                selectors.append(Symbol(f"… ({len(seen)}+ selectors; truncated at {CSS_SELECTOR_LIMIT})"))
+                return {"selectors": selectors}
     return {"selectors": selectors}
 
 
@@ -332,7 +331,6 @@ def parse_file(path: Path) -> dict[str, list[Symbol]]:
         return parse_markdown(text)
     return {}
 
-
 # ---------------------------------------------------------------------------
 # File discovery
 # ---------------------------------------------------------------------------
@@ -384,7 +382,6 @@ def discover_source_files(root: Path) -> tuple[list[Path], list[tuple[Path, int]
     included.sort(key=lambda p: p.relative_to(root).as_posix())
     skipped.sort(key=lambda t: t[0].relative_to(root).as_posix())
     return included, skipped
-
 
 # ---------------------------------------------------------------------------
 # Rendering
@@ -448,7 +445,6 @@ def render_map(root: Path, files: list[Path], skipped: list[tuple[Path, int]]) -
 
     return "\n".join(lines).rstrip() + "\n"
 
-
 # ---------------------------------------------------------------------------
 # Staleness check helper
 # ---------------------------------------------------------------------------
@@ -460,7 +456,6 @@ def _normalize(content: str) -> str:
         line for line in content.splitlines()
         if not line.startswith(_DATESTAMP_PREFIX)
     )
-
 
 # ---------------------------------------------------------------------------
 # Main
