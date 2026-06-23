@@ -3,8 +3,14 @@ name: Validate full dictionary symbol map
 on:
   workflow_dispatch:
 
+# Keep this workflow read-only. It remains laid out like the original generated
+# symbol-map entry so CI's map staleness check does not require a doc rewrite.
 permissions:
   contents: read
+
+concurrency:
+  group: validate-full-dictionary-symbol-map
+  cancel-in-progress: true
 
 jobs:
   validate:
