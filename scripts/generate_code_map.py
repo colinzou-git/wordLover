@@ -55,7 +55,7 @@ EXCLUDED_DIRS = {
 
 # Individual filenames to skip.
 EXCLUDED_FILENAMES = {
-    "dictionary-manifest.json", "online-dictionary-normalize.js", "online-dictionary.js", "online-dictionary-bridge.js", "test-online-dictionary.mjs",
+    "dictionary-manifest.json", "online-dictionary-normalize.js", "online-dictionary.js", "online-dictionary-bridge.js", "wiktionary-lookup.js", "test-online-dictionary.mjs",
     "AUTO_SYMBOL_MAP.md",   # the generated output itself
 }
 

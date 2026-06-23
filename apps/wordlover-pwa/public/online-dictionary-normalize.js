@@ -116,6 +116,50 @@ export function extractGroundingSources(metadata) {
   return sources;
 }
 
+// Assemble + sanitize a normalized online-dictionary entry from any source. Unlike
+// normalizeOnlineDictionaryResult (which applies grounding-specific guards such as
+// "no web sources => not_found"), this trusts the caller's status: Wiktionary and
+// the plain-text fallback have their own trust rules. Every entry carries a `source`
+// and `confidence` so the bridge can gate auto-add.
+export function buildOnlineEntry({
+  input,
+  source = "unknown",
+  status = "found",
+  canonicalWord = "",
+  suggestedWord = "",
+  phonetic = "",
+  entryType = "",
+  partsOfSpeech = [],
+  englishMeanings = [],
+  chineseMeanings = [],
+  tags = [],
+  confidence = "medium",
+  sourceUrls = [],
+  searchQueries = [],
+  model = "",
+  queryMs = 0,
+}) {
+  const inputTerm = cleanOnlineString(input, 120);
+  const canon = cleanOnlineString(canonicalWord || inputTerm, 120);
+  return {
+    status: ["found", "not_found", "correction"].includes(status) ? status : "not_found",
+    source,
+    canonicalWord: canon,
+    suggestedWord: cleanOnlineString(suggestedWord, 120),
+    phonetic: cleanOnlineString(phonetic, 160),
+    entryType: cleanOnlineString(entryType || (inputTerm.includes(" ") ? "phrase" : "word"), 80),
+    partsOfSpeech: cleanList(partsOfSpeech, { maxItems: 8, maxLength: 80 }),
+    englishMeanings: cleanList(englishMeanings),
+    chineseMeanings: cleanList(chineseMeanings),
+    tags: cleanList(tags, { maxItems: 10, maxLength: 80 }),
+    confidence: ["high", "medium", "low"].includes(confidence) ? confidence : "low",
+    sourceUrls: Array.isArray(sourceUrls) ? sourceUrls.slice(0, MAX_SOURCE_COUNT) : [],
+    searchQueries: cleanList(searchQueries, { maxItems: 8, maxLength: 200 }),
+    model,
+    queryMs,
+  };
+}
+
 export function normalizeOnlineDictionaryResult({
   input,
   structured,
@@ -128,10 +172,7 @@ export function normalizeOnlineDictionaryResult({
   const suggestedWord = cleanOnlineString(structured?.suggestedWord, 120);
   const englishMeanings = cleanList(structured?.englishMeanings);
   const chineseMeanings = cleanList(structured?.chineseMeanings);
-  const partsOfSpeech = cleanList(structured?.partsOfSpeech, { maxItems: 8, maxLength: 80 });
-  const tags = cleanList(structured?.tags, { maxItems: 10, maxLength: 80 });
   const sourceUrls = extractGroundingSources(groundingMetadata);
-  const searchQueries = cleanList(groundingMetadata?.webSearchQueries, { maxItems: 8, maxLength: 200 });
   const confidence = ["high", "medium", "low"].includes(structured?.confidence)
     ? structured.confidence
     : "low";
@@ -147,6 +188,8 @@ export function normalizeOnlineDictionaryResult({
   }
   if (status === "correction" && !correction && !exactSpelling) correction = canonicalWord;
 
+  // Grounding trust rule: a "found" claim must be backed by web sources, real
+  // bilingual meanings, and non-low confidence — otherwise it is not trustworthy.
   if (
     status === "found"
     && (
@@ -159,22 +202,24 @@ export function normalizeOnlineDictionaryResult({
     status = "not_found";
   }
 
-  return {
+  return buildOnlineEntry({
+    input: inputTerm,
+    source: "gemini-grounded",
     status,
     canonicalWord,
     suggestedWord: correction,
-    phonetic: cleanOnlineString(structured?.phonetic, 160),
-    entryType: cleanOnlineString(structured?.entryType || (inputTerm.includes(" ") ? "phrase" : "word"), 80),
-    partsOfSpeech,
+    phonetic: structured?.phonetic,
+    entryType: structured?.entryType,
+    partsOfSpeech: structured?.partsOfSpeech,
     englishMeanings,
     chineseMeanings,
-    tags,
+    tags: structured?.tags,
     confidence,
     sourceUrls,
-    searchQueries,
+    searchQueries: groundingMetadata?.webSearchQueries,
     model,
     queryMs,
-  };
+  });
 }
 
 export function onlineResponseText(payload) {

@@ -1,4 +1,24 @@
-import { requestOnlineDictionaryEntry } from "./online-dictionary.js?v=20260618-1";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260618-1";
+
+const SOURCE_LABELS = {
+  wiktionary: "Wiktionary",
+  "wiktionary+gemini": "Wiktionary + Gemini translation",
+  "gemini-grounded": "Google Search",
+  "gemini-plain": "Gemini (unverified)",
+};
+
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] ?? "the online dictionary";
+}
+
+// High-trust sources may auto-fill and submit the Add dialog. Low-confidence or
+// ungrounded ("gemini-plain") entries are filled but left for the user to review and
+// save, so a guess never lands silently in their dictionary.
+function isAutoAddSafe(online) {
+  return online.status === "found"
+    && online.confidence !== "low"
+    && online.source !== "gemini-plain";
+}
 
 const STATUS_ATTRIBUTE = "data-online-dictionary-status";
 const WAIT_FOR_LOCAL_MS = 30000;
@@ -121,6 +141,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && currentGeminiModal()) captureGeminiSettings();
 }, true);
 
+function existingGeminiSettings() {
+  return sessionApiKey
+    ? { apiKey: sessionApiKey, model: supportedGroundingModel(sessionModel) }
+    : null;
+}
+
 async function ensureGeminiSettings() {
   if (sessionApiKey) return { apiKey: sessionApiKey, model: supportedGroundingModel(sessionModel) };
   const { keyButton } = ui();
@@ -163,7 +189,7 @@ function waitForAddDialog() {
   });
 }
 
-async function addThroughNativeDialog(term, online) {
+async function addThroughNativeDialog(term, online, { autoSubmit = true } = {}) {
   const addButton = ui().result?.querySelector("#addToDictionary");
   if (!(addButton instanceof HTMLButtonElement)) {
     throw new Error("WordFan's Add to dictionary action is unavailable.");
@@ -186,7 +212,7 @@ async function addThroughNativeDialog(term, online) {
       control.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
-  modal.querySelector("[data-modal-submit]")?.click();
+  if (autoSubmit) modal.querySelector("[data-modal-submit]")?.click();
 }
 
 function renderCorrection(term, suggestedWord) {
@@ -204,31 +230,48 @@ async function runFallback(term, token) {
   busyTerm = normalizeTerm(cleanTerm);
   try {
     if (!navigator.onLine) {
-      setStatus("This term was not found locally. Connect to the internet to search Google.", { error: true });
+      setStatus("This term was not found locally. Connect to the internet to look it up online.", { error: true });
       return;
     }
-    const settings = await ensureGeminiSettings();
-    if (!settings || token !== generation) return;
 
-    setStatus(`Not found locally. Searching Google for “${cleanTerm}”…`);
-    const online = await requestOnlineDictionaryEntry({
+    // Wiktionary is the first tier and needs no key, so don't prompt up front —
+    // run with whatever key already exists.
+    const settings = existingGeminiSettings();
+    setStatus(`Not found locally. Looking up “${cleanTerm}” online…`);
+    let online = await resolveOnlineDictionaryEntry({
       term: cleanTerm,
-      apiKey: settings.apiKey,
-      model: settings.model,
+      apiKey: settings?.apiKey ?? "",
+      model: settings?.model ?? supportedGroundingModel(sessionModel),
     });
     if (token !== generation || normalizeTerm(ui().input?.value) !== normalizeTerm(cleanTerm)) return;
+
+    // Wiktionary alone couldn't fully resolve it and there's no key yet: offer to add
+    // one, then retry so the Gemini grounding / translation tiers can contribute.
+    if (!settings && online.status !== "correction" && !isAutoAddSafe(online)) {
+      const added = await ensureGeminiSettings();
+      if (token !== generation) return;
+      if (added) {
+        online = await resolveOnlineDictionaryEntry({ term: cleanTerm, apiKey: added.apiKey, model: added.model });
+        if (token !== generation || normalizeTerm(ui().input?.value) !== normalizeTerm(cleanTerm)) return;
+      }
+    }
 
     if (online.status === "correction" && online.suggestedWord) {
       renderCorrection(cleanTerm, online.suggestedWord);
       return;
     }
     if (online.status !== "found") {
-      setStatus("Google Search did not find enough reliable evidence to add this term automatically.", { error: true });
+      setStatus("No reliable online entry was found for this term.", { error: true });
       return;
     }
 
-    setStatus("Verified online. Adding this entry to WordFan…");
-    await addThroughNativeDialog(cleanTerm, online);
+    if (isAutoAddSafe(online)) {
+      setStatus(`Verified via ${sourceLabel(online.source)}. Adding this entry to WordFan…`);
+      await addThroughNativeDialog(cleanTerm, online, { autoSubmit: true });
+    } else {
+      setStatus(`Best-effort entry from ${sourceLabel(online.source)} — review the details and save if correct.`);
+      await addThroughNativeDialog(cleanTerm, online, { autoSubmit: false });
+    }
   } catch (error) {
     setStatus(`Online dictionary lookup failed: ${error instanceof Error ? error.message : String(error)}`, { error: true });
   } finally {
