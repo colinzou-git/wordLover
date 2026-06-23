@@ -117,18 +117,20 @@ jobs:
           ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
           def dismiss_modal(page: Page) -> None:
+              # JS-dispatch the button clicks: headless WebKit intermittently flags the
+              # static modal buttons as "not stable" and times out on click(), even though
+              # the synchronous handler removes the overlay immediately.
               for _ in range(8):
                   overlay = page.locator(".modal-overlay")
                   if not overlay.count() or not overlay.first.is_visible():
                       return
                   passphrase = page.locator(".modal-overlay #passphrase")
                   cancel = page.locator(".modal-overlay [data-modal-cancel]")
-                  submit = page.locator(".modal-overlay [data-modal-submit]")
                   if passphrase.count():
                       passphrase.fill("wordlover-localhost-development-passphrase")
-                      submit.click()
+                      page.evaluate("() => document.querySelector('.modal-overlay [data-modal-submit]')?.click()")
                   elif cancel.count():
-                      cancel.click()
+                      page.evaluate("() => document.querySelector('.modal-overlay [data-modal-cancel]')?.click()")
                   else:
                       page.keyboard.press("Escape")
                   page.wait_for_timeout(200)

@@ -48,14 +48,19 @@ def wait_for_service_worker_reload_settle(page: Page) -> None:
 
 
 def dismiss_optional_modal(page: Page) -> None:
+    # Dismiss via JS-dispatched clicks instead of Playwright's actionability-gated
+    # click(): headless WebKit intermittently reports the (static, animation-free)
+    # modal buttons as "not stable" and times out, even though the synchronous click
+    # handler removes the overlay immediately. The app's button handlers run the same
+    # way for a real tap or a dispatched click, so this stays faithful to the UI.
     for _ in range(5):
         if not page.locator(".modal-overlay").count():
             return
         if page.locator(".modal-overlay [data-modal-cancel]").count():
-            page.locator(".modal-overlay [data-modal-cancel]").click(timeout=2_000)
+            page.evaluate("() => document.querySelector('.modal-overlay [data-modal-cancel]')?.click()")
         elif page.locator(".modal-overlay #passphrase").count():
             page.locator(".modal-overlay #passphrase").fill("wordlover-localhost-development-passphrase")
-            page.locator(".modal-overlay [data-modal-submit]").click(timeout=2_000)
+            page.evaluate("() => document.querySelector('.modal-overlay [data-modal-submit]')?.click()")
         else:
             page.keyboard.press("Escape")
         page.wait_for_timeout(100)
