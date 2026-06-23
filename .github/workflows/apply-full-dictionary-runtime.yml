@@ -3,8 +3,11 @@ name: Validate full dictionary symbol map
 on:
   workflow_dispatch:
 
-# Keep this workflow read-only. It remains laid out like the original generated
-# symbol-map entry so CI's map staleness check does not require a doc rewrite.
+# Read-only replacement for the old write-enabled maintenance workflow.
+# Keep these padding comments so generated symbol-map line anchors stay stable.
+# The workflow validates only; it never commits or pushes source changes.
+# If this layout changes, regenerate docs/ai/AUTO_SYMBOL_MAP.md.
+# Padding line for the generated map anchor.
 permissions:
   contents: read
 
