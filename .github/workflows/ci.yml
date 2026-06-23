@@ -142,13 +142,21 @@ jobs:
                       page.wait_for_load_state("domcontentloaded", timeout=15_000)
                       page.wait_for_function("window.WordLoverApp != null", timeout=15_000)
                       dismiss_modal(page)
-                      page.evaluate("async () => window.WordLoverApp.ensureDictionaryLoaded()")
+                      # Let the app's own online auto-load bring the dictionary up. Calling
+                      # ensureDictionaryLoaded() here races init()'s setSearchLoading toggle:
+                      # if our load resolves while init is still awaiting (slower on headless
+                      # WebKit), init's later setSearchLoading(true) lands after our load and
+                      # the loaded=true early-return never re-enables the controls, leaving
+                      # #clearSearch stuck disabled.
                       page.wait_for_function(
                           "window.WordLoverApp?.getState?.().loaded === true",
                           timeout=60_000,
                       )
                       dismiss_modal(page)
                       page.locator("#termInput").wait_for(state="visible", timeout=10_000)
+                      # Search controls stay disabled while the dictionary loads; wait until
+                      # the app re-enables them before driving the search flow.
+                      page.locator("#clearSearch:not([disabled])").wait_for(state="attached", timeout=10_000)
                       return
                   except Exception as exc:  # navigation can occur when a service worker takes control
                       last_error = exc
