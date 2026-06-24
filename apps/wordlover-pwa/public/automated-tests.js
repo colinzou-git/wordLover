@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260624-3";
+} from "./fsrs-scheduler.js?v=20260624-4";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260624-3";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260624-3";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260624-4";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260624-4";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260624-3";
+} from "./ui-preferences.js?v=20260624-4";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260624-3";
+} from "./sync.js?v=20260624-4";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260624-3";
+} from "./study-one-more.js?v=20260624-4";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260624-3";
+} from "./goal-forecast.js?v=20260624-4";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,7 +48,9 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260624-3";
+} from "./tracks.js?v=20260624-4";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260624-4";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260624-4";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -62,7 +64,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v138";
+const SHELL_CACHE_NAME = "wordlover-shell-v139";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -79,19 +81,19 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260624-3",
-  "/full-dictionary.js?v=20260624-3",
-  "/persistence.js?v=20260624-3",
-  "/spelling.js?v=20260624-3",
-  "/ui-preferences.js?v=20260624-3",
-  "/review-state.js?v=20260624-3",
-  "/study-one-more.js?v=20260624-3",
-  "/sync.js?v=20260624-3",
-  "/fsrs-scheduler.js?v=20260624-3",
-  "/goal-forecast.js?v=20260624-3",
-  "/tracks.js?v=20260624-3",
-  "/styles.css?v=20260624-3",
-  "/wordlover-config.js?v=20260624-3",
+  "/app.js?v=20260624-4",
+  "/full-dictionary.js?v=20260624-4",
+  "/persistence.js?v=20260624-4",
+  "/spelling.js?v=20260624-4",
+  "/ui-preferences.js?v=20260624-4",
+  "/review-state.js?v=20260624-4",
+  "/study-one-more.js?v=20260624-4",
+  "/sync.js?v=20260624-4",
+  "/fsrs-scheduler.js?v=20260624-4",
+  "/goal-forecast.js?v=20260624-4",
+  "/tracks.js?v=20260624-4",
+  "/styles.css?v=20260624-4",
+  "/wordlover-config.js?v=20260624-4",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -107,7 +109,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260624-3",
+  "/automated-tests.js?v=20260624-4",
 ];
 
 let lastResults = null;
@@ -3022,6 +3024,84 @@ async function runLearningTracksImportExportTest() {
   }
 }
 
+// Issue #13: a local miss for a valid phrase like "sloppy work" must cascade through
+// Wiktionary -> Gemini grounding -> Gemini plain, end in a reviewable gemini-plain entry,
+// and open the Add-to-dictionary dialog prefilled WITHOUT auto-submitting (unverified).
+async function runOnlineDictionaryFallbackTest() {
+  const failures = [];
+  const assert = (label, condition) => { if (!condition) failures.push(label); };
+  try {
+    const jsonResponse = (obj, status = 200) =>
+      new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+    const geminiText = (text, extra = {}) =>
+      jsonResponse({ candidates: [{ content: { parts: [{ text }] }, ...extra }] });
+    const fetchImpl = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("/api/rest_v1/page/definition/")) return new Response("", { status: 404 });
+      if (u.includes("generativelanguage.googleapis.com")) {
+        const body = JSON.parse(opts.body || "{}");
+        const text = body.contents?.[0]?.parts?.[0]?.text || "";
+        if (body.tools) return geminiText("no authoritative dictionary source for this phrase", {});
+        if (text.includes("Without using web search")) {
+          return geminiText(JSON.stringify({
+            status: "found", canonicalWord: "sloppy work", suggestedWord: "", phonetic: "",
+            entryType: "phrase", partsOfSpeech: ["noun phrase"],
+            englishMeanings: ["Work done carelessly, inaccurately, or with poor attention to detail."],
+            chineseMeanings: ["草率完成的工作", "敷衍的工作"], tags: [], confidence: "medium",
+          }));
+        }
+        throw new Error("unexpected gemini call");
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    };
+
+    const entry = await resolveOnlineDictionaryEntry({
+      term: "sloppy work", apiKey: "test-key", model: "gemini-2.5-flash", fetchImpl,
+    });
+    assert("cascade ends in found", entry.status === "found");
+    assert("source is gemini-plain", entry.source === "gemini-plain");
+    assert("entryType is phrase", entry.entryType === "phrase");
+    assert("confidence forced low", entry.confidence === "low");
+    assert("chinese meanings present", entry.chineseMeanings.length > 0);
+    assert("plain fallback never auto-submits", shouldAutoSubmit(entry) === false);
+
+    // Drive the real bridge: openReviewDialog must prefill the Add-to-dictionary modal
+    // and, with autoSubmit=false, leave it for the user to confirm (no submit click).
+    let submitted = false;
+    const addButton = document.createElement("button");
+    addButton.addEventListener("click", () => {
+      const overlay = document.createElement("div");
+      overlay.className = "modal-overlay";
+      overlay.dataset.onlineFallbackTest = "1";
+      overlay.innerHTML = `
+        <div id="modalTitle">Add a word to the dictionary</div>
+        <input data-modal-field="term">
+        <input data-modal-field="phonetic">
+        <textarea data-modal-field="english"></textarea>
+        <textarea data-modal-field="chinese"></textarea>
+        <button data-modal-submit></button>`;
+      overlay.querySelector("[data-modal-submit]").addEventListener("click", () => { submitted = true; });
+      document.body.appendChild(overlay);
+    });
+    document.body.appendChild(addButton);
+    try {
+      await openReviewDialog({ term: "sloppy work", addButton }, entry, { autoSubmit: false });
+      const overlay = document.querySelector('.modal-overlay[data-online-fallback-test="1"]');
+      assert("review dialog opened", Boolean(overlay));
+      assert("term prefilled", overlay?.querySelector('[data-modal-field="term"]')?.value === "sloppy work");
+      assert("english prefilled", (overlay?.querySelector('[data-modal-field="english"]')?.value || "").includes("careless"));
+      assert("chinese prefilled", (overlay?.querySelector('[data-modal-field="chinese"]')?.value || "").length > 0);
+      assert("modal not auto-submitted", submitted === false);
+      overlay?.remove();
+    } finally {
+      addButton.remove();
+    }
+  } catch (error) {
+    failures.push(`threw: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { passed: failures.length === 0, failures };
+}
+
 function runModuleSmokeTests() {
   const failures = [];
   function assert(label, got, expected) {
@@ -3375,6 +3455,9 @@ async function runAllPocs() {
   addProgress("Running review, quiz, and FSRS-rating automation tests.");
   const reviewQuizRating = runReviewQuizRatingTests();
 
+  addProgress("Running online dictionary plain-fallback review-dialog test.");
+  const onlineDictionaryFallback = await runOnlineDictionaryFallbackTest();
+
   addProgress("Recording iPhone and Windows device coverage status.");
   const deviceCoverage = {
     windowsPoc: diagnostics.platform?.startsWith("Win") ? "executed-on-windows-browser" : "not-windows-browser",
@@ -3405,6 +3488,7 @@ async function runAllPocs() {
       encryptedExportImport: exportImport.roundTripMatches ? "pass" : "fail",
       mockCloudSync: mockSync.synced ? "pass" : "fail",
       reviewQuizRating: reviewQuizRating.passed ? "pass" : "fail",
+      onlineDictionaryFallback: onlineDictionaryFallback.passed ? "pass" : "fail",
       androidDeferred: "deferred-until-end",
       timedBenchmark: benchmark.timing.p95Ms < 1000 ? "pass" : "fail",
     },
@@ -3437,6 +3521,7 @@ async function runAllPocs() {
     exportImport,
     mockGoogleDriveSync: mockSync,
     reviewQuizRating,
+    onlineDictionaryFallback,
     deviceCoverage,
     moduleSmokeTests,
   };

@@ -7,8 +7,8 @@ import {
   extractGroundingSources,
   normalizeOnlineDictionaryResult,
   onlineResponseText,
-} from "./online-dictionary-normalize.js?v=20260624-3";
-import { lookupWiktionary } from "./wiktionary-lookup.js?v=20260624-3";
+} from "./online-dictionary-normalize.js?v=20260624-4";
+import { lookupWiktionary } from "./wiktionary-lookup.js?v=20260624-4";
 
 function geminiEndpoint(model, apiKey) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -187,9 +187,12 @@ export async function requestPlainOnlineEntry({
   const startedAt = Date.now();
   const prompt = [
     `Without using web search, produce a dictionary record for the exact English input "${cleanTerm}" from your own knowledge.`,
+    `Treat common phrases/collocations such as "sloppy work" as valid entries when you are confident of their meaning, even if they are not headwords in a dictionary.`,
+    "Do not invent obscure terms. For valid phrases, give concise meanings and Simplified Chinese glosses.",
     "Rules:",
-    "- This is an unverified last resort. If you are not confident the exact spelling is a real English term, set status=not_found and do not invent meanings.",
-    "- status=found only for a term you are confident exists; status=correction with suggestedWord for a likely typo; otherwise status=not_found.",
+    "- This is an unverified last resort. If you are not confident the exact spelling/phrase is real English, set status=not_found and do not invent meanings.",
+    "- status=found for a word, phrase, or collocation you are confident of; status=correction with suggestedWord for a likely typo; otherwise status=not_found.",
+    "- Preserve the exact input; do not rewrite a multi-word phrase to a single word.",
     "- Give 1-6 concise English meanings and matching simplified-Chinese meanings.",
     "- confidence must honestly reflect your certainty (high, medium, or low).",
   ].join("\n");
@@ -228,21 +231,27 @@ export async function requestPlainOnlineEntry({
   });
 }
 
-function transientGeminiError(error) {
-  const status = error instanceof OnlineDictionaryRequestError ? error.status : 0;
-  // 429 = quota, 0 = network/CORS, 5xx = server. A bad request (400) or auth/config
-  // failure (403) would fail identically for plain text, so don't waste a call retrying.
-  return status === 429 || status === 0 || status >= 500;
+function withTrace(entry, fallbackTrace) {
+  return { ...entry, fallbackTrace };
+}
+
+// A grounded result is usable only when it positively resolved the term: a "found"
+// entry, or a "correction" that actually names a suggestion. Anything else (a
+// not_found, or a normalization that downgraded to not_found for lack of sources /
+// meanings) means grounding could not help, so we must try the plain fallback.
+function usableResolvedEntry(entry) {
+  return entry.status === "found" || (entry.status === "correction" && Boolean(entry.suggestedWord));
 }
 
 // Tiered online lookup. Order is tuned to spend the scarce grounded-search quota only
-// where it is the only option (a word absent from Wiktionary):
+// where it is the only option (a word absent from Wiktionary), and to never dead-end a
+// valid term before every tier has been tried:
 //   1. Wiktionary  — free, browser-direct, no quota. Full hit wins outright.
 //   2. Wiktionary English but no Chinese — plain-text translate (cheap quota), merge.
 //   3. Wiktionary miss — Gemini grounding (needs the live web to find/verify/correct).
-//   4. Grounding fails for a transient/quota reason — plain-text last resort, flagged.
-// A grounding result that *ran* but found no evidence is returned as-is (honest
-// not_found); we never fall through to ungrounded guessing for unknown words.
+//   4. Grounding misses/errors/normalizes to not_found — plain-text last resort, flagged
+//      gemini-plain / low confidence so the bridge reviews instead of auto-adding.
+// Only after the plain fallback also fails do we report an actionable not_found/error.
 export async function resolveOnlineDictionaryEntry({
   term,
   apiKey,
@@ -253,13 +262,15 @@ export async function resolveOnlineDictionaryEntry({
   const cleanTerm = cleanOnlineString(term, 120);
   if (!cleanTerm) throw new Error("A word or phrase is required for online lookup.");
   const startedAt = Date.now();
+  const trace = [];
 
   // Tier 1 / 2: Wiktionary.
   const wik = await lookupWiktionary(cleanTerm, fetchImpl);
   if (wik.found) {
     const wikSource = [{ title: "Wiktionary", url: wik.sourceUrl }];
     if (wik.chineseMeanings.length) {
-      return buildOnlineEntry({
+      trace.push({ tier: "wiktionary", status: "found" });
+      return withTrace(buildOnlineEntry({
         input: cleanTerm,
         source: "wiktionary",
         status: "found",
@@ -272,7 +283,7 @@ export async function resolveOnlineDictionaryEntry({
         confidence: "high",
         sourceUrls: wikSource,
         queryMs: Date.now() - startedAt,
-      });
+      }), trace);
     }
     // English found, Chinese missing: top up with a plain-text translation.
     if (apiKey) {
@@ -286,7 +297,8 @@ export async function resolveOnlineDictionaryEntry({
           explainError,
         });
         if (chineseMeanings.length) {
-          return buildOnlineEntry({
+          trace.push({ tier: "wiktionary", status: "found-english-only" }, { tier: "gemini-translation", status: "found" });
+          return withTrace(buildOnlineEntry({
             input: cleanTerm,
             source: "wiktionary+gemini",
             status: "found",
@@ -299,14 +311,15 @@ export async function resolveOnlineDictionaryEntry({
             confidence: "medium",
             sourceUrls: wikSource,
             queryMs: Date.now() - startedAt,
-          });
+          }), trace);
         }
       } catch {
         // Translation failed (quota/error); fall through to English-only.
       }
     }
     // English-only: still useful, but unverified for Chinese — low confidence, no auto-add.
-    return buildOnlineEntry({
+    trace.push({ tier: "wiktionary", status: "found-english-only" });
+    return withTrace(buildOnlineEntry({
       input: cleanTerm,
       source: "wiktionary",
       status: "found",
@@ -319,27 +332,56 @@ export async function resolveOnlineDictionaryEntry({
       confidence: "low",
       sourceUrls: wikSource,
       queryMs: Date.now() - startedAt,
-    });
+    }), trace);
   }
+  trace.push({ tier: "wiktionary", status: "miss" });
 
-  // Tier 3: Wiktionary miss — only now spend grounded-search quota.
+  // No Gemini key: the grounded and plain tiers cannot run, so stop with an honest
+  // not_found whose source makes clear a key is what's missing (the bridge guides the user).
   if (!apiKey) {
-    return buildOnlineEntry({
+    return withTrace(buildOnlineEntry({
       input: cleanTerm,
       source: "wiktionary",
       status: "not_found",
       canonicalWord: cleanTerm,
       confidence: "low",
       queryMs: Date.now() - startedAt,
-    });
+    }), trace);
   }
+
+  // Tier 3: Gemini grounding. A positive result wins; any failure or unusable/not_found
+  // result is captured and we fall through to the plain fallback rather than dead-ending.
+  let groundingFailure = "";
   try {
-    return await requestOnlineDictionaryEntry({ term: cleanTerm, apiKey, model, fetchImpl, explainError });
+    const grounded = await requestOnlineDictionaryEntry({ term: cleanTerm, apiKey, model, fetchImpl, explainError });
+    if (usableResolvedEntry(grounded)) {
+      trace.push({ tier: "gemini-grounded", status: grounded.status });
+      return withTrace(grounded, trace);
+    }
+    trace.push({ tier: "gemini-grounded", status: "not_found" });
+    groundingFailure = "grounded search found no reliable dictionary entry";
   } catch (error) {
-    // Tier 4: plain-text last resort, but only for quota/transient grounding failures.
-    if (!transientGeminiError(error)) throw error;
-    return await requestPlainOnlineEntry({ term: cleanTerm, apiKey, model, fetchImpl, explainError });
+    trace.push({ tier: "gemini-grounded", status: "error" });
+    groundingFailure = error instanceof Error ? error.message : String(error);
   }
+
+  // Tier 4: Gemini plain-text last resort (unverified, low confidence, never auto-added).
+  let plain;
+  try {
+    plain = await requestPlainOnlineEntry({ term: cleanTerm, apiKey, model, fetchImpl, explainError });
+  } catch (error) {
+    const plainFailure = error instanceof Error ? error.message : String(error);
+    trace.push({ tier: "gemini-plain", status: "error" });
+    throw new OnlineDictionaryRequestError(
+      [
+        `Online lookup for "${cleanTerm}" failed after every fallback.`,
+        groundingFailure ? `Grounded search: ${groundingFailure}.` : "",
+        `Plain fallback: ${plainFailure}`,
+      ].filter(Boolean).join(" "),
+    );
+  }
+  trace.push({ tier: "gemini-plain", status: usableResolvedEntry(plain) ? plain.status : "not_found" });
+  return withTrace(plain, trace);
 }
 
-export { OnlineDictionaryRequestError } from "./online-dictionary-normalize.js?v=20260624-3";
+export { OnlineDictionaryRequestError } from "./online-dictionary-normalize.js?v=20260624-4";

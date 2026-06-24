@@ -1,4 +1,4 @@
-import { cleanOnlineString } from "./online-dictionary-normalize.js?v=20260624-3";
+import { cleanOnlineString } from "./online-dictionary-normalize.js?v=20260624-4";
 
 // English Wiktionary is the only "nice" dictionary that answers cross-origin
 // (Access-Control-Allow-Origin: *), so a no-backend PWA can read it directly.

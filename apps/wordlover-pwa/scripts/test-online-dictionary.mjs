@@ -9,6 +9,7 @@ import {
   requestOnlineDictionaryEntry,
   resolveOnlineDictionaryEntry,
 } from "../public/online-dictionary.js";
+import { shouldAutoSubmit } from "../public/online-dictionary-auto-miss.js";
 
 const groundingMetadata = {
   webSearchQueries: ["example dictionary definition"],
@@ -219,17 +220,154 @@ const ARGS = { apiKey: "k", model: "gemini-2.5-flash" };
   assert.equal(calls.plain, 1);
 }
 
-// Refinement 2: grounding RAN but found no evidence -> honest not_found, never plain text.
+// Tier 4 (network error): Wiktionary miss + grounding throws a network error -> plain.
 {
   const { fetchImpl, calls } = makeFetch({
     def: () => new Response("", { status: 404 }),
-    gemini: { grounded: () => geminiText("some prose but no sources", {}) },
+    gemini: {
+      grounded: () => { throw new TypeError("Failed to fetch"); },
+      plain: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "netword", suggestedWord: "", phonetic: "",
+        entryType: "word", partsOfSpeech: ["noun"], englishMeanings: ["offline best effort"],
+        chineseMeanings: ["离线尽力"], tags: [], confidence: "medium",
+      })),
+    },
   });
-  const r = await resolveOnlineDictionaryEntry({ term: "definitelynotaword", ...ARGS, fetchImpl });
-  assert.equal(r.status, "not_found");
-  assert.equal(r.source, "gemini-grounded");
-  assert.equal(calls.plain, 0);
-  assert.equal(calls.groundedStructured, 0);
+  const r = await resolveOnlineDictionaryEntry({ term: "netword", ...ARGS, fetchImpl });
+  assert.equal(r.source, "gemini-plain");
+  assert.equal(r.confidence, "low");
+  assert.equal(r.status, "found");
+  assert.equal(calls.plain, 1);
 }
+
+// Tier 4 (500): Wiktionary miss + grounding 500 -> plain.
+{
+  const { fetchImpl, calls } = makeFetch({
+    def: () => new Response("", { status: 404 }),
+    gemini: {
+      grounded: () => json({ error: { code: 500 } }, 500),
+      plain: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "serverword", suggestedWord: "", phonetic: "",
+        entryType: "word", partsOfSpeech: ["noun"], englishMeanings: ["server fallback"],
+        chineseMeanings: ["服务器回退"], tags: [], confidence: "high",
+      })),
+    },
+  });
+  const r = await resolveOnlineDictionaryEntry({ term: "serverword", ...ARGS, fetchImpl });
+  assert.equal(r.source, "gemini-plain");
+  assert.equal(r.status, "found");
+  assert.equal(calls.plain, 1);
+}
+
+// Grounding RAN but found no sources/evidence -> plain-text fallback now runs
+// (previously this dead-ended at not_found). Structured normalization is skipped.
+{
+  const { fetchImpl, calls } = makeFetch({
+    def: () => new Response("", { status: 404 }),
+    gemini: {
+      grounded: () => geminiText("some prose but no sources", {}),
+      plain: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "edgecase", suggestedWord: "", phonetic: "",
+        entryType: "word", partsOfSpeech: ["noun"], englishMeanings: ["a corner case"],
+        chineseMeanings: ["边缘情况"], tags: [], confidence: "high",
+      })),
+    },
+  });
+  const r = await resolveOnlineDictionaryEntry({ term: "edgecase", ...ARGS, fetchImpl });
+  assert.equal(r.source, "gemini-plain");
+  assert.equal(r.status, "found");
+  assert.equal(calls.groundedStructured, 0);
+  assert.equal(calls.plain, 1);
+}
+
+// Grounding returned sources + structured JSON that normalizes to not_found (no Chinese
+// meanings) -> plain fallback runs.
+{
+  const { fetchImpl, calls } = makeFetch({
+    def: () => new Response("", { status: 404 }),
+    gemini: {
+      grounded: () => geminiText("evidence", {
+        groundingMetadata: { groundingChunks: [{ web: { uri: "https://dict.example/y", title: "Dict" } }], webSearchQueries: ["q"] },
+      }),
+      groundedStructured: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "halfword", suggestedWord: "", phonetic: "",
+        entryType: "word", partsOfSpeech: ["noun"], englishMeanings: ["only english"],
+        chineseMeanings: [], tags: [], confidence: "high",
+      })),
+      plain: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "halfword", suggestedWord: "", phonetic: "",
+        entryType: "word", partsOfSpeech: ["noun"], englishMeanings: ["only english"],
+        chineseMeanings: ["半个词"], tags: [], confidence: "medium",
+      })),
+    },
+  });
+  const r = await resolveOnlineDictionaryEntry({ term: "halfword", ...ARGS, fetchImpl });
+  assert.equal(calls.groundedStructured, 1);
+  assert.equal(calls.plain, 1);
+  assert.equal(r.source, "gemini-plain");
+  assert.equal(r.status, "found");
+}
+
+// Phrase regression: "sloppy work" — Wiktionary 404, grounding no source/not_found,
+// plain returns a reviewable phrase entry. This is the headline fix from issue #13.
+{
+  const { fetchImpl, calls } = makeFetch({
+    def: () => new Response("", { status: 404 }),
+    gemini: {
+      grounded: () => geminiText("no authoritative dictionary source for this phrase", {}),
+      plain: () => geminiText(JSON.stringify({
+        status: "found", canonicalWord: "sloppy work", suggestedWord: "", phonetic: "",
+        entryType: "phrase", partsOfSpeech: ["noun phrase"],
+        englishMeanings: ["Work done carelessly, inaccurately, or with poor attention to detail."],
+        chineseMeanings: ["草率完成的工作", "敷衍的工作"], tags: [], confidence: "medium",
+      })),
+    },
+  });
+  const r = await resolveOnlineDictionaryEntry({ term: "sloppy work", ...ARGS, fetchImpl });
+  assert.equal(r.status, "found");
+  assert.equal(r.source, "gemini-plain");
+  assert.equal(r.entryType, "phrase");
+  assert.match(r.englishMeanings.join(" "), /careless|poor attention/i);
+  assert.ok(r.chineseMeanings.length > 0);
+  assert.equal(calls.plain, 1);
+  // Plain fallback must never auto-submit: it is unverified.
+  assert.equal(shouldAutoSubmit(r), false);
+}
+
+// All tiers fail (grounding errors transiently, plain also throws) -> actionable error
+// naming both failures, never a silent dead-end.
+{
+  const { fetchImpl } = makeFetch({
+    def: () => new Response("", { status: 404 }),
+    gemini: {
+      grounded: () => json({ error: { code: 429 } }, 429),
+      plain: () => json({ error: { code: 400, message: "bad model" } }, 400),
+    },
+  });
+  await assert.rejects(
+    resolveOnlineDictionaryEntry({ term: "totalfailure", ...ARGS, fetchImpl }),
+    (error) => {
+      assert.match(error.message, /Plain fallback/i);
+      assert.match(error.message, /Grounded search/i);
+      return true;
+    },
+  );
+}
+
+// No Gemini key + Wiktionary miss -> honest not_found from wiktionary, no Gemini calls.
+{
+  const { fetchImpl, calls } = makeFetch({ def: () => new Response("", { status: 404 }) });
+  const r = await resolveOnlineDictionaryEntry({ term: "nokeyword", apiKey: "", model: "gemini-2.5-flash", fetchImpl });
+  assert.equal(r.status, "not_found");
+  assert.equal(r.source, "wiktionary");
+  assert.equal(calls.grounded + calls.plain + calls.translation, 0);
+}
+
+// shouldAutoSubmit gating: gemini-plain / low confidence is never auto-added; a
+// verified high-confidence Wiktionary hit is.
+assert.equal(shouldAutoSubmit({ source: "gemini-plain", confidence: "low", status: "found" }), false);
+assert.equal(shouldAutoSubmit({ source: "gemini-grounded", confidence: "low", status: "found" }), false);
+assert.equal(shouldAutoSubmit({ source: "wiktionary", confidence: "high", status: "found" }), true);
+assert.equal(shouldAutoSubmit({ source: "wiktionary", confidence: "high", status: "not_found" }), false);
 
 console.log("online dictionary tests passed");

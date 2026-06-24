@@ -1,4 +1,4 @@
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260624-3";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260624-4";
 
 const STATUS_ATTRIBUTE = "data-online-dictionary-auto-status";
 const SOURCE_LABELS = {
@@ -39,7 +39,7 @@ function sourceLabel(source) {
   return SOURCE_LABELS[source] ?? "the online dictionary";
 }
 
-function shouldAutoSubmit(entry) {
+export function shouldAutoSubmit(entry) {
   return entry.status === "found" && entry.confidence !== "low" && entry.source !== "gemini-plain";
 }
 
@@ -87,7 +87,7 @@ function waitForAddDialog() {
   });
 }
 
-async function openReviewDialog(miss, entry, { autoSubmit = false } = {}) {
+export async function openReviewDialog(miss, entry, { autoSubmit = false } = {}) {
   const modalPromise = waitForAddDialog();
   miss.addButton.click();
   const modal = await modalPromise;
@@ -127,8 +127,13 @@ async function runAutoMissLookup() {
     const latest = localMiss();
     if (!latest || latest.normalized !== miss.normalized) return;
     if (entry.status !== "found") {
-      const suggestion = entry.suggestedWord ? ` Did you mean “${entry.suggestedWord}”?` : "";
-      setStatus(`No reliable online entry was found for this spelling.${suggestion}`, { error: true });
+      if (entry.suggestedWord) {
+        setStatus(`No verified entry for this exact spelling. Did you mean “${entry.suggestedWord}”?`, { error: true });
+      } else if (!configuredGeminiKey()) {
+        setStatus("Not found locally, and no Gemini API key is configured for online lookup. Add a Gemini key in Settings, or double-check the spelling.", { error: true });
+      } else {
+        setStatus("No online entry could be created after Wiktionary, Gemini grounding, and Gemini plain fallback. Check the spelling, Gemini key/model, and network, then try again.", { error: true });
+      }
       return;
     }
     const autoSubmit = shouldAutoSubmit(entry);
@@ -161,8 +166,10 @@ function install() {
   scheduleAutoMissLookup();
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", install, { once: true });
-} else {
-  install();
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install, { once: true });
+  } else {
+    install();
+  }
 }
