@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260624-2";
+} from "./fsrs-scheduler.js?v=20260624-3";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260624-2";
+} from "./persistence.js?v=20260624-3";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260624-2";
+} from "./spelling.js?v=20260624-3";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260624-2";
+} from "./ui-preferences.js?v=20260624-3";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260624-2";
+} from "./review-state.js?v=20260624-3";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -48,6 +48,7 @@ import {
   candidateMatchesStudyOneMoreLevel,
   normalizeStudyOneMoreCandidateRow,
   introducedByStudyOneMore,
+  shouldAutoContinueSpellingStudyOneMore,
   buildStudyOneMoreExclusionSets as _buildStudyOneMoreExclusionSets,
   buildSpellingStudyOneMoreExclusionSets as _buildSpellingStudyOneMoreExclusionSets,
   studyOneMoreExclusionReason,
@@ -58,7 +59,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260624-2";
+} from "./study-one-more.js?v=20260624-3";
 
 import {
   studyEventTrack,
@@ -70,11 +71,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260624-2";
+} from "./sync.js?v=20260624-3";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260624-2";
+} from "./goal-forecast.js?v=20260624-3";
 
 import {
   DEFAULT_TRACK_ID,
@@ -86,11 +87,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260624-2";
+} from "./tracks.js?v=20260624-3";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260624-2";
+} from "./full-dictionary.js?v=20260624-3";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -235,7 +236,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260624-2-v137";
+const APP_VERSION = "0.6.2-product.20260624-3-v138";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -243,7 +244,7 @@ const APP_VERSION = "0.6.2-product.20260624-2-v137";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v137";
+const SHELL_CACHE_VERSION = "wordlover-shell-v138";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
@@ -4107,14 +4108,24 @@ function getPracticeSpellingItems() {
     });
 }
 
-function startSpellingSessionWith(queue, emptyMessage, mode = "review") {
+function startSpellingSessionWith(queue, emptyMessage, mode = "review", options = {}) {
   spellingReviewPanel.hidden = false;
   if (!queue.length) {
     activeSpellingSession = null;
     spellingReviewPanel.innerHTML = `<p class="muted">${escapeHtml(emptyMessage)}</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
     return;
   }
-  activeSpellingSession = { queue, index: 0, retries: 0, consecutive: 0, completed: 0, awaitingRetry: false, mode };
+  activeSpellingSession = {
+    queue,
+    index: 0,
+    retries: 0,
+    consecutive: 0,
+    completed: 0,
+    awaitingRetry: false,
+    mode,
+    source: options.source ?? mode,
+    autoNext: Boolean(options.autoNext),
+  };
   quizPanel.hidden = true;
   renderSpellingPrompt();
 }
@@ -4129,13 +4140,21 @@ function startSpellingPractice() {
   startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.", "practice");
 }
 
-function practiceSpellingTerm(term) {
+function practiceSpellingTerm(term, options = {}) {
   const item = getSpellingItem(term);
   if (!item || item.archivedAt) return false;
   todayTrack = "spelling";
   activeVocabularyReviewSession = null;
   renderStudyStats();
-  startSpellingSessionWith([item], "This spelling word is not available.", reviewModeForItem(item));
+  startSpellingSessionWith(
+    [item],
+    "This spelling word is not available.",
+    options.mode ?? reviewModeForItem(item),
+    {
+      source: options.source ?? "manual",
+      autoNext: Boolean(options.autoNext),
+    },
+  );
   studyPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
   void persistUiPreferences();
   return true;
@@ -4272,12 +4291,23 @@ async function completeCurrentSpellingWord() {
     input?.focus();
     return;
   }
+  // Capture before mutating/clearing the session: the auto-continue path replaces
+  // activeSpellingSession, so the decision must be read off the just-completed session.
+  const autoContinue = shouldAutoContinueSpellingStudyOneMore(session);
   session.completed += 1;
   session.index += 1;
   session.retries = 0;
   session.consecutive = 0;
   if (session.index >= session.queue.length) {
-    finishSpellingSession();
+    if (autoContinue) {
+      // Don't call finishSpellingSession(): it would flash a "session done" state before the next
+      // word loads. Drop straight into finding the next new spelling word instead.
+      activeSpellingSession = null;
+      renderSpellingStudyOneMoreMessage("Finding the next new spelling word…");
+      void startNewSpellingWordStudy({ continueAfterCompletion: true });
+    } else {
+      finishSpellingSession();
+    }
   } else {
     // Advance the UI immediately after the feedback pause; persistence happens below so slow
     // IndexedDB/FSRS work cannot make a first-try-correct answer appear stuck.
@@ -4906,15 +4936,18 @@ function setSpellingStudyOneMoreLoading(loading) {
 // otherwise pick (and save) a second word before the first became active in the spelling list.
 let spellingStudyOneMoreInFlight = false;
 
-async function startNewSpellingWordStudy() {
+async function startNewSpellingWordStudy(options = {}) {
   if (spellingStudyOneMoreInFlight) return;
+  const continueAfterCompletion = Boolean(options.continueAfterCompletion);
   spellingStudyOneMoreInFlight = true;
   activeVocabularyReviewSession = null;
   hideQuiz();
   studyOneMoreFilter = readStudyOneMoreFilterFromPopup();
   void persistUiPreferences();
   setSpellingStudyOneMoreLoading(true);
-  renderSpellingStudyOneMoreMessage("Finding a new spelling word…");
+  renderSpellingStudyOneMoreMessage(
+    continueAfterCompletion ? "Finding the next new spelling word…" : "Finding a new spelling word…",
+  );
   try {
     if (!(await ensureDictionaryLoaded())) {
       renderSpellingStudyOneMoreMessage("Dictionary is not available yet. Try again in a moment.");
@@ -4932,8 +4965,13 @@ async function startNewSpellingWordStudy() {
     }
     await saveSpellingItem(data, "spelling-study-one-more");
     renderSpellingViews();
-    // Immediately drop into a one-word spelling practice session for the newly added word.
-    practiceSpellingTerm(entry.term);
+    // Immediately drop into a one-word spelling practice session for the newly added word, marked to
+    // auto-advance into the next new word on completion so the user never re-clicks Study one more.
+    practiceSpellingTerm(entry.term, {
+      source: "spelling-study-one-more",
+      mode: "practice",
+      autoNext: true,
+    });
   } finally {
     spellingStudyOneMoreInFlight = false;
     setSpellingStudyOneMoreLoading(false);
@@ -9671,6 +9709,8 @@ window.WordLoverApp = {
       currentTerm: currentSpellingItem()?.term ?? null,
       awaitingRetry: activeSpellingSession.awaitingRetry,
       pausing: Boolean(activeSpellingSession.pausing),
+      source: activeSpellingSession.source ?? null,
+      autoNext: Boolean(activeSpellingSession.autoNext),
     } : null,
     // Directly seed a spelling item for tests (bypasses dictionary lookup).
     addItemForTest: async (term, english, chinese) => {

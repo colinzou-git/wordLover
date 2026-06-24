@@ -7,8 +7,8 @@ import {
   extractGroundingSources,
   normalizeOnlineDictionaryResult,
   onlineResponseText,
-} from "./online-dictionary-normalize.js?v=20260624-2";
-import { lookupWiktionary } from "./wiktionary-lookup.js?v=20260624-2";
+} from "./online-dictionary-normalize.js?v=20260624-3";
+import { lookupWiktionary } from "./wiktionary-lookup.js?v=20260624-3";
 
 function geminiEndpoint(model, apiKey) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -342,4 +342,4 @@ export async function resolveOnlineDictionaryEntry({
   }
 }
 
-export { OnlineDictionaryRequestError } from "./online-dictionary-normalize.js?v=20260624-2";
+export { OnlineDictionaryRequestError } from "./online-dictionary-normalize.js?v=20260624-3";

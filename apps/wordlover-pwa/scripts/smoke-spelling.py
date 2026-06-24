@@ -80,6 +80,9 @@ def main() -> int:
         print(f"start state: {st}", flush=True)
         if not st or st.get("queueLength") != 2:
             failures.append(f"spelling session did not start with 2 words: {st}")
+        # Normal Spelling Review must not be marked to auto-advance into new Study one more words.
+        if st.get("autoNext") or st.get("source") == "spelling-study-one-more":
+            failures.append(f"Spelling Review must not auto-continue into new words: {st}")
         first_term = st.get("currentTerm")
 
         # --- Word 1: one wrong (retry), then 3 correct -> rating 'good' (1 retry) ---

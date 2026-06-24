@@ -15,6 +15,7 @@ const {
   buildStudyOneMoreExclusionSets,
   buildSpellingStudyOneMoreExclusionSets,
   studyOneMoreExclusionReason,
+  shouldAutoContinueSpellingStudyOneMore,
 } = await import("../public/study-one-more.js");
 const {
   rebuildReviewStateFromEvents,
@@ -89,6 +90,33 @@ test("Study One More exclusions match full-width apostrophe variants", () => {
     studyOneMoreExclusionReason({ normalizedTerm: "don't" }, exclusions),
     "memorize",
   );
+});
+
+test("Spelling Study One More auto-continues only for autoNext spelling-study-one-more sessions", () => {
+  assert.equal(
+    shouldAutoContinueSpellingStudyOneMore({ autoNext: true, source: "spelling-study-one-more" }),
+    true,
+  );
+  // autoNext off → ends normally even from the same source.
+  assert.equal(
+    shouldAutoContinueSpellingStudyOneMore({ autoNext: false, source: "spelling-study-one-more" }),
+    false,
+  );
+  // Review/practice/manual sources never auto-continue, even if some caller sets autoNext.
+  assert.equal(
+    shouldAutoContinueSpellingStudyOneMore({ autoNext: true, source: "practice" }),
+    false,
+  );
+  assert.equal(
+    shouldAutoContinueSpellingStudyOneMore({ autoNext: true, source: "review" }),
+    false,
+  );
+  assert.equal(
+    shouldAutoContinueSpellingStudyOneMore({ autoNext: true, source: "manual" }),
+    false,
+  );
+  assert.equal(shouldAutoContinueSpellingStudyOneMore(null), false);
+  assert.equal(shouldAutoContinueSpellingStudyOneMore(undefined), false);
 });
 
 test("Memorize Study One More still blocks words on the Memorize list", () => {

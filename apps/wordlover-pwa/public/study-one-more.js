@@ -5,7 +5,7 @@ import {
   STUDY_ONE_MORE_LEVELS,
   STUDY_ONE_MORE_TAGS,
   normalizeStudyOneMoreLevel,
-} from "./ui-preferences.js?v=20260624-2";
+} from "./ui-preferences.js?v=20260624-3";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
@@ -78,6 +78,13 @@ export function normalizeStudyOneMoreCandidateRow(row, level) {
 
 export function introducedByStudyOneMore(event) {
   return ["study-one-more-introduced", "study-one-more-skipped", "new-word-first-pass"].includes(event?.type);
+}
+
+// Only the Today → Spelling → Study one more flow auto-advances into the next new word after a
+// completion. Normal spelling review/practice and manual one-word practice must end normally, so the
+// decision is gated on both an explicit autoNext flag and the session source.
+export function shouldAutoContinueSpellingStudyOneMore(session) {
+  return Boolean(session?.autoNext && session.source === "spelling-study-one-more");
 }
 
 export function buildStudyOneMoreExclusionSets({

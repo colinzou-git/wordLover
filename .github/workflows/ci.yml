@@ -276,18 +276,33 @@ jobs:
                       raise AssertionError("Spelling Study One More must not add the word to the Memorize list.")
                   report["spellingStudyOneMore"] = first
 
-                  # A second run adds a different new word and never duplicates a spelling record.
-                  page.locator("#studyNewSpellingWord").click()
+                  # The Study one more session must be marked to auto-advance on completion.
+                  first_session = page.evaluate("() => window.WordLoverApp.spelling.state()")
+                  first_term = (first_session or {}).get("currentTerm")
+                  if not first_session or first_session.get("source") != "spelling-study-one-more" or not first_session.get("autoNext"):
+                      raise AssertionError(f"Spelling Study one more session not marked auto-continuing: {first_session}")
+
+                  # First-try correct must auto-advance to a NEW word WITHOUT a second button click.
+                  page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
                   page.wait_for_function(
-                      """() => window.WordLoverApp.buildUserDataSnapshot()
-                          .spellingItems.filter((i) => i.lastSaveReason === "spelling-study-one-more").length === 2""",
+                      """(prev) => {
+                          const s = window.WordLoverApp.spelling.state();
+                          return s && s.currentTerm && s.currentTerm !== prev;
+                      }""",
+                      arg=first_term,
                       timeout=15_000,
                   )
                   second = spelling_one_more_terms()
+                  if len(second["added"]) != 2:
+                      raise AssertionError(f"Auto-advance should add a second spelling-study-one-more record, got {second}")
                   if second["duplicates"]:
                       raise AssertionError(f"Duplicate spelling records created: {second}")
                   if second["leakedToVocab"]:
                       raise AssertionError("Spelling Study One More must not add words to the Memorize list.")
+                  report["spellingStudyOneMoreAutoAdvance"] = second
+
+                  page.locator("#spellingInput").wait_for(state="visible", timeout=15_000)
+                  page.evaluate("() => window.WordLoverApp.spelling.close()")
 
                   # Return to the Memorize tab so the layout/overflow check matches the default view.
                   page.locator('#todayTrackTabs button[data-today-track="vocabulary"]').click()
