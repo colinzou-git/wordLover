@@ -1289,6 +1289,10 @@ h1 {
   gap: 8px;
 }
 
+.study-one-more-control[hidden] {
+  display: none;
+}
+
 .study-one-more-hint {
   margin: -4px 0 4px;
 }

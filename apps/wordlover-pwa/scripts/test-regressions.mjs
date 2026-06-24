@@ -13,6 +13,7 @@ const {
 } = await import("../public/sync.js");
 const {
   buildStudyOneMoreExclusionSets,
+  buildSpellingStudyOneMoreExclusionSets,
   studyOneMoreExclusionReason,
 } = await import("../public/study-one-more.js");
 const {
@@ -88,6 +89,42 @@ test("Study One More exclusions match full-width apostrophe variants", () => {
     studyOneMoreExclusionReason({ normalizedTerm: "don't" }, exclusions),
     "memorize",
   );
+});
+
+test("Memorize Study One More still blocks words on the Memorize list", () => {
+  const exclusions = buildStudyOneMoreExclusionSets({
+    vocabulary: [{ term: "alpha", normalizedTerm: "alpha" }],
+    spelling: [{ term: "bravo", normalizedTerm: "bravo" }],
+  });
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "alpha" }, exclusions), "memorize");
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "bravo" }, exclusions), "spelling");
+});
+
+test("Spelling Study One More blocks active spelling but allows memorize-only terms", () => {
+  const exclusions = buildSpellingStudyOneMoreExclusionSets({
+    spelling: [{ term: "alpha", normalizedTerm: "alpha" }],
+  });
+  // The active spelling word is blocked...
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "alpha" }, exclusions), "spelling");
+  // ...but a word only in Memorize (not in this set) stays eligible, and the builder omits memorize.
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "bravo" }, exclusions), null);
+  assert.equal(exclusions.memorizeTerms, undefined);
+  assert.equal(exclusions.knownTerms, undefined);
+});
+
+test("Spelling Study One More exclusions normalize apostrophe variants", () => {
+  const exclusions = buildSpellingStudyOneMoreExclusionSets({
+    spelling: [{ term: "IT＇S", normalizedTerm: "it＇s" }],
+  });
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "it's" }, exclusions), "spelling");
+});
+
+test("Spelling Study One More keeps archived spelling out of default discovery", () => {
+  const exclusions = buildSpellingStudyOneMoreExclusionSets({
+    spelling: [{ term: "gone", normalizedTerm: "gone", archivedAt: "2026-06-01T00:00:00.000Z" }],
+  });
+  assert.equal(exclusions.spellingTerms.has("gone"), false);
+  assert.equal(studyOneMoreExclusionReason({ normalizedTerm: "gone" }, exclusions), "archivedIgnoredOrMastered");
 });
 
 test("Review replay matches normalized apostrophe variants", () => {

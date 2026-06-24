@@ -2,7 +2,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260624-1";
+} from "./fsrs-scheduler.js?v=20260624-2";
 
 import {
   isEncryptedRecord,
@@ -11,12 +11,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260624-1";
+} from "./persistence.js?v=20260624-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260624-1";
+} from "./spelling.js?v=20260624-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +31,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260624-1";
+} from "./ui-preferences.js?v=20260624-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260624-1";
+} from "./review-state.js?v=20260624-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -49,6 +49,7 @@ import {
   normalizeStudyOneMoreCandidateRow,
   introducedByStudyOneMore,
   buildStudyOneMoreExclusionSets as _buildStudyOneMoreExclusionSets,
+  buildSpellingStudyOneMoreExclusionSets as _buildSpellingStudyOneMoreExclusionSets,
   studyOneMoreExclusionReason,
   studyOneMoreCandidateAllowed,
   pickStudyOneMoreCandidateFromRows,
@@ -57,7 +58,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260624-1";
+} from "./study-one-more.js?v=20260624-2";
 
 import {
   studyEventTrack,
@@ -69,11 +70,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260624-1";
+} from "./sync.js?v=20260624-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260624-1";
+} from "./goal-forecast.js?v=20260624-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -85,11 +86,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260624-1";
+} from "./tracks.js?v=20260624-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260624-1";
+} from "./full-dictionary.js?v=20260624-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -170,6 +171,10 @@ const statKnown = document.querySelector("#statKnown");
 const startReviewButton = document.querySelector("#startReview");
 const studyNewWordButton = document.querySelector("#studyNewWord");
 const studyOneMoreFilterButton = document.querySelector("#studyOneMoreFilterButton");
+const memorizeStudyOneMoreControl = document.querySelector("#memorizeStudyOneMoreControl");
+const studyNewSpellingWordButton = document.querySelector("#studyNewSpellingWord");
+const spellingStudyOneMoreControl = document.querySelector("#spellingStudyOneMoreControl");
+const spellingStudyOneMoreFilterButton = document.querySelector("#spellingStudyOneMoreFilterButton");
 const studyOneMoreFilterPopup = document.querySelector("#studyOneMoreFilterPopup");
 const filterIncludeFreqMin = document.querySelector("#filterIncludeFreqMin");
 const filterIncludeFreqMax = document.querySelector("#filterIncludeFreqMax");
@@ -230,7 +235,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260624-1-v136";
+const APP_VERSION = "0.6.2-product.20260624-2-v137";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -238,7 +243,7 @@ const APP_VERSION = "0.6.2-product.20260624-1-v136";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v136";
+const SHELL_CACHE_VERSION = "wordlover-shell-v137";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
@@ -3401,6 +3406,8 @@ function renderStudyStats() {
   startReviewButton.hidden = isSpelling;
   studyNewWordButton.hidden = isSpelling;
   if (studyOneMoreFilterButton) studyOneMoreFilterButton.hidden = isSpelling;
+  if (memorizeStudyOneMoreControl) memorizeStudyOneMoreControl.hidden = isSpelling;
+  if (spellingStudyOneMoreControl) spellingStudyOneMoreControl.hidden = !isSpelling;
   if (studyOneMoreHint) studyOneMoreHint.hidden = isSpelling;
   if (startSpellingReviewButton) startSpellingReviewButton.hidden = !isSpelling;
   if (startSpellingPracticeMoreButton) {
@@ -4383,6 +4390,11 @@ function buildStudyOneMoreExclusionSets({
   return _buildStudyOneMoreExclusionSets({ vocabulary, spelling, events, known, nowMs: appNowMs() });
 }
 
+// Spelling discovery blocks only the active spelling list, never Memorize. See the pure helper.
+function buildSpellingStudyOneMoreExclusionSets({ spelling = spellingItems } = {}) {
+  return _buildSpellingStudyOneMoreExclusionSets({ spelling });
+}
+
 function queryStudyOneMoreCandidates(filter, limit = 240, offset = 0) {
   if (!dictionaryDb) return [];
   const normalizedFilter = normalizeStudyOneMoreFilter(filter);
@@ -4849,6 +4861,83 @@ async function addStudyOneMoreCandidate(target) {
   }
   // Auto-advance: the just-added word is now in vocabulary/spelling, so the next pick excludes it.
   await startNewWordStudy();
+}
+
+// Spelling Study One More picker: same dictionary pool/filter/pagination as the memorize picker,
+// but excluding only the active spelling list so a word already memorized for meaning is still
+// eligible to learn for spelling.
+function pickNewSpellingStudyEntry(filter = studyOneMoreFilter) {
+  if (!dictionaryDb) return null;
+  const normalizedFilter = normalizeStudyOneMoreFilter(filter);
+  const pageSize = 240;
+  const maxRows = 5000;
+  const diagnostics = {
+    filter: { ...normalizedFilter },
+    rowsScanned: 0,
+    selectedRank: null,
+    selectedTerm: null,
+    exclusionCounts: {},
+  };
+  const exclusions = buildSpellingStudyOneMoreExclusionSets();
+  let candidate = null;
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const rows = queryStudyOneMoreCandidates(normalizedFilter, Math.min(pageSize, maxRows - offset), offset);
+    if (!rows.length) break;
+    candidate = pickStudyOneMoreCandidateFromFilteredRows(rows, exclusions, diagnostics);
+    if (candidate) break;
+    if (rows.length < pageSize) break;
+  }
+  lastStudyOneMoreDiagnostics = diagnostics;
+  return candidate ? studyOneMoreEntryFromRow(candidate, fallbackStudyOneMoreLevel(candidate)) : null;
+}
+
+function renderSpellingStudyOneMoreMessage(message) {
+  spellingReviewPanel.hidden = false;
+  spellingReviewPanel.innerHTML = `<p class="muted">${escapeHtml(message)}</p><div class="quiz-actions"><button class="secondary-button" type="button" data-spelling-close="1">Close</button></div>`;
+  spellingReviewPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function setSpellingStudyOneMoreLoading(loading) {
+  if (studyNewSpellingWordButton) studyNewSpellingWordButton.disabled = Boolean(loading);
+  if (spellingStudyOneMoreFilterButton) spellingStudyOneMoreFilterButton.disabled = Boolean(loading);
+}
+
+// Guards against double-tap re-entry: a second tap while the first save+practice is in flight would
+// otherwise pick (and save) a second word before the first became active in the spelling list.
+let spellingStudyOneMoreInFlight = false;
+
+async function startNewSpellingWordStudy() {
+  if (spellingStudyOneMoreInFlight) return;
+  spellingStudyOneMoreInFlight = true;
+  activeVocabularyReviewSession = null;
+  hideQuiz();
+  studyOneMoreFilter = readStudyOneMoreFilterFromPopup();
+  void persistUiPreferences();
+  setSpellingStudyOneMoreLoading(true);
+  renderSpellingStudyOneMoreMessage("Finding a new spelling word…");
+  try {
+    if (!(await ensureDictionaryLoaded())) {
+      renderSpellingStudyOneMoreMessage("Dictionary is not available yet. Try again in a moment.");
+      return;
+    }
+    const entry = pickNewSpellingStudyEntry(studyOneMoreFilter);
+    if (!entry) {
+      renderSpellingStudyOneMoreMessage("No new spelling word found matching the current filter.");
+      return;
+    }
+    const data = lookupTerm(entry.term);
+    if (data.status !== "found") {
+      renderSpellingStudyOneMoreMessage("Could not load that word. Try Study one more again.");
+      return;
+    }
+    await saveSpellingItem(data, "spelling-study-one-more");
+    renderSpellingViews();
+    // Immediately drop into a one-word spelling practice session for the newly added word.
+    practiceSpellingTerm(entry.term);
+  } finally {
+    spellingStudyOneMoreInFlight = false;
+    setSpellingStudyOneMoreLoading(false);
+  }
 }
 
 async function addStudyOneMoreKnown() {
@@ -8292,11 +8381,32 @@ studyNewWordButton.addEventListener("click", () => {
   void startNewWordStudy();
 });
 
-studyOneMoreFilterButton?.addEventListener("click", () => {
+// The Memorize and Spelling Filter buttons share one popup. Only the button that opened it shows
+// aria-expanded, so the two are never both marked active at once.
+function closeStudyOneMoreFilterPopup() {
+  if (studyOneMoreFilterPopup) studyOneMoreFilterPopup.hidden = true;
+  studyOneMoreFilterButton?.setAttribute("aria-expanded", "false");
+  spellingStudyOneMoreFilterButton?.setAttribute("aria-expanded", "false");
+}
+
+function toggleStudyOneMoreFilterPopup(triggerButton) {
   if (!studyOneMoreFilterPopup) return;
   const open = studyOneMoreFilterPopup.hidden;
   studyOneMoreFilterPopup.hidden = !open;
-  studyOneMoreFilterButton.setAttribute("aria-expanded", String(open));
+  studyOneMoreFilterButton?.setAttribute("aria-expanded", String(open && triggerButton === studyOneMoreFilterButton));
+  spellingStudyOneMoreFilterButton?.setAttribute("aria-expanded", String(open && triggerButton === spellingStudyOneMoreFilterButton));
+}
+
+studyOneMoreFilterButton?.addEventListener("click", () => {
+  toggleStudyOneMoreFilterPopup(studyOneMoreFilterButton);
+});
+
+spellingStudyOneMoreFilterButton?.addEventListener("click", () => {
+  toggleStudyOneMoreFilterPopup(spellingStudyOneMoreFilterButton);
+});
+
+studyNewSpellingWordButton?.addEventListener("click", () => {
+  void startNewSpellingWordStudy();
 });
 
 studyOneMoreFilterPopup?.addEventListener("change", () => {
@@ -8305,8 +8415,7 @@ studyOneMoreFilterPopup?.addEventListener("change", () => {
 });
 
 document.querySelector("#studyOneMoreFilterClose")?.addEventListener("click", () => {
-  if (studyOneMoreFilterPopup) studyOneMoreFilterPopup.hidden = true;
-  studyOneMoreFilterButton?.setAttribute("aria-expanded", "false");
+  closeStudyOneMoreFilterPopup();
 });
 
 document.querySelector("#filterReset")?.addEventListener("click", () => {
@@ -8328,6 +8437,7 @@ for (const tab of todayTrackTabs) {
     const next = tab.dataset.todayTrack;
     if (!next || next === todayTrack) return;
     todayTrack = next;
+    closeStudyOneMoreFilterPopup();
     hideQuiz();
     hideSpellingReview();
     renderStudyStats();
@@ -9421,6 +9531,9 @@ window.WordLoverApp = {
     current: () => activeStudyOneMoreEntry,
     diagnostics: () => lastStudyOneMoreDiagnostics,
     buildExclusionSets: buildStudyOneMoreExclusionSets,
+    buildSpellingExclusionSets: (options) => _buildSpellingStudyOneMoreExclusionSets(options ?? { spelling: spellingItems }),
+    pickNewSpellingEntry: () => pickNewSpellingStudyEntry(studyOneMoreFilter),
+    startNewSpellingWordStudy,
     SKIP_COOLDOWN_DAYS: STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
     setBeforePickHookForTest: (hook) => {
       studyOneMoreBeforePickForTest = typeof hook === "function" ? hook : null;

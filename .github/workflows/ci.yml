@@ -234,6 +234,65 @@ jobs:
                   page.locator("#studyOneMoreFilterClose").click()
                   page.locator("#studyOneMoreFilterPopup").wait_for(state="hidden", timeout=5_000)
 
+                  # Spelling Study One More: switch the Today tab to Spelling and verify the
+                  # spelling-specific Study one more + Filter controls take over from Memorize.
+                  page.locator('#todayTrackTabs button[data-today-track="spelling"]').click()
+                  page.locator("#studyNewSpellingWord").wait_for(state="visible", timeout=5_000)
+                  if page.locator("#studyNewWord").is_visible():
+                      raise AssertionError("Memorize Study one more should be hidden on the Spelling tab.")
+
+                  page.locator("#spellingStudyOneMoreFilterButton").click()
+                  page.locator("#studyOneMoreFilterPopup").wait_for(state="visible", timeout=5_000)
+                  if page.locator("#spellingStudyOneMoreFilterButton").get_attribute("aria-expanded") != "true":
+                      raise AssertionError("Spelling Filter button should be aria-expanded when its popup is open.")
+                  if page.locator("#studyOneMoreFilterButton").get_attribute("aria-expanded") == "true":
+                      raise AssertionError("Memorize and Spelling Filter buttons must not both be expanded.")
+                  page.locator("#filterIncludeFreqMax").fill("5000")
+                  page.locator("#studyOneMoreFilterClose").click()
+                  page.locator("#studyOneMoreFilterPopup").wait_for(state="hidden", timeout=5_000)
+
+                  def spelling_one_more_terms():
+                      return page.evaluate(
+                          """() => {
+                              const snap = window.WordLoverApp.buildUserDataSnapshot();
+                              const spelling = (snap.spellingItems ?? []);
+                              const vocab = new Set((snap.vocabularyItems ?? []).map((i) => i.normalizedTerm));
+                              const fromOneMore = spelling.filter((i) => i.lastSaveReason === "spelling-study-one-more");
+                              const terms = spelling.map((i) => i.normalizedTerm);
+                              return {
+                                  added: fromOneMore.map((i) => i.normalizedTerm),
+                                  duplicates: terms.length !== new Set(terms).size,
+                                  leakedToVocab: fromOneMore.some((i) => vocab.has(i.normalizedTerm)),
+                              };
+                          }"""
+                      )
+
+                  page.locator("#studyNewSpellingWord").click()
+                  page.locator("#spellingInput").wait_for(state="visible", timeout=15_000)
+                  first = spelling_one_more_terms()
+                  if len(first["added"]) != 1:
+                      raise AssertionError(f"Expected exactly one spelling-study-one-more record, got {first}")
+                  if first["leakedToVocab"]:
+                      raise AssertionError("Spelling Study One More must not add the word to the Memorize list.")
+                  report["spellingStudyOneMore"] = first
+
+                  # A second run adds a different new word and never duplicates a spelling record.
+                  page.locator("#studyNewSpellingWord").click()
+                  page.wait_for_function(
+                      """() => window.WordLoverApp.buildUserDataSnapshot()
+                          .spellingItems.filter((i) => i.lastSaveReason === "spelling-study-one-more").length === 2""",
+                      timeout=15_000,
+                  )
+                  second = spelling_one_more_terms()
+                  if second["duplicates"]:
+                      raise AssertionError(f"Duplicate spelling records created: {second}")
+                  if second["leakedToVocab"]:
+                      raise AssertionError("Spelling Study One More must not add words to the Memorize list.")
+
+                  # Return to the Memorize tab so the layout/overflow check matches the default view.
+                  page.locator('#todayTrackTabs button[data-today-track="vocabulary"]').click()
+                  page.locator("#studyNewWord").wait_for(state="visible", timeout=5_000)
+
                   overflow = page.evaluate(
                       """() => ({
                           viewportWidth: window.innerWidth,

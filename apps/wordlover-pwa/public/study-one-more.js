@@ -5,7 +5,7 @@ import {
   STUDY_ONE_MORE_LEVELS,
   STUDY_ONE_MORE_TAGS,
   normalizeStudyOneMoreLevel,
-} from "./ui-preferences.js?v=20260624-1";
+} from "./ui-preferences.js?v=20260624-2";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS = 14;
@@ -122,6 +122,24 @@ export function buildStudyOneMoreExclusionSets({
       .filter((term) => !memorizeTerms.has(term) && !spellingTerms.has(term)),
   );
   return { memorizeTerms, spellingTerms, introducedToday, firstTryPassed, knownTerms, archivedIgnoredOrMastered, skippedRecently };
+}
+
+// Spelling Study One More is "new to the spelling list", not "new to all lists": a word can be
+// memorized for meaning yet still be unpracticed for spelling. So this builder deliberately omits
+// memorizeTerms/knownTerms and blocks only the active spelling list (plus archived/ignored/mastered
+// spelling so default discovery prefers genuinely fresh words). The returned shape is a subset of
+// buildStudyOneMoreExclusionSets, which is safe because studyOneMoreExclusionReason reads every set
+// optionally.
+export function buildSpellingStudyOneMoreExclusionSets({ spelling = [] } = {}) {
+  const spellingTerms = new Set();
+  const archivedIgnoredOrMastered = new Set();
+  for (const item of spelling ?? []) {
+    const term = normalizeTerm(item?.normalizedTerm ?? item?.term ?? "");
+    if (!term) continue;
+    if (!item.archivedAt) spellingTerms.add(term);
+    if (item.archivedAt || item.ignoredAt || item.review?.masteredAt) archivedIgnoredOrMastered.add(term);
+  }
+  return { spellingTerms, archivedIgnoredOrMastered };
 }
 
 export function studyOneMoreExclusionReason(candidate, exclusions) {
