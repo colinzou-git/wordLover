@@ -6,6 +6,10 @@ export const fsrsScheduler = fsrs({
   enable_fuzz: false,
 });
 
+// Minimum stability FSRS will accept for a formed memory state. Mirrors S_MIN in
+// the ts-fsrs library (vendor/ts-fsrs/index.mjs); below it the scheduler throws.
+const FSRS_S_MIN = 1e-3;
+
 const RATING_BY_LABEL = {
   again: Rating.Again,
   hard: Rating.Hard,
@@ -60,12 +64,26 @@ export function reviveFsrsCard(rawCard, fallbackDueIso) {
   const empty = createEmptyCard(fallbackDue);
   const due = validDate(raw.due ?? raw.dueAt ?? fallbackDue, fallbackDue);
   const lastReview = optionalDate(raw.last_review ?? raw.lastReview);
+  const stability = numeric(raw.stability, empty.stability);
+  const difficulty = numeric(raw.difficulty, empty.difficulty);
+  // FSRS only accepts a brand-new memory state (difficulty 0 + stability 0) or a
+  // fully-formed one (difficulty >= 1 and stability >= S_MIN). Legacy/imported cards
+  // occasionally carry an inconsistent pair — e.g. difficulty 5 with stability 0 —
+  // which makes scheduler.next() throw "Invalid memory state". A single such card
+  // would then break saving a review and Drive sync for the whole collection (every
+  // render/forecast/rebuild reschedules it). Its memory state is unrecoverable, so
+  // treat it as a new card rather than letting the corruption propagate.
+  const hasValidMemoryState =
+    (stability === 0 && difficulty === 0) || (difficulty >= 1 && stability >= FSRS_S_MIN);
+  if (!hasValidMemoryState) {
+    return { ...empty, due };
+  }
   return {
     ...empty,
     ...raw,
     due,
-    stability: numeric(raw.stability, empty.stability),
-    difficulty: numeric(raw.difficulty, empty.difficulty),
+    stability,
+    difficulty,
     elapsed_days: numeric(raw.elapsed_days ?? raw.elapsedDays, empty.elapsed_days),
     scheduled_days: numeric(raw.scheduled_days ?? raw.scheduledDays, empty.scheduled_days),
     learning_steps: numeric(raw.learning_steps ?? raw.learningSteps, empty.learning_steps),

@@ -17,7 +17,12 @@ const {
 } = await import("../public/study-one-more.js");
 const {
   rebuildReviewStateFromEvents,
+  normalizeReviewState,
 } = await import("../public/review-state.js");
+const {
+  reviveFsrsCard,
+  scheduleFromFsrsRating: scheduleFsrs,
+} = await import("../public/fsrs-scheduler.js");
 const {
   validateBackup,
 } = await import("../public/tracks.js");
@@ -130,6 +135,50 @@ test("Backup validation normalizes full-width apostrophes", () => {
     backup.tracks.track_test.wordLists.vocabulary[0].normalizedTerm,
     "don't",
   );
+});
+
+test("FSRS revives an inconsistent card (difficulty 5, stability 0) as new", () => {
+  // Repro of the production crash: a legacy/imported card whose memory state FSRS
+  // rejects with "Invalid memory state { difficulty: 5, stability: 0 }". One such
+  // card broke saving a spelling review and Drive sync for the whole collection.
+  const revived = reviveFsrsCard(
+    { difficulty: 5, stability: 0, state: "review", due: "2026-06-23T00:00:00.000Z" },
+    "2026-06-23T00:00:00.000Z",
+  );
+  assert.equal(revived.difficulty, 0);
+  assert.equal(revived.stability, 0);
+
+  // Scheduling it must now succeed instead of throwing.
+  const schedule = scheduleFsrs(
+    { fsrsCard: { difficulty: 5, stability: 0, state: "review" }, dueAt: "2026-06-23T00:00:00.000Z" },
+    "good",
+    "2026-06-23T01:00:00.000Z",
+  );
+  assert.ok(Number.isFinite(Date.parse(schedule.dueAt)));
+  assert.ok(schedule.fsrsCard.difficulty >= 1 && schedule.fsrsCard.stability >= 1e-3);
+});
+
+test("FSRS preserves a valid reviewed card", () => {
+  // Guard against over-sanitizing: a well-formed reviewed card must pass through.
+  const revived = reviveFsrsCard(
+    { difficulty: 6.3, stability: 12.5, state: "review", reps: 4, due: "2026-07-01T00:00:00.000Z" },
+    "2026-06-23T00:00:00.000Z",
+  );
+  assert.equal(revived.difficulty, 6.3);
+  assert.equal(revived.stability, 12.5);
+});
+
+test("normalizeReviewState sanitizes a corrupt card so render/sync cannot throw", () => {
+  // normalizeReviewState is on the render + Drive-sync rebuild path; it must hand
+  // back a schedulable card even when the stored fsrsCard is inconsistent.
+  const normalized = normalizeReviewState({
+    fsrsCard: { difficulty: 5, stability: 0, state: "review" },
+    dueAt: "2026-06-23T00:00:00.000Z",
+  });
+  assert.equal(normalized.fsrsCard.difficulty, 0);
+  assert.equal(normalized.fsrsCard.stability, 0);
+  const schedule = scheduleFsrs(normalized, "again", "2026-06-23T02:00:00.000Z");
+  assert.ok(Number.isFinite(Date.parse(schedule.dueAt)));
 });
 
 let failed = 0;
