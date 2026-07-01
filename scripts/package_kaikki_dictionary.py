@@ -22,10 +22,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--tag-source", type=Path, default=Path("data/dictionary.sqlite"))
     parser.add_argument("--tag-source-shards", type=Path, default=Path("apps/wordlover-pwa/public/dictionary-full"))
+    parser.add_argument("--full-translation-source", type=Path,
+                        help="Current full WordFan SQLite DB used for Chinese fallback.")
     parser.add_argument("--work-dir", type=Path, default=Path("data/kaikki-build"))
     parser.add_argument("--public-dir", type=Path, default=DEFAULT_PUBLIC)
     parser.add_argument("--version", default=f"{time.strftime('%Y.%m.%d')}.kaikki")
-    parser.add_argument("--target-rows", type=int, default=100_000)
+    parser.add_argument("--target-rows", type=int, default=50_000,
+                        help="Requested core size; mandatory ranked/STEM rows may make the final count larger.")
     parser.add_argument("--shard-count", type=int, default=128)
     return parser.parse_args(argv)
 
@@ -48,11 +51,14 @@ def validate_preview_output(output: Path, public_dir: Path) -> Path:
 def build_full_kaikki(args: argparse.Namespace) -> Path:
     full = args.work_dir / "dictionary-kaikki.sqlite"
     report = args.work_dir / "kaikki-dictionary-report.json"
-    run_command([
+    command = [
         sys.executable, "scripts/build_kaikki_dictionary.py", "--source", str(args.source),
         "--output", str(full), "--report", str(report), "--data-version", f"{args.version}.full",
         "--tag-source", str(args.tag_source), "--tag-source-shards", str(args.tag_source_shards),
-    ])
+    ]
+    if args.full_translation_source:
+        command.extend(["--full-translation-source", str(args.full_translation_source)])
+    run_command(command)
     return full
 
 
@@ -61,7 +67,7 @@ def build_slim_kaikki(args: argparse.Namespace, full_db: Path) -> Path:
     run_command([
         sys.executable, "scripts/build_slim_dictionary.py", "--input", str(full_db),
         "--output", str(slim), "--target-rows", str(args.target_rows),
-        "--data-version", f"{args.version}.slim",
+        "--data-version", f"{args.version}.slim", "--detail-policy", "none",
     ])
     return slim
 
@@ -70,7 +76,9 @@ def package_slim_web(args: argparse.Namespace, slim_db: Path) -> Path:
     output = validate_preview_output(preview_output(args.public_dir), args.public_dir)
     run_command([
         sys.executable, "scripts/package_dictionary_web.py", "--input", str(slim_db),
-        "--output-dir", str(output), "--version", f"{args.version}.slim", "--copy-sqlite",
+        "--output-dir", str(output), "--version", f"{args.version}.slim", "--variant", "kaikki-slim",
+        "--source-label", KAIKKI_SOURCES[0], "--source-label", KAIKKI_SOURCES[1],
+        "--source-label", KAIKKI_SOURCES[2], "--copy-sqlite",
     ])
     manifest_path = output / "dictionary-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -86,6 +94,8 @@ def package_full_shards(args: argparse.Namespace, full_db: Path) -> Path:
         sys.executable, "scripts/package_dictionary_shards.py", "--input", str(full_db),
         "--output-dir", str(output), "--version", f"{args.version}.full-sharded",
         "--shard-count", str(args.shard_count), "--gzip-level", "9",
+        "--source-label", KAIKKI_SOURCES[0], "--source-label", KAIKKI_SOURCES[1],
+        "--source-label", KAIKKI_SOURCES[2],
     ])
     manifest_path = output / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

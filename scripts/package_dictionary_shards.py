@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shard-count", type=int, default=DEFAULT_SHARD_COUNT)
     parser.add_argument("--gzip-level", type=int, default=9)
     parser.add_argument("--skip-validation", action="store_true")
+    parser.add_argument("--source-label", action="append", dest="sources")
     return parser.parse_args()
 
 

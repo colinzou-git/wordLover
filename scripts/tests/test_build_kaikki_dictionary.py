@@ -226,6 +226,25 @@ class KaikkiBuilderTests(unittest.TestCase):
         add_exchange_form(exchange_map, "p", "ran", "run")
         self.assertEqual(serialize_exchange(exchange_map), "p:ran")
 
+    def test_real_kaikki_cmn_and_gloss_only_form_of_shapes(self):
+        charge = {
+            "word": "charge", "lang": "English", "lang_code": "en", "pos": "noun",
+            "senses": [{"glosses": ["The amount of money levied for a service."]}],
+            "translations": [{"lang": "Chinese Mandarin", "lang_code": "cmn", "sense": "amount of money levied for a service", "word": "费用, 收费"}],
+        }
+        run = entry("run", "verb", "move quickly")
+        ran = {
+            "word": "ran", "lang": "English", "lang_code": "en", "pos": "verb",
+            "senses": [{"glosses": ["simple past of run"], "tags": ["form-of", "past"]}],
+        }
+        report = self.build([charge, run, ran])
+        rows = {row[0]: row for row in self.query("SELECT normalized_word,translation,detail,exchange FROM dictionary_entries")}
+        self.assertEqual(rows["charge"][1], "费用, 收费")
+        self.assertEqual(json.loads(rows["charge"][2])["displayMeanings"][0]["zhSource"], "kaikki-sense")
+        self.assertIn("p:ran", rows["run"][3])
+        self.assertNotIn("ran", rows)
+        self.assertEqual(report["form_of_aliases_attached"], 1)
+
     def test_stem_overlay_and_supplements(self):
         overlay = self.make_overlay([
             {"word": "isosceles", "definition": "having two equal sides", "translation": "等腰的", "tag": "k12_math"},

@@ -1,11 +1,11 @@
 # Kaikki Dictionary Progress
 
-- Current issue: #22 — Docs and final validation (implementation complete)
+- Current issue: #22 — complete; promotion remains gated
 - Current branch: `feature/kaikki-dictionary-preview`
-- Latest commit: `2784742 Render structured Kaikki dictionary results` (audit/docs checkpoint not committed yet)
-- Files changed: audit script/tests, Kaikki design/source docs, generated symbol map, progress file
+- Latest commit: `377b647 Refresh Kaikki symbol map`
+- Files changed: real-shape builder/overlay fixes; layered slim core/package/audit; preview asset routing; browser fixture/layout checks; docs/progress/symbol map
 - Tests added: builder/overlay/Chinese/STEM/detail/inflection; isolated packaging/shard compatibility; structured UI/XSS/layout smoke; audit health/coverage/failure/report tests
-- Tests run: all three required targeted Python modules; full `scripts/tests` discovery (35 tests); npm test/build; shell asset validation; full-dictionary Node tests; code-map generate/check; production asset diff
-- Result: PASS for every runnable test. Browser suite NOT RUN because Python Playwright is absent and system Python has no pip. Full 1.47M-line build/audit NOT RUN because the Kaikki source, current slim DB, and current full shards are absent in this checkout.
-- Remaining work: external validation only—run full build/audit with local source/overlays and browser suite in a Playwright-capable environment; review results before promotion/issue closure
-- Exact resume step: provide/export `KAIIKI_SOURCE`, current `data/dictionary.sqlite`, and current `dictionary-full`; run documented full build/package/audit, then `npm run test:browser:ci` where Playwright is installed
+- Tests run: required targeted Python modules; full discovery (37 tests); npm test/build (20 regression tests); full-dictionary Node tests; Chromium full browser suite; WebKit smoke; real-package Chromium and WebKit at 390px; code-map check; production asset diff
+- Result: PASS. Full build: 824,747 rows; 549,478 form aliases attached; 46,925 Kaikki Chinese rows; 277,187 final Chinese rows (33.6087%); 947 STEM rows. Package: 55,642-row/39,960,576-byte layered core plus 824,747 exact/510,864 alias full shards. Real audit PASS including 50 MiB core gate. Chromium/WebKit real preview renders layered `charge`; `ran` resolves through `run`; exact `running`/`excited` win; no errors/390px overflow.
+- Remaining work: no implementation work. Promotion remains prohibited until reviewed and real iPhone DRAM is measured with Safari simulator/Instruments; Android remains deferred.
+- Exact resume step: on Mac, run the isolated preview on iPhone simulator/device and record Instruments DRAM; only then consider a separate audited promotion PR

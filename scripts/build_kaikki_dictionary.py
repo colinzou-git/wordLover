@@ -108,6 +108,7 @@ class SenseRecord:
     gloss: str
     compact_gloss: str
     zh: str | None
+    zh_source: str
     domain: str | None
     examples: list[str]
     tags: list[str]
@@ -162,6 +163,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tag-source", type=Path, default=Path("data/dictionary.sqlite"))
     parser.add_argument("--tag-source-shards", type=Path, default=Path("apps/wordlover-pwa/public/dictionary-full"))
     parser.add_argument("--full-translation-source-shards", type=Path)
+    parser.add_argument("--full-translation-source", type=Path,
+                        help="Current full WordFan SQLite DB used for Chinese fallback.")
     parser.add_argument("--slim-translation-source", type=Path)
     parser.add_argument("--max-compact-senses", type=int, default=12)
     parser.add_argument("--max-detailed-senses-per-pos", type=int, default=20)
@@ -262,8 +265,8 @@ def is_form_of_only(entry: dict) -> bool:
     for sense in senses:
         if not isinstance(sense, dict):
             continue
-        form_of = form_of or bool(sense.get("form_of") or sense.get("alt_of"))
         tags = {str(tag).casefold() for tag in sense.get("tags") or []}
+        form_of = form_of or bool(sense.get("form_of") or sense.get("alt_of")) or "form-of" in tags
         glosses = [clean_text(g) for g in (sense.get("glosses") or sense.get("raw_glosses") or [])]
         if any(glosses) and not ({"form-of", "alt-of"} & tags or sense.get("form_of") or sense.get("alt_of")):
             meaningful = True
@@ -417,8 +420,8 @@ def load_translation_overlay_from_shards(path: Path) -> dict[str, TranslationOve
             for key, value in load_overlay_from_shards(path).items()}
 
 
-def load_translation_overlay_from_sqlite(path: Path) -> dict[str, TranslationOverlayRecord]:
-    return {key: TranslationOverlayRecord(key, value.translation, value.phonetic, value.tag, "wordfan-slim-overlay")
+def load_translation_overlay_from_sqlite(path: Path, source: str = "wordfan-slim-overlay") -> dict[str, TranslationOverlayRecord]:
+    return {key: TranslationOverlayRecord(key, value.translation, value.phonetic, value.tag, source)
             for key, value in load_overlay_from_sqlite(path).items()}
 
 
@@ -455,13 +458,32 @@ def extract_chinese_translations(entry: dict, sense: dict | None = None) -> list
     for candidate in candidates:
         if isinstance(candidate, dict):
             lang = str(candidate.get("lang_code") or candidate.get("code") or candidate.get("lang") or "").casefold()
-            if lang and lang not in {"zh", "zh-cn", "zh-hans", "chinese", "mandarin"}:
+            if lang and lang not in {"zh", "zh-cn", "zh-hans", "cmn", "yue", "chinese", "mandarin", "chinese mandarin"}:
                 continue
             candidate = candidate.get("word") or candidate.get("text") or candidate.get("translation")
         text = clean_text(candidate)
         if text and HAN_RE.search(text) and text not in output:
             output.append(text)
     return output
+
+
+def _aligned_entry_translation(entry: dict, gloss: str) -> str | None:
+    gloss_words = set(re.findall(r"[a-z]+", gloss.casefold()))
+    best: tuple[float, str] | None = None
+    for candidate in entry.get("translations") or []:
+        if not isinstance(candidate, dict):
+            continue
+        words = extract_chinese_translations({"translations": [candidate]})
+        sense_label = clean_text(candidate.get("sense"))
+        if not words or not sense_label:
+            continue
+        sense_words = set(re.findall(r"[a-z]+", sense_label.casefold()))
+        if not sense_words:
+            continue
+        score = len(gloss_words & sense_words) / len(sense_words)
+        if score >= 0.6 and (best is None or score > best[0]):
+            best = (score, words[0])
+    return best[1] if best else None
 
 
 def extract_examples(sense: dict, *, max_examples: int, max_chars: int) -> list[str]:
@@ -496,14 +518,16 @@ def extract_senses(entry: dict, args: argparse.Namespace | None = None, start_or
         if not isinstance(sense, dict) or sense.get("form_of") or sense.get("alt_of"):
             continue
         glosses = sense.get("glosses") or sense.get("raw_glosses") or []
-        zh_values = extract_chinese_translations(entry, sense)
         for gloss in glosses:
             text = clean_text(gloss)
             if not text:
                 continue
+            direct_zh = extract_chinese_translations(entry, sense)
+            aligned_zh = _aligned_entry_translation(entry, text) if not direct_zh else None
             output.append(SenseRecord(
                 clean_text(entry.get("pos")), map_pos(entry.get("pos")), text,
-                compact_english_definition(text), zh_values[0] if zh_values else None,
+                compact_english_definition(text), direct_zh[0] if direct_zh else aligned_zh,
+                "kaikki-sense" if (direct_zh or aligned_zh) else "none",
                 extract_domain(sense, entry),
                 extract_examples(sense, max_examples=args.max_examples_per_sense, max_chars=args.max_example_chars),
                 [str(x) for x in sense.get("tags") or []], [str(x) for x in sense.get("topics") or []],
@@ -520,7 +544,7 @@ def build_display_meanings(entries: list[dict], args: argparse.Namespace) -> lis
     for rank, sense in enumerate(senses[: args.max_compact_senses], 1):
         output.append({
             "rank": rank, "pos": sense.display_pos, "zh": sense.zh,
-            "zhSource": "kaikki-sense" if sense.zh else "none", "en": sense.compact_gloss,
+            "zhSource": sense.zh_source if sense.zh else "none", "en": sense.compact_gloss,
             "domain": sense.domain, "source": SOURCE_NAME,
         })
     return output
@@ -618,11 +642,22 @@ def extract_form_of_aliases(entry: dict) -> list[AliasRecord]:
         if not isinstance(sense, dict):
             continue
         tags = [str(tag) for tag in sense.get("tags") or []]
-        code = map_kaikki_form_tags_to_exchange_code(tags, entry.get("pos"))
-        for reference in list(sense.get("form_of") or []) + list(sense.get("alt_of") or []):
+        codes = [map_kaikki_form_tags_to_exchange_code(tags, entry.get("pos"))]
+        normalized_tags = {normalize_word(tag).replace(" ", "-") for tag in tags}
+        if {"past", "participle"} <= normalized_tags:
+            codes = ["p", "d"]
+        references = list(sense.get("form_of") or []) + list(sense.get("alt_of") or [])
+        if not references and "form-of" in normalized_tags:
+            for gloss in sense.get("glosses") or sense.get("raw_glosses") or []:
+                match = re.search(r"\bof\s+([A-Za-z]+(?:[ '-][A-Za-z]+){0,5})\s*$", clean_text(gloss) or "", re.IGNORECASE)
+                if match:
+                    references.append({"word": match.group(1)})
+        for reference in references:
             base = clean_text(reference.get("word") if isinstance(reference, dict) else reference)
             if base:
-                output.append(AliasRecord(alias, normalize_word(alias), base, normalize_word(base), code, tags))
+                for code in codes:
+                    if code:
+                        output.append(AliasRecord(alias, normalize_word(alias), base, normalize_word(base), code, tags))
     return output
 
 
@@ -857,9 +892,28 @@ def build_database(args: argparse.Namespace) -> dict:
 
         slim_path = Path(getattr(args, "slim_translation_source", None) or args.tag_source)
         full_path = Path(getattr(args, "full_translation_source_shards", None) or args.tag_source_shards)
+        full_sqlite_path = getattr(args, "full_translation_source", None)
+        full_sqlite_path = Path(full_sqlite_path) if full_sqlite_path else None
         overlay = load_overlay(args)
-        slim_translations = load_translation_overlay_from_sqlite(slim_path) if slim_path.exists() else {}
-        full_translations = load_translation_overlay_from_shards(full_path) if full_path.exists() else {}
+        def translations_from_overlay(values: dict[str, OverlayRecord], source: str) -> dict[str, TranslationOverlayRecord]:
+            return {key: TranslationOverlayRecord(key, item.translation, item.phonetic, item.tag, source)
+                    for key, item in values.items()}
+
+        tag_source_path = Path(args.tag_source) if getattr(args, "tag_source", None) else None
+        if full_sqlite_path and full_sqlite_path.exists():
+            if tag_source_path and full_sqlite_path.resolve() == tag_source_path.resolve() and overlay:
+                full_translations = translations_from_overlay(overlay, "wordfan-full-overlay")
+            else:
+                full_translations = load_translation_overlay_from_sqlite(full_sqlite_path, "wordfan-full-overlay")
+        else:
+            full_translations = load_translation_overlay_from_shards(full_path) if full_path.exists() else {}
+        if slim_path.exists() and not (full_sqlite_path and slim_path.resolve() == full_sqlite_path.resolve()):
+            if tag_source_path and slim_path.resolve() == tag_source_path.resolve() and overlay:
+                slim_translations = translations_from_overlay(overlay, "wordfan-slim-overlay")
+            else:
+                slim_translations = load_translation_overlay_from_sqlite(slim_path)
+        else:
+            slim_translations = {}
         stem_rows = load_current_stem_rows_from_sqlite(slim_path) if slim_path.exists() else {}
         report.update({
             "tag_overlay_available": bool(overlay), "tag_overlay_source": str(args.tag_source) if overlay else None,
@@ -867,10 +921,14 @@ def build_database(args: argparse.Namespace) -> dict:
             "slim_translation_overlay_records_loaded": len(slim_translations), "current_stem_rows_loaded": len(stem_rows),
             "kaikki_rows_with_stem_overlay": 0,
         })
-        rows: dict[str, RowData] = {}
-        for normalized, word, entries_json, exchange in conn.execute(
+        for key in ("rows_with_kaikki_sense_chinese", "rows_with_kaikki_entry_chinese",
+                    "rows_with_full_dictionary_chinese_overlay", "rows_with_slim_dictionary_chinese_overlay"):
+            report[key] = 0
+        batch: list[tuple] = []
+        aggregate_cursor = conn.execute(
             "SELECT normalized_word, word, entries_json, exchange FROM kaikki_aggregates ORDER BY source_order"
-        ):
+        )
+        for normalized, word, entries_json, exchange in aggregate_cursor:
             row = row_from_aggregate(json.loads(entries_json), normalized, word, exchange, args,
                                      overlay.get(normalized), full_translations.get(normalized), slim_translations.get(normalized))
             if tag_matches_ap_stem(row.tag):
@@ -879,18 +937,36 @@ def build_database(args: argparse.Namespace) -> dict:
                 if stem and stem.translation and row.zh_source.startswith("wordfan-"):
                     row.translation, row.zh_source = stem.translation, "wordfan-slim-overlay"
                     row.detail = _merge_detail(row.detail, {"translationFallback": {"zh": row.translation, "zhSource": row.zh_source}})
-            rows[normalized] = row
-        rows, stem_stats = append_missing_stem_rows(rows, stem_rows)
-        report.update(stem_stats)
-
-        batch: list[tuple] = []
-        for row in rows.values():
+            source_counter = {
+                "kaikki-sense": "rows_with_kaikki_sense_chinese",
+                "kaikki-entry": "rows_with_kaikki_entry_chinese",
+                "wordfan-full-overlay": "rows_with_full_dictionary_chinese_overlay",
+                "wordfan-slim-overlay": "rows_with_slim_dictionary_chinese_overlay",
+            }.get(row.zh_source)
+            if source_counter:
+                report[source_counter] += 1
             batch.append(row.tuple())
             if len(batch) >= args.batch_size:
                 insert_batch(conn, batch)
                 batch.clear()
         if batch:
             insert_batch(conn, batch)
+        report["missing_stem_rows_appended"] = 0
+        supplement_batch: list[tuple] = []
+        for normalized, current in stem_rows.items():
+            if conn.execute("SELECT 1 FROM dictionary_entries WHERE normalized_word=? LIMIT 1", (normalized,)).fetchone():
+                continue
+            supplemental, _stats = append_missing_stem_rows({}, {normalized: current})
+            row = supplemental[normalized]
+            supplement_batch.append(row.tuple())
+            report["missing_stem_rows_appended"] += 1
+            if row.translation:
+                report["rows_with_slim_dictionary_chinese_overlay"] += 1
+            if len(supplement_batch) >= args.batch_size:
+                insert_batch(conn, supplement_batch)
+                supplement_batch.clear()
+        if supplement_batch:
+            insert_batch(conn, supplement_batch)
         if not args.skip_fts:
             build_fts_index(conn)
         generated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -905,27 +981,25 @@ def build_database(args: argparse.Namespace) -> dict:
         quick = conn.execute("PRAGMA quick_check").fetchone()[0]
         if quick != "ok":
             raise RuntimeError(f"SQLite quick_check failed: {quick}")
-        report["final_rows"] = len(rows)
-        report["rows_with_definition"] = sum(bool(row.definition) for row in rows.values())
-        report["rows_with_phonetic"] = sum(bool(row.phonetic) for row in rows.values())
-        report["rows_with_exchange"] = sum(bool(row.exchange) for row in rows.values())
-        report["rows_with_current_tag"] = sum(bool(row.tag) for row in rows.values())
-        report["rows_with_toefl"] = sum(bool(row.is_toefl) for row in rows.values())
-        report["rows_with_frq"] = sum(row.frq is not None for row in rows.values())
-        report["rows_with_bnc"] = sum(row.bnc is not None for row in rows.values())
-        report["rows_with_collins"] = sum(row.collins > 0 for row in rows.values())
-        report["rows_with_oxford"] = sum(row.oxford > 0 for row in rows.values())
-        for source, key in (("kaikki-sense", "rows_with_kaikki_sense_chinese"), ("kaikki-entry", "rows_with_kaikki_entry_chinese"),
-                            ("wordfan-full-overlay", "rows_with_full_dictionary_chinese_overlay"),
-                            ("wordfan-slim-overlay", "rows_with_slim_dictionary_chinese_overlay")):
-            report[key] = sum(row.zh_source == source for row in rows.values())
-        report["rows_without_chinese_translation"] = sum(not row.translation for row in rows.values())
-        report["final_rows_with_chinese_translation"] = len(rows) - report["rows_without_chinese_translation"]
-        report["final_chinese_translation_coverage_percent"] = round(100 * report["final_rows_with_chinese_translation"] / max(1, len(rows)), 4)
-        report["final_stem_rows"] = sum(tag_matches_ap_stem(row.tag) for row in rows.values())
-        report["final_k12_stem_rows"] = sum(any(token.startswith("k12_") for token in (row.tag or "").split()) for row in rows.values())
-        report["final_ap_stem_rows"] = sum(any(token.startswith("ap_") for token in (row.tag or "").split()) for row in rows.values())
-        report["final_linear_algebra_extension_rows"] = sum(contains_tag(row.tag, "linear_algebra_extension") for row in rows.values())
+        count_where = lambda clause: int(conn.execute(f"SELECT count(*) FROM dictionary_entries WHERE {clause}").fetchone()[0])
+        report["final_rows"] = count_where("1")
+        report["rows_with_definition"] = count_where("definition IS NOT NULL AND trim(definition) <> ''")
+        report["rows_with_phonetic"] = count_where("phonetic IS NOT NULL AND trim(phonetic) <> ''")
+        report["rows_with_exchange"] = count_where("exchange IS NOT NULL AND trim(exchange) <> ''")
+        report["rows_with_current_tag"] = count_where("tag IS NOT NULL AND trim(tag) <> ''")
+        report["rows_with_toefl"] = count_where("is_toefl = 1")
+        report["rows_with_frq"] = count_where("frq IS NOT NULL")
+        report["rows_with_bnc"] = count_where("bnc IS NOT NULL")
+        report["rows_with_collins"] = count_where("collins > 0")
+        report["rows_with_oxford"] = count_where("oxford > 0")
+        report["rows_without_chinese_translation"] = count_where("translation IS NULL OR trim(translation) = ''")
+        report["final_rows_with_chinese_translation"] = report["final_rows"] - report["rows_without_chinese_translation"]
+        report["final_chinese_translation_coverage_percent"] = round(100 * report["final_rows_with_chinese_translation"] / max(1, report["final_rows"]), 4)
+        stem_tags = [tag for (tag,) in conn.execute("SELECT tag FROM dictionary_entries WHERE tag IS NOT NULL AND trim(tag) <> ''") if tag_matches_ap_stem(tag)]
+        report["final_stem_rows"] = len(stem_tags)
+        report["final_k12_stem_rows"] = sum(any(token.startswith("k12_") for token in tag.split()) for tag in stem_tags)
+        report["final_ap_stem_rows"] = sum(any(token.startswith("ap_") for token in tag.split()) for tag in stem_tags)
+        report["final_linear_algebra_extension_rows"] = sum(contains_tag(tag, "linear_algebra_extension") for tag in stem_tags)
         conn.close()
         conn = None
         os.replace(tmp, args.output)

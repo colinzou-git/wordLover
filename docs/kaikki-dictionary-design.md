@@ -113,19 +113,27 @@ python scripts/build_kaikki_dictionary.py \
   --source "$KAIIKI_SOURCE" \
   --output data/dictionary-kaikki.sqlite \
   --report data/kaikki-dictionary-report.json \
-  --tag-source data/dictionary.sqlite \
+  --tag-source "$HOME/dictBackup/dictionary.sqlite" \
+  --full-translation-source "$HOME/dictBackup/dictionary.sqlite" \
   --tag-source-shards apps/wordlover-pwa/public/dictionary-full
 
 python scripts/package_kaikki_dictionary.py \
   --source "$KAIIKI_SOURCE" \
-  --tag-source data/dictionary.sqlite \
+  --tag-source "$HOME/dictBackup/dictionary.sqlite" \
+  --full-translation-source "$HOME/dictBackup/dictionary.sqlite" \
   --tag-source-shards apps/wordlover-pwa/public/dictionary-full \
   --work-dir data/kaikki-build \
   --public-dir apps/wordlover-pwa/public \
   --version 2026.07.01.kaikki \
-  --target-rows 100000 \
+  --target-rows 50000 \
   --shard-count 128
 ```
+
+The Kaikki core omits duplicated structured `detail` and requests 50,000 rows;
+mandatory ranked/STEM rows may raise the final count. Exact core results fetch
+their structured detail from the corresponding full shard when online/cached,
+while the legacy core fields remain usable offline. This keeps sql.js near the
+iPhone memory envelope; real iPhone DRAM still requires Instruments validation.
 
 The wrapper can write only
 `apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production
@@ -168,7 +176,7 @@ python -m http.server 4173 --directory apps/wordlover-pwa/public
 ```
 
 Open
-`http://127.0.0.1:4173/?dictionary=kaikki-preview&fresh=latest`. Production
+`http://127.0.0.1:4173/?dictionary=kaikki-preview-local&fresh=latest`. Production
 without the query continues to use `/dictionary-manifest.json` and
 `/dictionary-full`; the preview uses only
 `/kaikki-preview/feature-kaikki-dictionary-preview/`.

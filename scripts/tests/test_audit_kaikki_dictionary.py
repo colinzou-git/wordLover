@@ -103,6 +103,17 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["status"], "invalid-input")
 
+    def test_preview_package_over_memory_target_fails(self):
+        preview = self.root / "preview"
+        (preview / "dictionary-full").mkdir(parents=True)
+        (preview / "dictionary-manifest.json").write_text(
+            json.dumps({"sqlite": {"bytes": 51 * 1024 * 1024}}), encoding="utf-8"
+        )
+        (preview / "dictionary-full/manifest.json").write_text("{}", encoding="utf-8")
+        report, passed = audit_database(self.args(preview_package=preview))
+        self.assertFalse(passed)
+        self.assertFalse(report["packaging_compatibility"]["core_within_memory_target"])
+
 
 if __name__ == "__main__":
     unittest.main()

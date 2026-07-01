@@ -29,6 +29,7 @@ const {
   validateBackup,
 } = await import("../public/tracks.js");
 const {
+  resolveDictionaryAssetUrl,
   resolveDictionaryConfig,
 } = await import("../public/dictionary-config.js");
 
@@ -55,6 +56,25 @@ test("Kaikki preview configuration uses only isolated URLs", () => {
     "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-full",
   );
   assert.equal(config.mode, "kaikki-preview");
+});
+
+test("Local Kaikki preview configuration uses the isolated local package", () => {
+  const config = resolveDictionaryConfig("?dictionary=kaikki-preview-local");
+  assert.equal(config.dictionaryManifestUrl, "/kaikki-preview/local/dictionary-manifest.json");
+  assert.equal(config.fullDictionaryBaseUrl, "/kaikki-preview/local/dictionary-full");
+  assert.equal(config.mode, "kaikki-preview-local");
+});
+
+test("Dictionary assets resolve beside the selected manifest", () => {
+  assert.equal(resolveDictionaryAssetUrl("/dictionary-manifest.json", "dictionary.sqlite"), "/dictionary.sqlite");
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary.sqlite",
+  );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki-preview/local/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki-preview/local/dictionary.sqlite",
+  );
 });
 
 test("Goals preserve an explicit zero-new-word target", () => {

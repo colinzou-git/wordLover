@@ -62,8 +62,8 @@ FIXTURE_ROWS = [
         "definition": "n. a structured dictionary fixture",
         "translation": "结构化词条",
         "pos": "n",
-        "bnc": 1,
-        "frq": 1,
+        "bnc": 5000,
+        "frq": 5000,
         "detail": json.dumps({
             "displayMeanings": [{
                 "rank": 1, "pos": "n.", "zh": "结构化词条", "zhSource": "kaikki-sense",

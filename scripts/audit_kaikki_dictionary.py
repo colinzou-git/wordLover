@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 REQUIRED_METADATA = {"source_name", "source_format", "data_version", "variant", "generated_at", "created_at_unix"}
 STEM_SAMPLES = ("isosceles", "scalene", "rhombus", "derivative", "momentum", "eigenvalue")
+CORE_SQLITE_MAX_BYTES = 50 * 1024 * 1024
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -196,7 +197,17 @@ def audit_preview_package(path: Path | None) -> dict:
         return {"status": "skipped", "reason": "preview package not provided or missing"}
     required = (path / "dictionary-manifest.json", path / "dictionary-full/manifest.json")
     missing = [str(item) for item in required if not item.is_file()]
-    return {"status": "failed" if missing else "checked", "missing": missing}
+    if missing:
+        return {"status": "failed", "missing": missing}
+    manifest = json.loads(required[0].read_text(encoding="utf-8"))
+    core_bytes = int(manifest.get("sqlite", {}).get("bytes") or 0)
+    within_target = 0 < core_bytes <= CORE_SQLITE_MAX_BYTES
+    return {
+        "status": "checked" if within_target else "failed",
+        "missing": [], "core_sqlite_bytes": core_bytes,
+        "core_sqlite_max_bytes": CORE_SQLITE_MAX_BYTES,
+        "core_within_memory_target": within_target,
+    }
 
 
 def audit_database(args: argparse.Namespace) -> tuple[dict, bool]:
@@ -209,7 +220,7 @@ def audit_database(args: argparse.Namespace) -> tuple[dict, bool]:
         shards = audit_shards(args.current_full_shards)
         package = audit_preview_package(args.preview_package)
         if shards.get("status") == "failed": failures.append(shards.get("reason", "shard audit failed"))
-        if package.get("status") == "failed": failures.append("preview package is incomplete")
+        if package.get("status") == "failed": failures.append("preview package is incomplete or exceeds the core memory target")
         report = {
             "status": "pass" if not failures else "fail", "kaikki_db": str(args.kaikki_db),
             "health": health, "chinese_coverage": chinese,
