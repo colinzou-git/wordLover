@@ -28,6 +28,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--current-full-shards", type=Path)
     parser.add_argument("--preview-package", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--strict", action="store_true",
+                        help="Require full-build STEM, representative inflection, and overlay quality gates.")
     return parser.parse_args(argv)
 
 
@@ -122,12 +124,14 @@ def audit_stem(conn: sqlite3.Connection) -> dict:
     present = {normalize_word(row[0]) for row in conn.execute(
         f"SELECT normalized_word FROM dictionary_entries WHERE normalized_word IN ({','.join('?' for _ in STEM_SAMPLES)})", STEM_SAMPLES
     )}
+    samples = {term: term in present for term in STEM_SAMPLES}
     return {
+        "status": "checked" if present else "skipped-no-sample-terms",
         "final_stem_rows": len(stem),
         "final_k12_stem_rows": sum(any(token.startswith("k12_") for token in str(tag).split()) for _, tag in stem),
         "final_ap_stem_rows": sum(any(token.startswith("ap_") for token in str(tag).split()) for _, tag in stem),
         "final_linear_algebra_extension_rows": sum(contains_tag(tag, "linear_algebra_extension") for _, tag in stem),
-        "sample_stem_terms": {term: term in present for term in STEM_SAMPLES},
+        "sample_stem_terms": samples,
         "sample_stem_terms_present": all(term in present for term in STEM_SAMPLES),
     }
 
@@ -212,6 +216,7 @@ def audit_preview_package(path: Path | None) -> dict:
 
 def audit_database(args: argparse.Namespace) -> tuple[dict, bool]:
     failures: list[str] = []
+    strict = bool(getattr(args, "strict", False))
     with sqlite3.connect(f"file:{args.kaikki_db.resolve()}?mode=ro", uri=True) as conn:
         health, health_failures = audit_health(conn)
         failures.extend(health_failures)
@@ -221,11 +226,27 @@ def audit_database(args: argparse.Namespace) -> tuple[dict, bool]:
         package = audit_preview_package(args.preview_package)
         if shards.get("status") == "failed": failures.append(shards.get("reason", "shard audit failed"))
         if package.get("status") == "failed": failures.append("preview package is incomplete or exceeds the core memory target")
+        stem = audit_stem(conn)
+        inflections = audit_inflections(conn)
+        if strict:
+            if not stem["sample_stem_terms_present"]:
+                missing_stem = [term for term, present in stem["sample_stem_terms"].items() if not present]
+                failures.append("Strict STEM samples missing: " + ", ".join(missing_stem))
+                stem["status"] = "problem"
+            if inflections["run_present"] and not (inflections["running_alias"] and inflections["ran_alias"]):
+                failures.append("Strict inflection check failed: run must include running and ran")
+                inflections["status"] = "problem"
+            if inflections["excite_present"] and not inflections["excited_alias"]:
+                failures.append("Strict inflection check failed: excite must include excited")
+                inflections["status"] = "problem"
+            if args.current_full_shards is not None and shards.get("status") == "checked" and chinese["rows_with_wordfan_full_overlay_chinese"] == 0:
+                failures.append("Strict full-overlay check failed: no WordFan full-overlay Chinese rows found")
+                shards["overlay_chinese_status"] = "problem"
         report = {
-            "status": "pass" if not failures else "fail", "kaikki_db": str(args.kaikki_db),
+            "status": "pass" if not failures else "fail", "strict": strict, "kaikki_db": str(args.kaikki_db),
             "health": health, "chinese_coverage": chinese,
             "tag_rank_preservation": audit_overlay_preservation(conn, args.current_slim_db),
-            "stem_preservation": audit_stem(conn), "inflections": audit_inflections(conn),
+            "stem_preservation": stem, "inflections": inflections,
             "structured_detail": detail, "full_shard_comparison": shards,
             "packaging_compatibility": package, "failures": failures,
         }

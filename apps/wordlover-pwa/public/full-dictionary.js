@@ -61,6 +61,25 @@ function formatVersionForCache(value) {
   return String(value ?? "unknown").replace(/[^a-z0-9._-]+/gi, "-");
 }
 
+export function fullDictionaryStorageConfig(storageScope = "production") {
+  const scope = String(storageScope || "production")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-") || "production";
+  if (scope === "production") {
+    return Object.freeze({
+      manifestKey: MANIFEST_STORAGE_KEY,
+      installedVersionKey: INSTALLED_VERSION_KEY,
+      cachePrefix: CACHE_PREFIX,
+    });
+  }
+  return Object.freeze({
+    manifestKey: `wordfan.fullDictionary.${scope}.manifest.v1`,
+    installedVersionKey: `wordfan.fullDictionary.${scope}.installedVersion.v1`,
+    cachePrefix: `wordfan-full-dictionary-${scope}-v1-`,
+  });
+}
+
 function hasOwn(record, key) {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
@@ -243,6 +262,8 @@ export class FullDictionaryClient {
       ? options.isOnline
       : () => globalThis.navigator?.onLine !== false;
     this.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;
+    this.storageScope = String(options.storageScope ?? "production");
+    this.storageConfig = fullDictionaryStorageConfig(this.storageScope);
     const requestedParsedShards = Number(options.maxParsedShards ?? MAX_PARSED_SHARDS);
     this.maxParsedShards = Number.isInteger(requestedParsedShards) && requestedParsedShards > 0
       ? Math.min(requestedParsedShards, MAX_CONFIGURED_PARSED_SHARDS)
@@ -269,7 +290,7 @@ export class FullDictionaryClient {
   }
 
   _cacheName(manifest = this.manifest) {
-    return `${CACHE_PREFIX}${formatVersionForCache(manifest?.dictionaryDataVersion)}`;
+    return `${this.storageConfig.cachePrefix}${formatVersionForCache(manifest?.dictionaryDataVersion)}`;
   }
 
   _notify() {
@@ -294,18 +315,18 @@ export class FullDictionaryClient {
   }
 
   _storedManifest() {
-    const raw = safeStorageGet(this.storage, MANIFEST_STORAGE_KEY);
+    const raw = safeStorageGet(this.storage, this.storageConfig.manifestKey);
     if (!raw) return null;
     try {
       return validateFullDictionaryManifest(JSON.parse(raw));
     } catch {
-      safeStorageRemove(this.storage, MANIFEST_STORAGE_KEY);
+      safeStorageRemove(this.storage, this.storageConfig.manifestKey);
       return null;
     }
   }
 
   _markOfflineIncomplete() {
-    safeStorageRemove(this.storage, INSTALLED_VERSION_KEY);
+    safeStorageRemove(this.storage, this.storageConfig.installedVersionKey);
     this.offlineInstalled = false;
     this.offlineVerificationVersion = null;
   }
@@ -339,7 +360,7 @@ export class FullDictionaryClient {
       if (remote) {
         const previousVersion = this.manifest?.dictionaryDataVersion ?? stored?.dictionaryDataVersion ?? null;
         this.manifest = remote;
-        safeStorageSet(this.storage, MANIFEST_STORAGE_KEY, JSON.stringify(remote));
+        safeStorageSet(this.storage, this.storageConfig.manifestKey, JSON.stringify(remote));
         if (previousVersion && previousVersion !== remote.dictionaryDataVersion) {
           this._markOfflineIncomplete();
           this.parsedShards.clear();
@@ -367,7 +388,7 @@ export class FullDictionaryClient {
     const names = await this.cachesApi.keys();
     await Promise.all(
       names
-        .filter((name) => name.startsWith(CACHE_PREFIX) && (includeCurrent || name !== current))
+        .filter((name) => name.startsWith(this.storageConfig.cachePrefix) && (includeCurrent || name !== current))
         .map((name) => this.cachesApi.delete(name)),
     );
   }
@@ -413,11 +434,11 @@ export class FullDictionaryClient {
     if (!force && this.offlineVerificationVersion === manifest.dictionaryDataVersion) {
       return this.offlineInstalled;
     }
-    const markerMatches = safeStorageGet(this.storage, INSTALLED_VERSION_KEY) === manifest.dictionaryDataVersion;
+    const markerMatches = safeStorageGet(this.storage, this.storageConfig.installedVersionKey) === manifest.dictionaryDataVersion;
     const complete = markerMatches && await this._cacheHasAllShardResponses(manifest);
     this.offlineInstalled = Boolean(complete);
     this.offlineVerificationVersion = manifest.dictionaryDataVersion;
-    if (!complete && markerMatches) safeStorageRemove(this.storage, INSTALLED_VERSION_KEY);
+    if (!complete && markerMatches) safeStorageRemove(this.storage, this.storageConfig.installedVersionKey);
     return this.offlineInstalled;
   }
 
@@ -609,7 +630,7 @@ export class FullDictionaryClient {
       if (!await this._cacheHasAllShardResponses(manifest)) {
         throw new Error("The full dictionary download finished, but one or more shards were not stored.");
       }
-      safeStorageSet(this.storage, INSTALLED_VERSION_KEY, manifest.dictionaryDataVersion);
+      safeStorageSet(this.storage, this.storageConfig.installedVersionKey, manifest.dictionaryDataVersion);
       this.offlineInstalled = true;
       this.offlineVerificationVersion = manifest.dictionaryDataVersion;
       this.progress = { completed: total, total, completedBytes: totalBytes, totalBytes, percent: 100 };

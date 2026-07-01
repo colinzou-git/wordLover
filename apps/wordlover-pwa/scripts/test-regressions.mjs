@@ -33,6 +33,9 @@ const {
   resolveDictionaryAssetUrl,
   resolveDictionaryConfig,
 } = await import("../public/dictionary-config.js");
+const {
+  fullDictionaryStorageConfig,
+} = await import("../public/full-dictionary.js");
 
 const tests = [];
 function test(name, fn) {
@@ -84,6 +87,23 @@ test("Kaikki preview storage keys are isolated from production", () => {
     versionKey: "kaikki-preview-local.dictionaryDataVersion",
     installedKey: "kaikki-preview-local.dictionaryInstalled",
   });
+});
+
+test("Full dictionary shard storage follows dictionary mode", () => {
+  assert.equal(fullDictionaryStorageConfig("production").manifestKey, "wordfan.fullDictionary.manifest.v1");
+  assert.equal(fullDictionaryStorageConfig("production").cachePrefix, "wordfan-full-dictionary-v1-");
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview").manifestKey,
+    "wordfan.fullDictionary.kaikki-preview.manifest.v1",
+  );
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview-local").installedVersionKey,
+    "wordfan.fullDictionary.kaikki-preview-local.installedVersion.v1",
+  );
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview").cachePrefix,
+    "wordfan-full-dictionary-kaikki-preview-v1-",
+  );
 });
 
 test("Local Kaikki preview configuration uses the isolated local package", () => {

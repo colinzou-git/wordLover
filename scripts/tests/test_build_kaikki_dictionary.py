@@ -226,6 +226,7 @@ class KaikkiBuilderTests(unittest.TestCase):
 
     def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
         self.assertTrue(has_han_text("费用"))
+        self.assertTrue(has_han_text("\uf900"))
         self.assertTrue(is_chinese_translation_item({"lang_code": "zh-Hant", "word": "費用"}))
         self.assertTrue(is_chinese_translation_item({"lang": "Mandarin Chinese", "word": "收费"}))
         self.assertTrue(is_chinese_translation_item({"language": "Simplified Chinese", "text": "收费"}))
@@ -246,6 +247,41 @@ class KaikkiBuilderTests(unittest.TestCase):
         report = self.build([entry("fee", translations=[{"lang_code": "zh-Hans", "word": "费用"}])])
         self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
         self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "费用")
+
+    def test_unaligned_entry_chinese_is_general_fallback(self):
+        value = {
+            "word": "charge", "lang_code": "en", "pos": "noun",
+            "senses": [
+                {"glosses": ["an amount of money paid"]},
+                {"glosses": ["an impetuous rush"]},
+            ],
+            "translations": [{"lang_code": "zh", "word": "费用；冲锋"}],
+        }
+        report = self.build([value])
+        translation, detail_raw = self.query("SELECT translation,detail FROM dictionary_entries")[0]
+        detail = json.loads(detail_raw)
+        self.assertEqual(translation, "费用；冲锋")
+        self.assertTrue(all(item["zh"] is None for item in detail["displayMeanings"]))
+        self.assertEqual(detail["translationFallback"], {"zh": "费用；冲锋", "zhSource": "kaikki-entry"})
+        self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
+
+    def test_strongly_aligned_entry_chinese_attaches_to_matching_meaning(self):
+        value = {
+            "word": "charge", "lang_code": "en", "pos": "noun",
+            "senses": [
+                {"glosses": ["an amount of money paid"]},
+                {"glosses": ["an impetuous rush"]},
+            ],
+            "translations": [{
+                "lang_code": "zh", "word": "费用",
+                "sense": "amount of money paid",
+            }],
+        }
+        self.build([value])
+        detail = json.loads(self.query("SELECT detail FROM dictionary_entries")[0][0])
+        self.assertEqual(detail["displayMeanings"][0]["zh"], "费用")
+        self.assertEqual(detail["displayMeanings"][0]["zhSource"], "kaikki-sense")
+        self.assertNotIn("translationFallback", detail)
 
     def test_missing_full_overlay_requires_explicit_allowance(self):
         self.write_jsonl([entry("apple")])

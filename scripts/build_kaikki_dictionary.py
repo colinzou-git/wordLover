@@ -28,7 +28,7 @@ DEFAULT_OUTPUT = Path("data/dictionary-kaikki.sqlite")
 DEFAULT_REPORT = Path("data/kaikki-dictionary-report.json")
 APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
-HAN_RE = re.compile(r"[\u3400-\u9fff]")
+HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 CHINESE_CODES = {
     "zh", "zho", "chi", "cmn", "cmn-hans", "cmn-hant", "zh-cn", "zh-sg",
     "zh-my", "zh-hans", "zh-hans-cn", "zh-hant", "zh-tw", "zh-hk", "zh-mo",
@@ -886,9 +886,7 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
         entry_zh_values.extend(extract_chinese_translations(entry))
     entry_zh = "\n".join(dict.fromkeys(entry_zh_values)) or None
     translation, zh_source = choose_chinese_translation(sense_zh, entry_zh, full_translation, slim_translation)
-    if zh_source == "kaikki-entry" and display:
-        display[0]["zh"], display[0]["zhSource"] = translation, "kaikki-entry"
-    fallback = (translation, zh_source) if zh_source.startswith("wordfan-") else None
+    fallback = (translation, zh_source) if zh_source == "kaikki-entry" or zh_source.startswith("wordfan-") else None
     if fallback:
         for item in display:
             if not item.get("zh"):

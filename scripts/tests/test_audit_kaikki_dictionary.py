@@ -44,7 +44,7 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
     def args(self, **overrides):
         values = dict(
             kaikki_db=self.database, current_slim_db=None, current_full_shards=None,
-            preview_package=None, report=self.root / "audit.json",
+            preview_package=None, report=self.root / "audit.json", strict=False,
         )
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -60,6 +60,44 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
         self.assertTrue(report["inflections"]["ran_alias"])
         self.assertEqual(report["tag_rank_preservation"]["status"], "skipped")
         self.assertEqual(report["full_shard_comparison"]["status"], "skipped")
+        self.assertEqual(report["stem_preservation"]["status"], "skipped-no-sample-terms")
+
+    def add_stem_samples(self):
+        with sqlite3.connect(self.database) as conn:
+            for term, tag in (("isosceles", "k12_math"), ("scalene", "k12_math"), ("rhombus", "k12_math"),
+                              ("derivative", "ap_calculus_ab"), ("momentum", "ap_physics"),
+                              ("eigenvalue", "linear_algebra_extension")):
+                conn.execute(
+                    "INSERT INTO dictionary_entries(word,normalized_word,definition_source,tag,is_toefl,source) VALUES (?,?,?,?,0,?)",
+                    (term, term, "WordFan_STEM_Supplement", tag, "WordFan_STEM_Supplement"),
+                )
+                rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                conn.execute("INSERT INTO dictionary_search_fts(rowid,word,normalized_word,definition,translation) VALUES (?,?,?,?,?)", (rowid, term, term, "", ""))
+            conn.commit()
+
+    def test_strict_mode_requires_stem_samples(self):
+        report, passed = audit_database(self.args(strict=True))
+        self.assertFalse(passed)
+        self.assertEqual(report["stem_preservation"]["status"], "problem")
+        self.assertTrue(any("Strict STEM samples missing" in item for item in report["failures"]))
+
+    def test_strict_mode_requires_representative_inflections_when_base_exists(self):
+        self.add_stem_samples()
+        with sqlite3.connect(self.database) as conn:
+            conn.execute("UPDATE dictionary_entries SET exchange=NULL WHERE normalized_word='run'")
+            conn.commit()
+        report, passed = audit_database(self.args(strict=True))
+        self.assertFalse(passed)
+        self.assertEqual(report["inflections"]["status"], "problem")
+        self.assertTrue(any("run must include running and ran" in item for item in report["failures"]))
+
+    def test_strict_cli_writes_problem_report(self):
+        report_path = self.root / "strict.json"
+        code = main(["--kaikki-db", str(self.database), "--strict", "--report", str(report_path)])
+        self.assertEqual(code, 1)
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertTrue(payload["strict"])
+        self.assertEqual(payload["status"], "fail")
 
     def test_fts_mismatch_fails_and_writes_report(self):
         with sqlite3.connect(self.database) as conn:
@@ -82,19 +120,10 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
         self.assertEqual(report["structured_detail"]["malformed_detail_rows"], 1)
 
     def test_stem_samples_detected(self):
-        with sqlite3.connect(self.database) as conn:
-            for term, tag in (("isosceles", "k12_math"), ("scalene", "k12_math"), ("rhombus", "k12_math"),
-                              ("derivative", "ap_calculus_ab"), ("momentum", "ap_physics"),
-                              ("eigenvalue", "linear_algebra_extension")):
-                conn.execute(
-                    "INSERT INTO dictionary_entries(word,normalized_word,definition_source,tag,is_toefl,source) VALUES (?,?,?,?,0,?)",
-                    (term, term, "WordFan_STEM_Supplement", tag, "WordFan_STEM_Supplement"),
-                )
-                rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                conn.execute("INSERT INTO dictionary_search_fts(rowid,word,normalized_word,definition,translation) VALUES (?,?,?,?,?)", (rowid, term, term, "", ""))
-            conn.commit()
+        self.add_stem_samples()
         report, passed = audit_database(self.args())
         self.assertTrue(passed)
+        self.assertEqual(report["stem_preservation"]["status"], "checked")
         self.assertTrue(report["stem_preservation"]["sample_stem_terms_present"])
         self.assertEqual(report["stem_preservation"]["final_stem_rows"], 6)
 

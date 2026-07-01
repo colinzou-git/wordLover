@@ -1,12 +1,47 @@
 import json
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.package_kaikki_dictionary import main, preview_output, validate_preview_output
+from scripts.package_kaikki_dictionary import (
+    SLIM_DETAIL_POLICY,
+    build_full_kaikki,
+    main,
+    parse_args,
+    preview_output,
+    validate_preview_output,
+)
 
 
 class PackageKaikkiDictionaryTests(unittest.TestCase):
+    def test_parse_args_exposes_both_full_overlay_sources(self):
+        args = parse_args([
+            "--source", "kaikki.jsonl",
+            "--full-translation-source", "full.sqlite",
+            "--full-translation-source-shards", "dictionary-full",
+        ])
+        self.assertEqual(args.full_translation_source, Path("full.sqlite"))
+        self.assertEqual(args.full_translation_source_shards, Path("dictionary-full"))
+
+    def test_build_wrapper_passes_full_overlay_arguments(self):
+        args = Namespace(
+            source=Path("kaikki.jsonl"), work_dir=Path("work"), version="test",
+            tag_source=Path("slim.sqlite"), tag_source_shards=Path("tag-shards"),
+            full_translation_source=Path("full.sqlite"),
+            full_translation_source_shards=Path("full-shards"),
+            allow_missing_full_overlay=True,
+        )
+        with patch("scripts.package_kaikki_dictionary.run_command") as run:
+            build_full_kaikki(args)
+        command = run.call_args.args[0]
+        self.assertIn("--full-translation-source", command)
+        self.assertIn("full.sqlite", command)
+        self.assertIn("--full-translation-source-shards", command)
+        self.assertIn("full-shards", command)
+        self.assertIn("--allow-missing-full-overlay", command)
+
     def test_rejects_production_root(self):
         with tempfile.TemporaryDirectory() as temp:
             public = Path(temp) / "public"
@@ -44,6 +79,9 @@ class PackageKaikkiDictionaryTests(unittest.TestCase):
             self.assertEqual(manifest["variant"], "kaikki-slim")
             self.assertIn("Kaikki/Wiktextract", manifest["sources"])
             self.assertEqual(production_manifest.read_text(encoding="utf-8"), "production")
+            summary = json.loads((root / "work/kaikki-package-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["slimDetailPolicy"], SLIM_DETAIL_POLICY)
+            self.assertEqual(summary["fullTranslationOverlaySource"]["type"], "tag-source-shards-default")
 
 
 if __name__ == "__main__":

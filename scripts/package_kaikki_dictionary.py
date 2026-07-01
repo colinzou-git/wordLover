@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PUBLIC = REPO_ROOT / "apps/wordlover-pwa/public"
 PREVIEW_RELATIVE = Path("kaikki-preview/local")
 KAIKKI_SOURCES = ["Kaikki/Wiktextract", "current WordFan tag/translation overlay", "WordFan K-12/AP STEM"]
+SLIM_DETAIL_POLICY = "none-with-full-shard-enrichment"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -24,6 +25,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tag-source-shards", type=Path, default=Path("apps/wordlover-pwa/public/dictionary-full"))
     parser.add_argument("--full-translation-source", type=Path,
                         help="Current full WordFan SQLite DB used for Chinese fallback.")
+    parser.add_argument("--full-translation-source-shards", type=Path,
+                        help="Current manifest-backed full WordFan shards used for Chinese fallback.")
     parser.add_argument("--allow-missing-full-overlay", action="store_true",
                         help="Allow fixture packaging without the current full WordFan Chinese fallback overlay.")
     parser.add_argument("--work-dir", type=Path, default=Path("data/kaikki-build"))
@@ -60,6 +63,8 @@ def build_full_kaikki(args: argparse.Namespace) -> Path:
     ]
     if args.full_translation_source:
         command.extend(["--full-translation-source", str(args.full_translation_source)])
+    if args.full_translation_source_shards:
+        command.extend(["--full-translation-source-shards", str(args.full_translation_source_shards)])
     if args.allow_missing_full_overlay:
         command.append("--allow-missing-full-overlay")
     run_command(command)
@@ -115,7 +120,20 @@ def validate_outputs(args: argparse.Namespace) -> dict:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing Kaikki preview outputs: " + ", ".join(missing))
-    return {"output": str(output), "files": len(list(output.rglob("*"))), "productionPathsChanged": False}
+    overlay_source = (
+        {"type": "sqlite", "path": str(args.full_translation_source)}
+        if args.full_translation_source
+        else {"type": "shards", "path": str(args.full_translation_source_shards)}
+        if args.full_translation_source_shards
+        else {"type": "tag-source-shards-default", "path": str(args.tag_source_shards)}
+    )
+    return {
+        "output": str(output),
+        "files": len(list(output.rglob("*"))),
+        "productionPathsChanged": False,
+        "slimDetailPolicy": SLIM_DETAIL_POLICY,
+        "fullTranslationOverlaySource": overlay_source,
+    }
 
 
 def write_summary(args: argparse.Namespace, summary: dict) -> None:

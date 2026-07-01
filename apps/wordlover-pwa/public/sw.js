@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordlover-shell-v145";
+const CACHE_NAME = "wordlover-shell-v146";
 // Staging cache for atomic installs: required assets are written here first and the
 // live cache is only updated once every one of them succeeds, so an interrupted or
 // partly-failed install can never leave a half-populated shell that the app trusts.
@@ -7,20 +7,20 @@ const SHELL_CACHE_PREFIX = "wordlover-shell-";
 
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260701-6",
-  "/dictionary-config.js?v=20260701-6",
-  "/full-dictionary.js?v=20260701-6",
-  "/persistence.js?v=20260701-6",
-  "/spelling.js?v=20260701-6",
-  "/ui-preferences.js?v=20260701-6",
-  "/review-state.js?v=20260701-6",
-  "/study-one-more.js?v=20260701-6",
-  "/sync.js?v=20260701-6",
-  "/fsrs-scheduler.js?v=20260701-6",
-  "/goal-forecast.js?v=20260701-6",
-  "/tracks.js?v=20260701-6",
-  "/styles.css?v=20260701-6",
-  "/wordlover-config.js?v=20260701-6",
+  "/app.js?v=20260701-7",
+  "/dictionary-config.js?v=20260701-7",
+  "/full-dictionary.js?v=20260701-7",
+  "/persistence.js?v=20260701-7",
+  "/spelling.js?v=20260701-7",
+  "/ui-preferences.js?v=20260701-7",
+  "/review-state.js?v=20260701-7",
+  "/study-one-more.js?v=20260701-7",
+  "/sync.js?v=20260701-7",
+  "/fsrs-scheduler.js?v=20260701-7",
+  "/goal-forecast.js?v=20260701-7",
+  "/tracks.js?v=20260701-7",
+  "/styles.css?v=20260701-7",
+  "/wordlover-config.js?v=20260701-7",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -39,7 +39,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260701-6",
+  "/automated-tests.js?v=20260701-7",
 ];
 
 // Bounded timeouts. The root cause of the offline hang is that an unbounded

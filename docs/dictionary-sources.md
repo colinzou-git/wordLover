@@ -27,6 +27,9 @@ The GitHub Actions Kaikki preview artifact is a fixture preview generated from
 the CI dictionary, not a redistribution of the full Kaikki source. Full local
 validation requires the downloaded Kaikki JSONL plus the current full WordFan
 SQLite/full-shard overlay so Chinese fallback coverage is measured correctly.
+The packaging wrapper accepts either `--full-translation-source` for a full
+WordFan SQLite backup or `--full-translation-source-shards` for a
+manifest-backed `dictionary-full/` directory.
 
 Before public distribution, verify the current attribution and license
 requirements directly against every upstream source. This document intentionally

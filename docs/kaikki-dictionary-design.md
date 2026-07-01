@@ -70,6 +70,11 @@ and FTS, and in `detail.translationFallback` with provenance. It is not copied
 onto every Kaikki sense. Curated STEM translation deterministically wins for a
 STEM-tagged term when the selected Chinese is otherwise a WordFan word-level
 fallback.
+Unmatched Kaikki entry-level Chinese follows the same general-fallback rule:
+it remains in `dictionary_entries.translation` and
+`detail.translationFallback` with `zhSource=kaikki-entry`. Only sense-level or
+strongly sense-matched entry translations appear inside
+`detail.displayMeanings[]`.
 
 ## STEM and inflection preservation
 
@@ -148,6 +153,11 @@ mandatory ranked/STEM rows may raise the final count. Exact core results fetch
 their structured detail from the corresponding full shard when online/cached,
 while the legacy core fields remain usable offline. This keeps sql.js near the
 iPhone memory envelope; real iPhone DRAM still requires Instruments validation.
+This is the explicit package policy, recorded in
+`kaikki-package-summary.json` as
+`slimDetailPolicy=none-with-full-shard-enrichment`. Full-shard exact and alias
+results carry the optional structured detail; unavailable/malformed detail uses
+the existing legacy renderer.
 
 The wrapper can write only
 `apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production
@@ -155,6 +165,18 @@ root assets.
 If you deliberately build a fixture without the full WordFan overlay, add
 `--allow-missing-full-overlay`; do not use that flag for the real promotion
 candidate.
+
+If the current full WordFan source is available as manifest-backed shards
+instead of SQLite, use:
+
+```bash
+python scripts/package_kaikki_dictionary.py \
+  --source "$KAIIKI_SOURCE" \
+  --tag-source "$HOME/dictBackup/dictionary.sqlite" \
+  --full-translation-source-shards apps/wordlover-pwa/public/dictionary-full \
+  --work-dir data/kaikki-build \
+  --public-dir apps/wordlover-pwa/public
+```
 
 ## Audit and validation
 
@@ -169,6 +191,7 @@ python scripts/audit_kaikki_dictionary.py \
   --current-slim-db data/dictionary.sqlite \
   --current-full-shards apps/wordlover-pwa/public/dictionary-full \
   --preview-package apps/wordlover-pwa/public/kaikki-preview/local \
+  --strict \
   --report data/kaikki-dictionary-audit.json
 
 sqlite3 data/dictionary-kaikki.sqlite "PRAGMA quick_check;"
@@ -202,6 +225,11 @@ production keeps the existing `dictionary.sqlite` / `dictionaryDataVersion`
 keys, while preview modes use `kaikki-preview.*` or `kaikki-preview-local.*`.
 Preview invalidation therefore cannot delete a user's production offline
 dictionary copy.
+The full-shard client follows the same rule. Production retains the legacy
+`wordfan.fullDictionary.*` localStorage keys and
+`wordfan-full-dictionary-v1-*` cache names. Preview manifests, installed-version
+markers, and Cache Storage names include the preview mode, so preview cleanup
+cannot remove production shards.
 
 The **Build Kaikki fixture preview artifact** workflow is manual-only
 (`workflow_dispatch`) and uploads an artifact. It uses the tiny CI fixture to
