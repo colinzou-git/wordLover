@@ -1,11 +1,11 @@
 # Kaikki Dictionary Progress
 
-- Current issue: #21 — UI rendering
+- Current issue: #22 — Docs and final validation (implementation complete)
 - Current branch: `feature/kaikki-dictionary-preview`
-- Latest commit: `959fd38 Add Kaikki dictionary builder` (#20 changes not committed yet)
-- Files changed: shard packager/client/tests, Kaikki package wrapper/test, web zstd fallback, `.gitignore`, progress file
-- Tests added: isolated end-to-end preview package; production-root rejection; shard exact/alias detail; old shard compatibility
-- Tests run: builder suite; `test_package_dictionary_shards`; `test_package_kaikki_dictionary`; `test-full-dictionary.mjs`
-- Result: PASS; issues #17, #18, #24, #25, #19, #23, and #20 complete in focused tests
-- Remaining work: #21 UI, #26 audit, #22 docs; full regression/browser validation; commits/push
-- Exact resume step: add safe structured-detail parsing/rendering and SQLite/full-shard result plumbing tests for #21
+- Latest commit: `2784742 Render structured Kaikki dictionary results` (audit/docs checkpoint not committed yet)
+- Files changed: audit script/tests, Kaikki design/source docs, generated symbol map, progress file
+- Tests added: builder/overlay/Chinese/STEM/detail/inflection; isolated packaging/shard compatibility; structured UI/XSS/layout smoke; audit health/coverage/failure/report tests
+- Tests run: all three required targeted Python modules; full `scripts/tests` discovery (35 tests); npm test/build; shell asset validation; full-dictionary Node tests; code-map generate/check; production asset diff
+- Result: PASS for every runnable test. Browser suite NOT RUN because Python Playwright is absent and system Python has no pip. Full 1.47M-line build/audit NOT RUN because the Kaikki source, current slim DB, and current full shards are absent in this checkout.
+- Remaining work: external validation only—run full build/audit with local source/overlays and browser suite in a Playwright-capable environment; review results before promotion/issue closure
+- Exact resume step: provide/export `KAIIKI_SOURCE`, current `data/dictionary.sqlite`, and current `dictionary-full`; run documented full build/package/audit, then `npm run test:browser:ci` where Playwright is installed
