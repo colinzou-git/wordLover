@@ -65,6 +65,12 @@ Build reports separate selected-source counters from available-source counters:
 `available_rows_with_*` says that source had Chinese available before priority
 selection. Legacy `rows_with_*` counters remain aliases for selected rows.
 
+Chinese detection accepts Han-script translations identified by common Kaikki
+codes (`zh`, `cmn`, `yue`, `wuu`, `nan`, `hak`, `lzh`, `cdo`, `gan`, `hsn`,
+and their documented variants) or language labels including Hokkien, Wu, Gan,
+and Xiang. A Chinese-family label alone is insufficient: romanization-only
+text is rejected, as are Japanese-labeled Han translations.
+
 Word-level WordFan fallback remains in legacy `translation` for Chinese search
 and FTS, and in `detail.translationFallback` with provenance. It is not copied
 onto every Kaikki sense. Curated STEM translation deterministically wins for a
@@ -74,7 +80,9 @@ Unmatched Kaikki entry-level Chinese follows the same general-fallback rule:
 it remains in `dictionary_entries.translation` and
 `detail.translationFallback` with `zhSource=kaikki-entry`. Only sense-level or
 strongly sense-matched entry translations appear inside
-`detail.displayMeanings[]`.
+`detail.displayMeanings[]`. Their provenance remains `kaikki-entry`; only
+Chinese attached directly to a Kaikki sense uses `kaikki-sense`. The selected
+source counters follow the same distinction.
 
 ## STEM and inflection preservation
 
@@ -161,7 +169,11 @@ the existing legacy renderer.
 
 The wrapper can write only
 `apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production
-root assets.
+root assets. It snapshots each protected production file plus every file under
+`dictionary-full/` before and after packaging using relative paths, sizes, and
+SHA-256 checksums. The summary's `productionPathsChanged` value is therefore a
+verified comparison, and any change fails the packaging command after writing
+the diagnostic summary.
 If you deliberately build a fixture without the full WordFan overlay, add
 `--allow-missing-full-overlay`; do not use that flag for the real promotion
 candidate.
@@ -202,6 +214,12 @@ sqlite3 data/dictionary-kaikki.sqlite \
 python scripts/generate_code_map.py --check
 npm --prefix apps/wordlover-pwa run validate:shell-assets
 ```
+
+When `--current-full-shards` is supplied, the audit verifies manifest format,
+shard count and ordering, safe listed paths, file sizes and SHA-256 checksums,
+payload version and maps, per-shard entry/alias counts, and manifest-wide row,
+alias, and compressed-byte totals. Any stale, corrupt, or mismatched package is
+a failing audit result.
 
 Browser/manual checks: `charge` renders both layers; `running` and `ran` resolve
 through `run`; an exact `excited` adjective wins. Full local builds are manual

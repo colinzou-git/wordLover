@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import sqlite3
 import sys
@@ -179,21 +180,70 @@ def audit_overlay_preservation(conn: sqlite3.Connection, source: Path | None) ->
 def audit_shards(path: Path | None) -> dict:
     if path is None or not path.exists():
         return {"status": "skipped", "reason": "current full shard comparison source not provided or missing"}
+    result = {
+        "status": "failed", "shards_checked": 0, "entries_counted": 0,
+        "aliases_counted": 0, "bytes_counted": 0,
+    }
+
+    def fail(reason: str) -> dict:
+        result["reason"] = reason
+        return result
+
     manifest_path = path / "manifest.json"
     if not manifest_path.is_file():
-        return {"status": "failed", "reason": "manifest.json missing"}
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    checked = 0
-    for shard in manifest.get("shards") or []:
-        shard_path = path / shard["path"]
-        if not shard_path.is_file():
-            return {"status": "failed", "reason": f"missing {shard['path']}"}
-        with gzip.open(shard_path, "rt", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        if not isinstance(payload.get("e"), dict) or not isinstance(payload.get("a"), dict):
-            return {"status": "failed", "reason": f"invalid payload {shard['path']}"}
-        checked += 1
-    return {"status": "checked", "shards_checked": checked, "format_version": manifest.get("formatVersion")}
+        return fail("manifest.json missing")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        shards = manifest.get("shards")
+        shard_count = manifest.get("shardCount")
+        if manifest.get("formatVersion") != 1:
+            return fail("unsupported manifest formatVersion")
+        if not isinstance(shards, list) or not isinstance(shard_count, int) or shard_count < 1:
+            return fail("invalid manifest shards or shardCount")
+        if len(shards) != shard_count:
+            return fail(f"shardCount mismatch: manifest={shard_count}, listed={len(shards)}")
+        for index, shard in enumerate(shards):
+            if not isinstance(shard, dict):
+                return fail(f"invalid shard record at index {index}")
+            relative = shard.get("path")
+            expected_id = format(index, f"0{max(2, len(f'{shard_count - 1:x}'))}x")
+            if (not isinstance(relative, str) or not relative
+                    or Path(relative).name != relative or Path(relative).is_absolute()):
+                return fail(f"invalid shard path at index {index}: {relative!r}")
+            if shard.get("id") != expected_id or relative != f"shard-{expected_id}.json.gz":
+                return fail(f"invalid shard ordering/path at index {index}: {relative}")
+            shard_path = path / relative
+            if not shard_path.is_file():
+                return fail(f"missing {relative}")
+            actual_bytes = shard_path.stat().st_size
+            if not isinstance(shard.get("bytes"), int) or actual_bytes != shard["bytes"]:
+                return fail(f"size mismatch for {relative}")
+            checksum = hashlib.sha256(shard_path.read_bytes()).hexdigest()
+            if checksum != shard.get("sha256"):
+                return fail(f"checksum mismatch for {relative}")
+            with gzip.open(shard_path, "rt", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if (payload.get("v") != 1 or not isinstance(payload.get("e"), dict)
+                    or not isinstance(payload.get("a"), dict)):
+                return fail(f"invalid payload {relative}")
+            entries = len(payload["e"])
+            aliases = len(payload["a"])
+            if entries != shard.get("entries") or aliases != shard.get("aliases"):
+                return fail(f"payload count mismatch for {relative}")
+            result["shards_checked"] += 1
+            result["entries_counted"] += entries
+            result["aliases_counted"] += aliases
+            result["bytes_counted"] += actual_bytes
+        if result["entries_counted"] != manifest.get("rowCount"):
+            return fail("row total mismatch")
+        if result["aliases_counted"] != manifest.get("aliasCount"):
+            return fail("alias total mismatch")
+        if result["bytes_counted"] != manifest.get("totalCompressedBytes"):
+            return fail("total compressed bytes mismatch")
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        return fail(f"invalid shard package: {exc}")
+    result.update({"status": "checked", "reason": None, "format_version": 1})
+    return result
 
 
 def audit_preview_package(path: Path | None) -> dict:

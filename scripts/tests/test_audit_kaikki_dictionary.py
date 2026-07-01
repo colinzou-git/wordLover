@@ -3,10 +3,12 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
-from scripts.audit_kaikki_dictionary import audit_database, main
+from scripts.audit_kaikki_dictionary import audit_database, audit_shards, main
 from scripts.build_kaikki_dictionary import build_database
+from scripts.package_dictionary_shards import package
 
 
 class AuditKaikkiDictionaryTests(unittest.TestCase):
@@ -143,6 +145,52 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
         report, passed = audit_database(self.args(preview_package=preview))
         self.assertFalse(passed)
         self.assertFalse(report["packaging_compatibility"]["core_within_memory_target"])
+
+    def make_shards(self) -> tuple[Path, dict]:
+        output = self.root / "full-shards"
+        manifest = package(Namespace(
+            input=self.database, output_dir=output, version="test", shard_count=2,
+            gzip_level=1, skip_validation=False, sources=["test"],
+        ))
+        return output, manifest
+
+    @staticmethod
+    def write_manifest(output: Path, manifest: dict) -> None:
+        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def test_valid_full_shard_package_passes(self):
+        output, manifest = self.make_shards()
+        result = audit_shards(output)
+        self.assertEqual(result["status"], "checked")
+        self.assertEqual(result["shards_checked"], manifest["shardCount"])
+        self.assertEqual(result["entries_counted"], manifest["rowCount"])
+        self.assertEqual(result["aliases_counted"], manifest["aliasCount"])
+        self.assertEqual(result["bytes_counted"], manifest["totalCompressedBytes"])
+
+    def test_full_shard_integrity_failures(self):
+        mutations = (
+            ("wrong size", lambda m: m["shards"][0].__setitem__("bytes", m["shards"][0]["bytes"] + 1), "size mismatch"),
+            ("wrong checksum", lambda m: m["shards"][0].__setitem__("sha256", "0" * 64), "checksum mismatch"),
+            ("row total", lambda m: m.__setitem__("rowCount", m["rowCount"] + 1), "row total mismatch"),
+            ("alias total", lambda m: m.__setitem__("aliasCount", m["aliasCount"] + 1), "alias total mismatch"),
+            ("byte total", lambda m: m.__setitem__("totalCompressedBytes", m["totalCompressedBytes"] + 1), "total compressed bytes mismatch"),
+            ("invalid path", lambda m: m["shards"][0].__setitem__("path", "../shard-00.json.gz"), "invalid shard path"),
+        )
+        for label, mutate, expected in mutations:
+            with self.subTest(label=label):
+                output, manifest = self.make_shards()
+                mutate(manifest)
+                self.write_manifest(output, manifest)
+                result = audit_shards(output)
+                self.assertEqual(result["status"], "failed")
+                self.assertIn(expected, result["reason"])
+
+    def test_missing_listed_full_shard_fails(self):
+        output, manifest = self.make_shards()
+        (output / manifest["shards"][0]["path"]).unlink()
+        result = audit_shards(output)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("missing", result["reason"])
 
 
 if __name__ == "__main__":

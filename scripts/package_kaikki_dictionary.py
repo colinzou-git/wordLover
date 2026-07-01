@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -16,6 +17,10 @@ DEFAULT_PUBLIC = REPO_ROOT / "apps/wordlover-pwa/public"
 PREVIEW_RELATIVE = Path("kaikki-preview/local")
 KAIKKI_SOURCES = ["Kaikki/Wiktextract", "current WordFan tag/translation overlay", "WordFan K-12/AP STEM"]
 SLIM_DETAIL_POLICY = "none-with-full-shard-enrichment"
+PROTECTED_PRODUCTION_PATHS = (
+    Path("dictionary.sqlite"), Path("dictionary.sqlite.zst"),
+    Path("dictionary-manifest.json"), Path("dictionary-full"),
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -113,7 +118,34 @@ def package_full_shards(args: argparse.Namespace, full_db: Path) -> Path:
     return output
 
 
-def validate_outputs(args: argparse.Namespace) -> dict:
+def _file_fingerprint(path: Path) -> dict:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {"size": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
+def snapshot_production_paths(public_dir: Path) -> dict:
+    snapshot: dict = {}
+    for relative in PROTECTED_PRODUCTION_PATHS:
+        path = public_dir / relative
+        if path.is_file():
+            snapshot[str(relative)] = {"type": "file", **_file_fingerprint(path)}
+        elif path.is_dir():
+            snapshot[str(relative)] = {
+                "type": "directory",
+                "files": {
+                    item.relative_to(path).as_posix(): _file_fingerprint(item)
+                    for item in sorted(path.rglob("*")) if item.is_file()
+                },
+            }
+        else:
+            snapshot[str(relative)] = {"type": "missing"}
+    return snapshot
+
+
+def validate_outputs(args: argparse.Namespace, production_before: dict | None = None) -> dict:
     output = validate_preview_output(preview_output(args.public_dir), args.public_dir)
     run_command([sys.executable, "scripts/validate_dictionary_shards.py", str(output / "dictionary-full")])
     required = [output / "dictionary.sqlite", output / "dictionary.sqlite.zst", output / "dictionary-manifest.json", output / "dictionary-full/manifest.json"]
@@ -127,10 +159,12 @@ def validate_outputs(args: argparse.Namespace) -> dict:
         if args.full_translation_source_shards
         else {"type": "tag-source-shards-default", "path": str(args.tag_source_shards)}
     )
+    production_after = snapshot_production_paths(args.public_dir)
+    changed = production_before is not None and production_before != production_after
     return {
         "output": str(output),
         "files": len(list(output.rglob("*"))),
-        "productionPathsChanged": False,
+        "productionPathsChanged": changed,
         "slimDetailPolicy": SLIM_DETAIL_POLICY,
         "fullTranslationOverlaySource": overlay_source,
     }
@@ -144,13 +178,16 @@ def write_summary(args: argparse.Namespace, summary: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    production_before = snapshot_production_paths(args.public_dir)
     args.work_dir.mkdir(parents=True, exist_ok=True)
     full = build_full_kaikki(args)
     slim = build_slim_kaikki(args, full)
     package_slim_web(args, slim)
     package_full_shards(args, full)
-    summary = validate_outputs(args)
+    summary = validate_outputs(args, production_before)
     write_summary(args, summary)
+    if summary["productionPathsChanged"]:
+        raise RuntimeError("Kaikki preview packaging changed protected production dictionary paths")
     print(json.dumps(summary, indent=2))
     return 0
 

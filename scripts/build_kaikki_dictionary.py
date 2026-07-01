@@ -32,10 +32,11 @@ HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 CHINESE_CODES = {
     "zh", "zho", "chi", "cmn", "cmn-hans", "cmn-hant", "zh-cn", "zh-sg",
     "zh-my", "zh-hans", "zh-hans-cn", "zh-hant", "zh-tw", "zh-hk", "zh-mo",
-    "yue", "wuu", "nan", "hak", "lzh",
+    "yue", "wuu", "nan", "hak", "lzh", "cdo", "gan", "hsn",
 }
 CHINESE_LANG_KEYWORDS = (
-    "chinese", "mandarin", "cantonese", "min nan", "hakka", "wu chinese",
+    "chinese", "mandarin", "cantonese", "min nan", "hakka", "hokkien",
+    "wu", "gan", "xiang",
     "simplified chinese", "traditional chinese", "中文", "汉语", "漢語", "普通话",
     "國語", "国语", "粤语", "粵語",
 )
@@ -549,7 +550,8 @@ def is_chinese_language_label(value: object | None) -> bool:
         return False
     if text in CHINESE_CODES:
         return True
-    return any(keyword in text for keyword in CHINESE_LANG_KEYWORDS)
+    return any(re.search(rf"(?<![a-z]){re.escape(keyword)}(?![a-z])", text)
+               for keyword in CHINESE_LANG_KEYWORDS)
 
 
 def is_chinese_translation_item(candidate: object) -> bool:
@@ -642,7 +644,7 @@ def extract_senses(entry: dict, args: argparse.Namespace | None = None, start_or
             output.append(SenseRecord(
                 clean_text(entry.get("pos")), map_pos(entry.get("pos")), text,
                 compact_english_definition(text), direct_zh[0] if direct_zh else aligned_zh,
-                "kaikki-sense" if (direct_zh or aligned_zh) else "none",
+                "kaikki-sense" if direct_zh else "kaikki-entry" if aligned_zh else "none",
                 extract_domain(sense, entry),
                 extract_examples(sense, max_examples=args.max_examples_per_sense, max_chars=args.max_example_chars),
                 [str(x) for x in sense.get("tags") or []], [str(x) for x in sense.get("topics") or []],
@@ -880,13 +882,23 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
                        slim_translation: TranslationOverlayRecord | None = None) -> RowData:
     display = build_display_meanings(entries, args)
     detailed = build_detailed_definitions(entries, args)
-    sense_zh = next((item["zh"] for item in display if item.get("zh")), None)
+    sense_zh = next((item["zh"] for item in display
+                     if item.get("zh") and item.get("zhSource") == "kaikki-sense"), None)
+    aligned_entry_zh = next((item["zh"] for item in display
+                             if item.get("zh") and item.get("zhSource") == "kaikki-entry"), None)
     entry_zh_values: list[str] = []
     for entry in entries:
         entry_zh_values.extend(extract_chinese_translations(entry))
     entry_zh = "\n".join(dict.fromkeys(entry_zh_values)) or None
-    translation, zh_source = choose_chinese_translation(sense_zh, entry_zh, full_translation, slim_translation)
-    fallback = (translation, zh_source) if zh_source == "kaikki-entry" or zh_source.startswith("wordfan-") else None
+    translation, zh_source = choose_chinese_translation(
+        sense_zh, aligned_entry_zh or entry_zh, full_translation, slim_translation
+    )
+    fallback = (
+        (translation, zh_source)
+        if zh_source.startswith("wordfan-")
+        or (zh_source == "kaikki-entry" and not aligned_entry_zh)
+        else None
+    )
     if fallback:
         for item in display:
             if not item.get("zh"):
@@ -1057,7 +1069,8 @@ def build_database(args: argparse.Namespace) -> dict:
         )
         for normalized, word, entries_json, exchange in aggregate_cursor:
             entries = json.loads(entries_json)
-            if any(sense.zh for entry_item in entries for sense in extract_senses(entry_item, args)):
+            senses = [sense for entry_item in entries for sense in extract_senses(entry_item, args)]
+            if any(sense.zh and sense.zh_source == "kaikki-sense" for sense in senses):
                 report["available_rows_with_kaikki_sense_chinese"] += 1
             if any(extract_chinese_translations(entry_item) for entry_item in entries):
                 report["available_rows_with_kaikki_entry_chinese"] += 1

@@ -248,6 +248,19 @@ class KaikkiBuilderTests(unittest.TestCase):
         self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
         self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "费用")
 
+    def test_chinese_family_variants_require_han_text(self):
+        for code in ("cdo", "gan", "hsn"):
+            self.assertTrue(is_chinese_translation_item({"lang_code": code, "word": "費用"}), code)
+        for language in ("Hokkien", "Wu", "Gan", "Xiang"):
+            self.assertTrue(is_chinese_translation_item({"lang": language, "word": "費用"}), language)
+        self.assertFalse(is_chinese_translation_item({"lang": "Hokkien", "word": "hui-iong"}))
+        self.assertFalse(is_chinese_translation_item({"lang": "Mandarin", "word": "fèiyòng"}))
+        self.assertFalse(is_chinese_translation_item({"lang": "Japanese", "word": "料金"}))
+
+        report = self.build([entry("fee", translations=[{"lang_code": "cdo", "word": "費用"}])])
+        self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "費用")
+        self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
+
     def test_unaligned_entry_chinese_is_general_fallback(self):
         value = {
             "word": "charge", "lang_code": "en", "pos": "noun",
@@ -280,8 +293,13 @@ class KaikkiBuilderTests(unittest.TestCase):
         self.build([value])
         detail = json.loads(self.query("SELECT detail FROM dictionary_entries")[0][0])
         self.assertEqual(detail["displayMeanings"][0]["zh"], "费用")
-        self.assertEqual(detail["displayMeanings"][0]["zhSource"], "kaikki-sense")
+        self.assertEqual(detail["displayMeanings"][0]["zhSource"], "kaikki-entry")
         self.assertNotIn("translationFallback", detail)
+        self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "费用")
+
+        report = json.loads(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
+        self.assertEqual(report["selected_rows_with_kaikki_sense_chinese"], 0)
 
     def test_missing_full_overlay_requires_explicit_allowance(self):
         self.write_jsonl([entry("apple")])
@@ -364,7 +382,7 @@ class KaikkiBuilderTests(unittest.TestCase):
         report = self.build([charge, run, ran])
         rows = {row[0]: row for row in self.query("SELECT normalized_word,translation,detail,exchange FROM dictionary_entries")}
         self.assertEqual(rows["charge"][1], "费用, 收费")
-        self.assertEqual(json.loads(rows["charge"][2])["displayMeanings"][0]["zhSource"], "kaikki-sense")
+        self.assertEqual(json.loads(rows["charge"][2])["displayMeanings"][0]["zhSource"], "kaikki-entry")
         self.assertIn("p:ran", rows["run"][3])
         self.assertNotIn("ran", rows)
         self.assertEqual(report["form_of_aliases_attached"], 1)
