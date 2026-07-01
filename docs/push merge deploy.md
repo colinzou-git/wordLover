@@ -87,3 +87,11 @@ gh api repos/colinzou-git/wordLover/pages/builds --jq ".[0] | {status: .status, 
 
 GitHub repo → Settings → Pages → Source = **Deploy from a branch**, branch =
 `gh-pages` / `(root)`, custom domain = `wordfan.app`, **Enforce HTTPS** on.
+
+## Kaikki preview deployment
+
+Kaikki work remains on `feature/kaikki-dictionary-preview`. Its manual
+`.github/workflows/kaikki-preview.yml` workflow uploads an artifact and never
+writes to `gh-pages`; production deployment and root dictionary URLs remain
+unchanged. See `docs/kaikki-dictionary-design.md` for local and Actions preview
+instructions and the post-audit promotion gate.

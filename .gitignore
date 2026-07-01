@@ -22,3 +22,4 @@ __pycache__/
 
 # Generated locally/CI, deployed separately, and never committed to the source branch.
 apps/wordlover-pwa/public/dictionary-full/
+apps/wordlover-pwa/public/kaikki-preview/

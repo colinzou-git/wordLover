@@ -2,7 +2,9 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260624-4";
+} from "./fsrs-scheduler.js?v=20260701-1";
+
+import { resolveDictionaryConfig } from "./dictionary-config.js?v=20260701-1";
 
 import {
   isEncryptedRecord,
@@ -11,12 +13,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260624-4";
+} from "./persistence.js?v=20260701-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260624-4";
+} from "./spelling.js?v=20260701-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260624-4";
+} from "./ui-preferences.js?v=20260701-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260624-4";
+} from "./review-state.js?v=20260701-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +61,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260624-4";
+} from "./study-one-more.js?v=20260701-1";
 
 import {
   studyEventTrack,
@@ -71,11 +73,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260624-4";
+} from "./sync.js?v=20260701-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260624-4";
+} from "./goal-forecast.js?v=20260701-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -87,11 +89,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260624-4";
+} from "./tracks.js?v=20260701-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260624-4";
+} from "./full-dictionary.js?v=20260701-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -236,7 +238,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260624-4-v139";
+const APP_VERSION = "0.6.2-product.20260701-1-v140";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -244,13 +246,14 @@ const APP_VERSION = "0.6.2-product.20260624-4-v139";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v139";
+const SHELL_CACHE_VERSION = "wordlover-shell-v140";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
+const dictionaryConfig = resolveDictionaryConfig(window.location.search, CONFIG);
 const fullDictionary = createFullDictionaryClient({
-  baseUrl: "/dictionary-full",
+  baseUrl: dictionaryConfig.fullDictionaryBaseUrl,
   onStateChange: (state) => renderFullDictionarySettings(state),
 });
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
@@ -260,7 +263,7 @@ const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
 const REVIEW_REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000;
 const DICTIONARY_ESTIMATED_BYTES = 40 * 1024 * 1024;
-const DICTIONARY_MANIFEST_URL = "/dictionary-manifest.json";
+const DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
 const DICTIONARY_VERSION_KEY = "dictionaryDataVersion";
 const MAX_CHECKPOINTS = 5;
 const MAX_USER_DATA_IMPORT_BYTES = 25 * 1024 * 1024;

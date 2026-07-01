@@ -28,11 +28,34 @@ const {
 const {
   validateBackup,
 } = await import("../public/tracks.js");
+const {
+  resolveDictionaryConfig,
+} = await import("../public/dictionary-config.js");
 
 const tests = [];
 function test(name, fn) {
   tests.push({ name, fn });
 }
+
+test("Dictionary configuration keeps production URLs by default", () => {
+  const config = resolveDictionaryConfig("?fresh=test");
+  assert.equal(config.dictionaryManifestUrl, "/dictionary-manifest.json");
+  assert.equal(config.fullDictionaryBaseUrl, "/dictionary-full");
+  assert.equal(config.mode, "production");
+});
+
+test("Kaikki preview configuration uses only isolated URLs", () => {
+  const config = resolveDictionaryConfig("?dictionary=kaikki-preview");
+  assert.equal(
+    config.dictionaryManifestUrl,
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-manifest.json",
+  );
+  assert.equal(
+    config.fullDictionaryBaseUrl,
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-full",
+  );
+  assert.equal(config.mode, "kaikki-preview");
+});
 
 test("Goals preserve an explicit zero-new-word target", () => {
   const normalized = normalizeForecastInput({ dailyNewWords: 0 });
