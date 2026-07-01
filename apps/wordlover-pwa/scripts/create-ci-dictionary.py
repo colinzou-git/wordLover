@@ -57,6 +57,28 @@ COLUMNS = [
 
 FIXTURE_ROWS = [
     {
+        "word": "structuredword",
+        "phonetic": "/ˈstrʌktʃərd/",
+        "definition": "n. a structured dictionary fixture",
+        "translation": "结构化词条",
+        "pos": "n",
+        "bnc": 1,
+        "frq": 1,
+        "detail": json.dumps({
+            "displayMeanings": [{
+                "rank": 1, "pos": "n.", "zh": "结构化词条", "zhSource": "kaikki-sense",
+                "en": "a structured dictionary fixture", "domain": "Computing", "source": "Kaikki/Wiktextract",
+            }],
+            "detailedDefinitions": [{
+                "pos": "Noun", "senses": [{
+                    "definition": "an entry used to verify structured rendering",
+                    "domain": None, "examples": ["This structured example wraps safely."],
+                    "source": "Kaikki/Wiktextract",
+                }],
+            }],
+        }, ensure_ascii=False, separators=(",", ":")),
+    },
+    {
         "word": "abandon",
         "phonetic": "/əˈbændən/",
         "definition": "to leave a place, thing, or person permanently",

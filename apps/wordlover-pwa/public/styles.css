@@ -2666,3 +2666,54 @@ li button {
 .full-dictionary-progress[hidden] {
   display: none;
 }
+.structured-dictionary-result {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.structured-meanings,
+.detailed-definitions {
+  min-width: 0;
+}
+
+.structured-meaning-line {
+  overflow-wrap: anywhere;
+  margin: 0 0 8px;
+}
+
+.structured-pos {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.structured-bar,
+.structured-domain {
+  color: var(--muted);
+}
+
+.structured-translation-fallback {
+  background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
+  border-left: 3px solid var(--primary);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+.detailed-definitions h4 {
+  color: var(--text);
+  margin: 14px 0 8px;
+}
+
+.detailed-definitions ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.detailed-definitions blockquote {
+  border-left: 2px solid var(--card-line);
+  color: var(--muted);
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+  padding-left: 10px;
+}

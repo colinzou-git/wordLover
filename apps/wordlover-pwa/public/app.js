@@ -2,9 +2,9 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260701-1";
+} from "./fsrs-scheduler.js?v=20260701-2";
 
-import { resolveDictionaryConfig } from "./dictionary-config.js?v=20260701-1";
+import { resolveDictionaryConfig } from "./dictionary-config.js?v=20260701-2";
 
 import {
   isEncryptedRecord,
@@ -13,12 +13,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260701-1";
+} from "./persistence.js?v=20260701-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260701-1";
+} from "./spelling.js?v=20260701-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -33,14 +33,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260701-1";
+} from "./ui-preferences.js?v=20260701-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260701-1";
+} from "./review-state.js?v=20260701-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -61,7 +61,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260701-1";
+} from "./study-one-more.js?v=20260701-2";
 
 import {
   studyEventTrack,
@@ -73,11 +73,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260701-1";
+} from "./sync.js?v=20260701-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260701-1";
+} from "./goal-forecast.js?v=20260701-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -89,11 +89,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260701-1";
+} from "./tracks.js?v=20260701-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260701-1";
+} from "./full-dictionary.js?v=20260701-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -238,7 +238,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260701-1-v140";
+const APP_VERSION = "0.6.2-product.20260701-2-v141";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -246,7 +246,7 @@ const APP_VERSION = "0.6.2-product.20260701-1-v140";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v140";
+const SHELL_CACHE_VERSION = "wordlover-shell-v141";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
@@ -1536,6 +1536,61 @@ function hideRecentSearchPopover() {
   recentSearchPopover.hidden = true;
 }
 
+function parseDictionaryDetail(value) {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasStructuredDictionaryDetail(detail) {
+  return Boolean(detail) && (
+    Array.isArray(detail.displayMeanings) && detail.displayMeanings.length > 0
+    || Array.isArray(detail.detailedDefinitions) && detail.detailedDefinitions.length > 0
+    || Boolean(detail.translationFallback?.zh)
+  );
+}
+
+function formatDomainSuffix(domain) {
+  const value = String(domain ?? "").trim();
+  return value ? ` (${value})` : "";
+}
+
+function renderStructuredDisplayMeanings(meanings) {
+  if (!Array.isArray(meanings) || !meanings.length) return "";
+  return `<div class="structured-meanings">${meanings.map((meaning) => {
+    const pos = meaning?.pos ? `<span class="structured-pos">${escapeHtml(meaning.pos)}</span> ` : "";
+    const zh = meaning?.zh ? `${escapeHtml(meaning.zh)} <span class="structured-bar">|</span> ` : "";
+    const english = escapeHtml(meaning?.en ?? "");
+    const domain = meaning?.domain ? `<span class="structured-domain">${escapeHtml(formatDomainSuffix(meaning.domain))}</span>` : "";
+    return `<p class="structured-meaning-line">${pos}${zh}${english}${domain}</p>`;
+  }).join("")}</div>`;
+}
+
+function renderStructuredDetailedDefinitions(groups) {
+  if (!Array.isArray(groups) || !groups.length) return "";
+  return `<div class="detailed-definitions">${groups.map((group) => {
+    const senses = Array.isArray(group?.senses) ? group.senses : [];
+    if (!senses.length) return "";
+    return `<section><h4>${escapeHtml(group?.pos ?? "Definitions")}:</h4><ol>${senses.map((sense) => {
+      const examples = Array.isArray(sense?.examples) ? sense.examples : [];
+      return `<li><p>${escapeHtml(sense?.definition ?? "")}${escapeHtml(formatDomainSuffix(sense?.domain))}</p>${examples.map((example) => `<blockquote>${escapeHtml(example)}</blockquote>`).join("")}</li>`;
+    }).join("")}</ol></section>`;
+  }).join("")}</div>`;
+}
+
+function renderStructuredDictionaryResult(data, detail) {
+  const fallback = detail?.translationFallback?.zh
+    ? `<p class="structured-translation-fallback"><strong>Chinese meanings:</strong> ${escapeHtml(detail.translationFallback.zh)}</p>`
+    : "";
+  return `<div class="structured-dictionary-result">${fallback}${renderStructuredDisplayMeanings(detail?.displayMeanings)}${renderStructuredDetailedDefinitions(detail?.detailedDefinitions)}</div>`;
+}
+
 function renderResult(data) {
   if (data.status === "invalid_input") {
     currentResult = null;
@@ -1575,6 +1630,10 @@ function renderResult(data) {
   const isActiveSaved = Boolean(vocabularyItem && !vocabularyItem.archivedAt);
   const spellingItem = getSpellingItem(data.term);
   const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
+  const structuredDetail = parseDictionaryDetail(data.detail);
+  const structuredHtml = hasStructuredDictionaryDetail(structuredDetail)
+    ? renderStructuredDictionaryResult(data, structuredDetail)
+    : "";
   result.innerHTML = `
     <div class="result-head">
       <div class="result-title-row">
@@ -1587,7 +1646,7 @@ function renderResult(data) {
       ${data.dictionaryCoverage === "full" ? `<p class="small muted">Full 770,770-entry dictionary</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
-    <div class="meaning-grid">
+    ${structuredHtml || `<div class="meaning-grid">
       <section>
         <h3>English <em>${escapeHtml(data.englishMeaningSource ?? "")}</em></h3>
         ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No English definition.</p>'}
@@ -1596,7 +1655,7 @@ function renderResult(data) {
         <h3>Chinese</h3>
         ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
       </section>
-    </div>
+    </div>`}
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button">${isActiveSaved ? "Practice in Memorize list" : "Add to Memorize list"}</button>
@@ -1874,7 +1933,7 @@ function lookupTerm(input) {
 
   const start = performance.now();
   const statement = dictionaryDb.prepare(`
-    SELECT word, phonetic, definition, definition_source, translation, tag
+    SELECT word, phonetic, definition, definition_source, translation, tag, detail
     FROM dictionary_entries
     WHERE normalized_word = :term
     ORDER BY
@@ -1903,6 +1962,7 @@ function lookupTerm(input) {
       englishMeaningSource: row.definition_source ?? "unknown",
       chineseMeanings: topLines(row.translation),
       tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
+      detail: row.detail,
       queryMs: performance.now() - start,
     };
   } finally {
@@ -1948,7 +2008,7 @@ function exchangeCodeLabel(code) {
 
 function lookupInflectedTerm(input, normalized, start) {
   const statement = dictionaryDb.prepare(`
-    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, exchange
+    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, exchange, detail
     FROM dictionary_entries
     WHERE exchange LIKE :needle
     ORDER BY
@@ -1977,6 +2037,7 @@ function lookupInflectedTerm(input, normalized, start) {
         englishMeaningSource: row.definition_source ?? "unknown",
         chineseMeanings: topLines(row.translation),
         tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
+        detail: row.detail,
         queryMs: performance.now() - start,
         baseTerm,
         baseNormalizedTerm: row.normalized_word,
@@ -9515,6 +9576,14 @@ for (const tab of goalsPeriodTabs) {
 }
 
 window.WordLoverApp = {
+  dictionaryRendering: {
+    parseDetail: parseDictionaryDetail,
+    hasStructuredDetail: hasStructuredDictionaryDetail,
+    formatDomainSuffix,
+    renderDisplayMeanings: renderStructuredDisplayMeanings,
+    renderDetailedDefinitions: renderStructuredDetailedDefinitions,
+    renderStructuredResult: renderStructuredDictionaryResult,
+  },
   ensureDictionaryLoaded,
   // Offline-readiness probe for tests: asks the active worker which required shell
   // assets are cached. Resolves null when no worker controls the page.
