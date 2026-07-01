@@ -2,6 +2,10 @@ data/*.sqlite
 data/*.sqlite-*
 data/*.db
 data/dictionary-report.json
+data/dictionary-kaikki*.sqlite
+data/kaikki-dictionary-report.json
+data/kaikki-dictionary-audit.json
+data/kaikki-build/
 data/wordnet-augmentation-report.json
 data/opted-augmentation-report.json
 #data/sources/
@@ -23,3 +27,5 @@ __pycache__/
 # Generated locally/CI, deployed separately, and never committed to the source branch.
 apps/wordlover-pwa/public/dictionary-full/
 apps/wordlover-pwa/public/kaikki-preview/
+apps/wordlover-pwa/public/kaikki/
+apps/wordlover-pwa/public/dictionary-kaikki/

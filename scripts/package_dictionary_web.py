@@ -8,6 +8,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -45,10 +46,14 @@ def compress_zstd(source: Path, target: Path, level: int) -> int:
     try:
         import zstandard as zstd
     except ImportError as exc:
-        raise SystemExit(
-            "Python module 'zstandard' is required for .zst packaging. "
-            "Install it with: python -m pip install zstandard"
-        ) from exc
+        executable = shutil.which("zstd")
+        if not executable:
+            raise SystemExit(
+                "Python module 'zstandard' or the zstd CLI is required for .zst packaging. "
+                "Install with: python -m pip install zstandard"
+            ) from exc
+        subprocess.run([executable, f"-{level}", "-q", "-f", str(source), "-o", str(target)], check=True)
+        return target.stat().st_size
 
     compressor = zstd.ZstdCompressor(level=level, threads=-1)
     with source.open("rb") as src, target.open("wb") as dst:

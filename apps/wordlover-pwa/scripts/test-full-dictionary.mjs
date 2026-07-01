@@ -6,6 +6,8 @@ import { gzipSync } from "node:zlib";
 import {
   createFullDictionaryClient,
   fnv1a32,
+  fullDictionaryAliasToResult,
+  fullDictionaryEntryToResult,
   fullDictionaryShardIndex,
   validateFullDictionaryManifest,
 } from "../public/full-dictionary.js";
@@ -60,6 +62,10 @@ const payload = {
     fullsizeonlywords: ["/fʊl/", "a term present only in the full dictionary fixture", "CI full fixture", "仅存在于完整词典中的词", "rare", "fullsizeonlyword", "plural", "fullsizeonlyword"],
   },
 };
+const detail = JSON.stringify({ displayMeanings: [{ rank: 1, pos: "n.", en: "structured" }] });
+assert.equal(fullDictionaryEntryToResult("word", ["word", null, "old", "source", null, null]).detail, undefined);
+assert.equal(fullDictionaryEntryToResult("word", ["word", null, "new", "source", null, null, detail]).detail, detail);
+assert.equal(fullDictionaryAliasToResult("words", [null, "new", "source", null, null, "word", "plural", "word", detail]).detail, detail);
 const compressed = gzipPayload(payload);
 const manifest = {
   app: "wordlover",

@@ -22,7 +22,7 @@ DEFAULT_SHARD_COUNT = 128
 DEFAULT_VERSION = f"{time.strftime('%Y.%m.%d')}.full-shards"
 APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 
-ENTRY_FIELDS = ["word", "phonetic", "definition", "definitionSource", "translation", "tag"]
+ENTRY_FIELDS = ["word", "phonetic", "definition", "definitionSource", "translation", "tag", "detail"]
 ALIAS_FIELDS = [
     "phonetic",
     "definition",
@@ -32,6 +32,7 @@ ALIAS_FIELDS = [
     "baseWord",
     "inflectionLabel",
     "baseNormalizedWord",
+    "detail",
 ]
 
 
@@ -156,13 +157,15 @@ def package(args: argparse.Namespace) -> dict:
             for writer in writers:
                 writer.write('{"v":1,"e":{')
 
-            entry_sql = """
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(dictionary_entries)")}
+            detail_select = "detail" if "detail" in columns else "NULL AS detail"
+            entry_sql = f"""
                 SELECT normalized_word, word, phonetic, definition,
-                       definition_source, translation, tag
+                       definition_source, translation, tag, {detail_select}
                 FROM dictionary_entries
                 ORDER BY id
             """
-            for normalized, word, phonetic, definition, definition_source, translation, tag in conn.execute(entry_sql):
+            for normalized, word, phonetic, definition, definition_source, translation, tag, detail in conn.execute(entry_sql):
                 index = shard_index(normalized, args.shard_count)
                 if not entry_first[index]:
                     writers[index].write(",")
@@ -176,6 +179,7 @@ def package(args: argparse.Namespace) -> dict:
                     definition_source,
                     translation,
                     tag,
+                    detail,
                 ]))
                 entry_counts[index] += 1
 
@@ -183,14 +187,14 @@ def package(args: argparse.Namespace) -> dict:
                 writer.write('},"a":{')
 
             alias_seen: set[str] = set()
-            alias_sql = """
+            alias_sql = f"""
                 SELECT normalized_word, word, phonetic, definition,
-                       definition_source, translation, tag, exchange
+                       definition_source, translation, tag, exchange, {detail_select}
                 FROM dictionary_entries
                 WHERE exchange IS NOT NULL AND trim(exchange) <> ''
                 ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, length(word), word
             """
-            for base_normalized, base_word, phonetic, definition, definition_source, translation, tag, exchange in conn.execute(alias_sql):
+            for base_normalized, base_word, phonetic, definition, definition_source, translation, tag, exchange, detail in conn.execute(alias_sql):
                 for alias, label in parse_exchange_forms(exchange):
                     if alias in existing or alias in alias_seen:
                         continue
@@ -210,6 +214,7 @@ def package(args: argparse.Namespace) -> dict:
                         base_word,
                         label,
                         base_normalized,
+                        detail,
                     ]))
                     alias_counts[index] += 1
     finally:
@@ -242,7 +247,7 @@ def package(args: argparse.Namespace) -> dict:
         "entryFields": ENTRY_FIELDS,
         "aliasFields": ALIAS_FIELDS,
         "totalCompressedBytes": sum(item["bytes"] for item in shards),
-        "sources": ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913", "WordFan K-12/AP STEM"],
+        "sources": getattr(args, "sources", None) or ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913", "WordFan K-12/AP STEM"],
         "shards": shards,
         "elapsedSeconds": round(time.time() - started, 3),
     }

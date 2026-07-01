@@ -191,7 +191,7 @@ export async function decodeFullDictionaryShard(bytes, DecompressionStreamCtor =
 }
 
 export function fullDictionaryEntryToResult(input, row, queryMs = 0) {
-  const [word, phonetic, definition, definitionSource, translation, tag] = row;
+  const [word, phonetic, definition, definitionSource, translation, tag, detail] = row;
   return {
     status: "found",
     term: word ?? String(input ?? "").trim(),
@@ -201,6 +201,7 @@ export function fullDictionaryEntryToResult(input, row, queryMs = 0) {
     englishMeaningSource: definitionSource ?? "ECDICT",
     chineseMeanings: topLines(translation),
     tags: tagsFrom(tag),
+    detail,
     queryMs,
     source: "full-dictionary-shard",
     dictionaryCoverage: "full",
@@ -208,7 +209,7 @@ export function fullDictionaryEntryToResult(input, row, queryMs = 0) {
 }
 
 export function fullDictionaryAliasToResult(input, row, queryMs = 0) {
-  const [phonetic, definition, definitionSource, translation, tag, baseWord, inflectionLabel, baseNormalizedWord] = row;
+  const [phonetic, definition, definitionSource, translation, tag, baseWord, inflectionLabel, baseNormalizedWord, detail] = row;
   const term = String(input ?? "").trim();
   return {
     status: "found",
@@ -219,6 +220,7 @@ export function fullDictionaryAliasToResult(input, row, queryMs = 0) {
     englishMeaningSource: definitionSource ?? "ECDICT",
     chineseMeanings: topLines(translation),
     tags: tagsFrom(tag),
+    detail,
     queryMs,
     baseTerm: baseWord,
     baseNormalizedTerm: baseNormalizedWord,

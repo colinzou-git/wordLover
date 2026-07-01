@@ -1,11 +1,11 @@
 # Kaikki Dictionary Progress
 
-- Current issue: #20 — Package Kaikki safely
+- Current issue: #21 — UI rendering
 - Current branch: `feature/kaikki-dictionary-preview`
-- Latest commit: `b0e7934 Add Kaikki dictionary preview pipeline` (builder changes not committed yet)
-- Files changed: `.codex/KAIIKI_DICTIONARY_PROGRESS.md`, `scripts/build_kaikki_dictionary.py`, `scripts/tests/test_build_kaikki_dictionary.py`
-- Tests added: builder streaming/schema/atomicity; overlay merge; Chinese priority/FTS; structured detail; inflections; STEM overlay/supplement/slimming
-- Tests run: `python3 -m unittest scripts.tests.test_build_kaikki_dictionary`
-- Result: PASS (10 tests); issues #17, #18, #24, #25, #19, and #23 implementation complete in focused tests
-- Remaining work: implement #20 packaging, #21 UI, #26 audit, #22 docs; full regression/browser validation; commits/push
-- Exact resume step: extend shard payloads with optional detail and add isolated Kaikki packaging wrapper/tests for #20
+- Latest commit: `959fd38 Add Kaikki dictionary builder` (#20 changes not committed yet)
+- Files changed: shard packager/client/tests, Kaikki package wrapper/test, web zstd fallback, `.gitignore`, progress file
+- Tests added: isolated end-to-end preview package; production-root rejection; shard exact/alias detail; old shard compatibility
+- Tests run: builder suite; `test_package_dictionary_shards`; `test_package_kaikki_dictionary`; `test-full-dictionary.mjs`
+- Result: PASS; issues #17, #18, #24, #25, #19, #23, and #20 complete in focused tests
+- Remaining work: #21 UI, #26 audit, #22 docs; full regression/browser validation; commits/push
+- Exact resume step: add safe structured-detail parsing/rendering and SQLite/full-shard result plumbing tests for #21

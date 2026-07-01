@@ -23,7 +23,8 @@ CREATE TABLE dictionary_entries (
     tag TEXT,
     frq INTEGER,
     bnc INTEGER,
-    exchange TEXT
+    exchange TEXT,
+    detail TEXT
 );
 """
 
@@ -36,13 +37,13 @@ class PackageDictionaryShardsTests(unittest.TestCase):
                 """
                 INSERT INTO dictionary_entries(
                     word, normalized_word, phonetic, definition,
-                    definition_source, translation, tag, frq, bnc, exchange
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    definition_source, translation, tag, frq, bnc, exchange, detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    ("abandon", "abandon", "/a/", "leave permanently", "ECDICT", "放弃", "cet4", 100, 100, None),
-                    ("take", "take", "/t/", "carry something", "ECDICT", "拿", "cet4", 10, 10, "p:took/d:taken/i:taking/3:takes"),
-                    ("taken", "taken", "/t/", "past participle entry", "ECDICT", "拿走的", None, 20, 20, None),
+                    ("abandon", "abandon", "/a/", "leave permanently", "ECDICT", "放弃", "cet4", 100, 100, None, None),
+                    ("take", "take", "/t/", "carry something", "ECDICT", "拿", "cet4", 10, 10, "p:took/d:taken/i:taking/3:takes", '{"displayMeanings":[{"en":"carry"}]}'),
+                    ("taken", "taken", "/t/", "past participle entry", "ECDICT", "拿走的", None, 20, 20, None, None),
                 ],
             )
             conn.commit()
@@ -80,6 +81,7 @@ class PackageDictionaryShardsTests(unittest.TestCase):
             self.assertIn("took", payload["a"])
             self.assertEqual(payload["a"]["took"][5], "take")
             self.assertEqual(payload["a"]["took"][6], "past tense")
+            self.assertIn("displayMeanings", payload["a"]["took"][8])
 
             taken_index = shard_index("taken", 4)
             taken_shard = manifest["shards"][taken_index]
@@ -87,6 +89,11 @@ class PackageDictionaryShardsTests(unittest.TestCase):
                 payload = json.load(handle)
             self.assertIn("taken", payload["e"])
             self.assertNotIn("taken", payload["a"])
+
+            take_index = shard_index("take", 4)
+            with gzip.open(output / manifest["shards"][take_index]["path"], "rt", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            self.assertIn("displayMeanings", payload["e"]["take"][6])
 
     def test_shards_are_deterministic_for_same_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
