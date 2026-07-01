@@ -34,6 +34,18 @@ export function resolveDictionaryConfig(search = "", explicitConfig = {}) {
   });
 }
 
+export function dictionaryStorageKeys(mode = "production") {
+  const normalizedMode = String(mode || "production");
+  const prefix = normalizedMode === "production" ? "" : `${normalizedMode}.`;
+  return Object.freeze({
+    dictionaryKey: `${prefix}dictionary.sqlite`,
+    progressKey: `${prefix}dictionary.sqlite.downloadProgress`,
+    chunkPrefix: `${prefix}dictionary.sqlite.chunk.`,
+    versionKey: `${prefix}dictionaryDataVersion`,
+    installedKey: `${prefix}dictionaryInstalled`,
+  });
+}
+
 export function resolveDictionaryAssetUrl(manifestUrl, assetPath = "dictionary.sqlite") {
   const manifest = String(manifestUrl || PRODUCTION_DICTIONARY_CONFIG.dictionaryManifestUrl);
   const asset = String(assetPath || "dictionary.sqlite").replace(/^\/+/, "");

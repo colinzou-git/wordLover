@@ -36,6 +36,10 @@ apps/wordlover-pwa/public/kaikki-preview/local/
 The local package contains a slim SQLite core and complete gzip JSON shards.
 Full-shard exact rows and aliases carry optional trailing structured `detail`;
 old six-field exact and eight-field alias payloads remain supported.
+Full-shard overlays are manifest-driven: the builder reads
+`dictionary-full/manifest.json`, validates the WordFan full-sharded format, and
+loads only the shard files listed there. Stale `shard-*.json.gz` files not in
+the manifest are ignored.
 
 ## Data overlay and Chinese fallback
 
@@ -50,6 +54,16 @@ Chinese priority is:
 3. current full WordFan shard translation;
 4. current slim/core WordFan translation;
 5. empty.
+
+Real builds require the current full WordFan Chinese overlay. Provide either
+`--full-translation-source` or a manifest-backed full-shard directory through
+`--full-translation-source-shards` / `--tag-source-shards`. Use
+`--allow-missing-full-overlay` only for intentional tiny fixtures; the report
+then records `full_translation_overlay_available=false` and the missing reason.
+Build reports separate selected-source counters from available-source counters:
+`selected_rows_with_*` says which source won for the final row, while
+`available_rows_with_*` says that source had Chinese available before priority
+selection. Legacy `rows_with_*` counters remain aliases for selected rows.
 
 Word-level WordFan fallback remains in legacy `translation` for Chinese search
 and FTS, and in `detail.translationFallback` with provenance. It is not copied
@@ -138,6 +152,9 @@ iPhone memory envelope; real iPhone DRAM still requires Instruments validation.
 The wrapper can write only
 `apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production
 root assets.
+If you deliberately build a fixture without the full WordFan overlay, add
+`--allow-missing-full-overlay`; do not use that flag for the real promotion
+candidate.
 
 ## Audit and validation
 
@@ -180,10 +197,16 @@ Open
 without the query continues to use `/dictionary-manifest.json` and
 `/dictionary-full`; the preview uses only
 `/kaikki-preview/feature-kaikki-dictionary-preview/`.
+The app also namespaces installed dictionary storage by dictionary mode:
+production keeps the existing `dictionary.sqlite` / `dictionaryDataVersion`
+keys, while preview modes use `kaikki-preview.*` or `kaikki-preview-local.*`.
+Preview invalidation therefore cannot delete a user's production offline
+dictionary copy.
 
-The **Build Kaikki dictionary preview artifact** workflow is manual-only
-(`workflow_dispatch`) and uploads an artifact. It never writes `gh-pages`.
-Download/extract the artifact, then run
+The **Build Kaikki fixture preview artifact** workflow is manual-only
+(`workflow_dispatch`) and uploads an artifact. It uses the tiny CI fixture to
+validate preview packaging and UI wiring; it is not a full Kaikki validation.
+It never writes `gh-pages`. Download/extract the artifact, then run
 `python -m http.server 4173 --directory public`.
 
 Confirm production remains untouched:

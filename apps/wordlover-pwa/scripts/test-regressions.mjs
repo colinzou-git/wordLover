@@ -29,6 +29,7 @@ const {
   validateBackup,
 } = await import("../public/tracks.js");
 const {
+  dictionaryStorageKeys,
   resolveDictionaryAssetUrl,
   resolveDictionaryConfig,
 } = await import("../public/dictionary-config.js");
@@ -45,6 +46,16 @@ test("Dictionary configuration keeps production URLs by default", () => {
   assert.equal(config.mode, "production");
 });
 
+test("Production dictionary storage keys remain backward compatible", () => {
+  assert.deepEqual(dictionaryStorageKeys("production"), {
+    dictionaryKey: "dictionary.sqlite",
+    progressKey: "dictionary.sqlite.downloadProgress",
+    chunkPrefix: "dictionary.sqlite.chunk.",
+    versionKey: "dictionaryDataVersion",
+    installedKey: "dictionaryInstalled",
+  });
+});
+
 test("Kaikki preview configuration uses only isolated URLs", () => {
   const config = resolveDictionaryConfig("?dictionary=kaikki-preview");
   assert.equal(
@@ -56,6 +67,23 @@ test("Kaikki preview configuration uses only isolated URLs", () => {
     "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-full",
   );
   assert.equal(config.mode, "kaikki-preview");
+});
+
+test("Kaikki preview storage keys are isolated from production", () => {
+  assert.deepEqual(dictionaryStorageKeys("kaikki-preview"), {
+    dictionaryKey: "kaikki-preview.dictionary.sqlite",
+    progressKey: "kaikki-preview.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki-preview.dictionary.sqlite.chunk.",
+    versionKey: "kaikki-preview.dictionaryDataVersion",
+    installedKey: "kaikki-preview.dictionaryInstalled",
+  });
+  assert.deepEqual(dictionaryStorageKeys("kaikki-preview-local"), {
+    dictionaryKey: "kaikki-preview-local.dictionary.sqlite",
+    progressKey: "kaikki-preview-local.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki-preview-local.dictionary.sqlite.chunk.",
+    versionKey: "kaikki-preview-local.dictionaryDataVersion",
+    installedKey: "kaikki-preview-local.dictionaryInstalled",
+  });
 });
 
 test("Local Kaikki preview configuration uses the isolated local package", () => {

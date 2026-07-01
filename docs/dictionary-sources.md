@@ -23,6 +23,11 @@ used for curated learner tags/ranks, broad Chinese fallback, and guaranteed
 K-12/AP STEM coverage. Builder reports and manifests must retain this composite
 provenance.
 
+The GitHub Actions Kaikki preview artifact is a fixture preview generated from
+the CI dictionary, not a redistribution of the full Kaikki source. Full local
+validation requires the downloaded Kaikki JSONL plus the current full WordFan
+SQLite/full-shard overlay so Chinese fallback coverage is measured correctly.
+
 Before public distribution, verify the current attribution and license
 requirements directly against every upstream source. This document intentionally
 does not make additional license claims.

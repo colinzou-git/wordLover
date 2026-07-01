@@ -33,6 +33,7 @@ class AuditKaikkiDictionaryTests(unittest.TestCase):
             data_version="test.kaikki", batch_size=10, skip_fts=False,
             tag_source=self.root / "missing.sqlite", tag_source_shards=self.root / "missing-shards",
             full_translation_source_shards=None, slim_translation_source=None,
+            allow_missing_full_overlay=True,
             max_compact_senses=12, max_detailed_senses_per_pos=20,
             max_examples_per_sense=3, max_example_chars=240,
         ))

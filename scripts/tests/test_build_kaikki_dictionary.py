@@ -14,7 +14,11 @@ from scripts.build_kaikki_dictionary import (
     choose_chinese_translation,
     clean_text,
     contains_tag,
+    extract_chinese_translations,
+    has_han_text,
+    is_chinese_translation_item,
     load_overlay_from_sqlite,
+    load_translation_overlay_from_shards,
     map_kaikki_form_tags_to_exchange_code,
     merge_tag_tokens,
     normalize_word,
@@ -58,6 +62,7 @@ class KaikkiBuilderTests(unittest.TestCase):
             data_version="test.kaikki", batch_size=2, skip_fts=False,
             tag_source=self.root / "missing.sqlite", tag_source_shards=self.root / "missing-shards",
             full_translation_source_shards=None, slim_translation_source=None,
+            allow_missing_full_overlay=True,
             max_compact_senses=12, max_detailed_senses_per_pos=20,
             max_examples_per_sense=3, max_example_chars=240,
         )
@@ -96,6 +101,29 @@ class KaikkiBuilderTests(unittest.TestCase):
                 data["source"] = data["source"] or "WordFan_AP_STEM"
                 conn.execute(f"INSERT INTO dictionary_entries ({','.join(full)}) VALUES ({','.join('?' for _ in full)})", tuple(data[x] for x in full))
         return path
+
+    def make_full_shards(self, entries, *, stale_entries=None, omit_manifest=False, omit_listed_shard=False):
+        shard_dir = self.root / f"shards-{len(list(self.root.glob('shards-*')))}"
+        shard_dir.mkdir()
+        shard_path = shard_dir / "shard-00.json.gz"
+        if not omit_listed_shard:
+            with gzip.open(shard_path, "wt", encoding="utf-8") as handle:
+                json.dump({"v": 1, "e": entries, "a": {}}, handle, ensure_ascii=False)
+        if stale_entries is not None:
+            with gzip.open(shard_dir / "shard-ff.json.gz", "wt", encoding="utf-8") as handle:
+                json.dump({"v": 1, "e": stale_entries, "a": {}}, handle, ensure_ascii=False)
+        if not omit_manifest:
+            (shard_dir / "manifest.json").write_text(json.dumps({
+                "app": "wordlover",
+                "formatVersion": 1,
+                "dictionaryDataVersion": "test.full-shards",
+                "variant": "full-sharded",
+                "shardCount": 1,
+                "hash": "fnv1a32-utf8-mod",
+                "compression": "gzip",
+                "shards": [{"id": "00", "path": "shard-00.json.gz", "bytes": 1, "sha256": "x"}],
+            }), encoding="utf-8")
+        return shard_dir
 
     def test_parse_args_and_normalization_helpers(self):
         args = parse_args(["--source", "x.jsonl", "--skip-fts"])
@@ -193,6 +221,66 @@ class KaikkiBuilderTests(unittest.TestCase):
         self.assertEqual(detail["detailedDefinitions"][0]["pos"], "Noun")
         self.assertEqual(len(detail["detailedDefinitions"][0]["senses"][0]["examples"]), 3)
         self.assertEqual(report["rows_with_kaikki_sense_chinese"], 1)
+        self.assertEqual(report["selected_rows_with_kaikki_sense_chinese"], 1)
+        self.assertEqual(report["available_rows_with_kaikki_sense_chinese"], 1)
+
+    def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
+        self.assertTrue(has_han_text("费用"))
+        self.assertTrue(is_chinese_translation_item({"lang_code": "zh-Hant", "word": "費用"}))
+        self.assertTrue(is_chinese_translation_item({"lang": "Mandarin Chinese", "word": "收费"}))
+        self.assertTrue(is_chinese_translation_item({"language": "Simplified Chinese", "text": "收费"}))
+        self.assertTrue(is_chinese_translation_item({"lang_code": "cmn-Hans", "translation": "收费"}))
+        self.assertFalse(is_chinese_translation_item({"lang_code": "cmn", "word": "shōufèi"}))
+        self.assertFalse(is_chinese_translation_item({"lang_code": "ja", "word": "料金"}))
+        self.assertEqual(
+            extract_chinese_translations({
+                "translations": [
+                    {"lang_code": "zh-Hant", "word": "費用"},
+                    {"lang": "Mandarin Chinese", "word": "收费"},
+                    {"lang_code": "cmn", "word": "shōufèi"},
+                    {"lang_code": "fr", "word": "charge"},
+                ],
+            }),
+            ["費用", "收费"],
+        )
+        report = self.build([entry("fee", translations=[{"lang_code": "zh-Hans", "word": "费用"}])])
+        self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
+        self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "费用")
+
+    def test_missing_full_overlay_requires_explicit_allowance(self):
+        self.write_jsonl([entry("apple")])
+        args = self.args(allow_missing_full_overlay=False, full_translation_source_shards=self.root / "missing-shards")
+        with self.assertRaises(ValueError) as caught:
+            build_database(args)
+        self.assertIn("Full WordFan Chinese overlay is required", str(caught.exception))
+        failed_report = json.loads(self.report.read_text(encoding="utf-8"))
+        self.assertTrue(failed_report["failed"])
+        self.assertIn("not found", failed_report["full_translation_overlay_missing_reason"])
+
+        report = build_database(self.args(allow_missing_full_overlay=True, full_translation_source_shards=self.root / "missing-shards"))
+        self.assertFalse(report["full_translation_overlay_available"])
+        self.assertIn("not found", report["full_translation_overlay_missing_reason"])
+
+    def test_full_shards_are_manifest_driven(self):
+        shards = self.make_full_shards(
+            {"apple": ["apple", None, "fruit", "ECDICT", "苹果", "k12_science"]},
+            stale_entries={"banana": ["banana", None, "fruit", "ECDICT", "香蕉", "stale"]},
+        )
+        overlay = load_translation_overlay_from_shards(shards)
+        self.assertEqual(set(overlay), {"apple"})
+        self.assertEqual(overlay["apple"].translation, "苹果")
+
+        report = self.build([entry("apple")], full_translation_source_shards=shards)
+        self.assertTrue(report["full_translation_overlay_available"])
+        self.assertEqual(report["full_translation_overlay_shard_manifest_version"], "test.full-shards")
+        self.assertEqual(report["selected_rows_with_full_dictionary_chinese_overlay"], 1)
+        self.assertEqual(self.query("SELECT translation FROM dictionary_entries")[0][0], "苹果")
+
+    def test_full_shards_fail_on_missing_manifest_or_listed_file(self):
+        with self.assertRaises(FileNotFoundError):
+            load_translation_overlay_from_shards(self.make_full_shards({}, omit_manifest=True))
+        with self.assertRaises(FileNotFoundError):
+            load_translation_overlay_from_shards(self.make_full_shards({}, omit_listed_shard=True))
 
     def test_word_level_overlay_is_translation_fallback_and_fts_searchable(self):
         overlay = self.make_overlay([{"word": "apple", "translation": "苹果", "tag": "k12_science", "frq": 10}])

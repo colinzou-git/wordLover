@@ -1,11 +1,11 @@
 # Kaikki Dictionary Progress
 
-- Current issue: #22 — complete; promotion remains gated
+- Current issue: #28–#34 — real full package validation running
 - Current branch: `feature/kaikki-dictionary-preview`
-- Latest implementation commit: `98b58e5 Validate full Kaikki preview pipeline`
-- Files changed: real-shape builder/overlay fixes; layered slim core/package/audit; preview asset routing; browser fixture/layout checks; docs/progress/symbol map
-- Tests added: builder/overlay/Chinese/STEM/detail/inflection; isolated packaging/shard compatibility; structured UI/XSS/layout smoke; audit health/coverage/failure/report tests
-- Tests run: required targeted Python modules; full discovery (37 tests); npm test/build (20 regression tests); full-dictionary Node tests; Chromium full browser suite; WebKit smoke; real-package Chromium and WebKit at 390px; code-map check; production asset diff
-- Result: PASS. Full build: 824,747 rows; 549,478 form aliases attached; 46,925 Kaikki Chinese rows; 277,187 final Chinese rows (33.6087%); 947 STEM rows. Package: 55,642-row/39,960,576-byte layered core plus 824,747 exact/510,864 alias full shards. Real audit PASS including 50 MiB core gate. Chromium/WebKit real preview renders layered `charge`; `ran` resolves through `run`; exact `running`/`excited` win; no errors/390px overflow.
-- Remaining work: no implementation work; issues #16, #17, #18, #19, #20, #21, #22, #23, #24, #25, #26, and #27 are closed. Promotion remains prohibited until reviewed and real iPhone DRAM is measured with Safari simulator/Instruments; Android remains deferred.
-- Exact resume step: on Mac, run the isolated preview on iPhone simulator/device and record Instruments DRAM; only then consider a separate audited promotion PR
+- Latest implementation commit: `dbd6de0 Record completed Kaikki validation`
+- Files changed: Kaikki builder hardening; manifest-driven shard overlay reads; explicit missing-full-overlay handling; selected/available report counters; preview dictionary storage namespacing; fixture preview wording; docs/progress/symbol map
+- Tests added: Chinese code/name variant detection; romanization/non-Chinese rejection; manifest-driven shard loading; stale shard ignore; missing manifest/listed shard failure; missing full overlay failure + report; selected/available counters; preview storage key isolation; fixture opt-in coverage
+- Tests run: targeted builder/package tests; package shard tests; audit tests; full Python discovery (41 tests); npm unit/build; shell-asset validation; code-map regenerate/check
+- Result: PASS for current targeted and full local unit/static validation after fixes. `python` is absent on Ubuntu, so npm scripts were run with `/tmp/python -> /usr/bin/python3` in PATH.
+- Remaining work: optionally rerun real full Kaikki build/package/audit with `~/dictBackup/` inputs and browser CI smoke; close/comment #28–#34 after final validation. Promotion remains prohibited until reviewed and real iPhone DRAM is measured with Safari simulator/Instruments; Android remains deferred.
+- Exact resume step: wait for `scripts/package_kaikki_dictionary.py` real build/package with `~/dictBackup` inputs, then run audit and browser/static validation

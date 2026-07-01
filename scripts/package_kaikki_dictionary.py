@@ -24,6 +24,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tag-source-shards", type=Path, default=Path("apps/wordlover-pwa/public/dictionary-full"))
     parser.add_argument("--full-translation-source", type=Path,
                         help="Current full WordFan SQLite DB used for Chinese fallback.")
+    parser.add_argument("--allow-missing-full-overlay", action="store_true",
+                        help="Allow fixture packaging without the current full WordFan Chinese fallback overlay.")
     parser.add_argument("--work-dir", type=Path, default=Path("data/kaikki-build"))
     parser.add_argument("--public-dir", type=Path, default=DEFAULT_PUBLIC)
     parser.add_argument("--version", default=f"{time.strftime('%Y.%m.%d')}.kaikki")
@@ -58,6 +60,8 @@ def build_full_kaikki(args: argparse.Namespace) -> Path:
     ]
     if args.full_translation_source:
         command.extend(["--full-translation-source", str(args.full_translation_source)])
+    if args.allow_missing_full_overlay:
+        command.append("--allow-missing-full-overlay")
     run_command(command)
     return full
 

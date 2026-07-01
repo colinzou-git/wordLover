@@ -29,6 +29,16 @@ DEFAULT_REPORT = Path("data/kaikki-dictionary-report.json")
 APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 TERM_RE = re.compile(r"^[A-Za-z]+(?:[ '-][A-Za-z]+){0,5}$")
 HAN_RE = re.compile(r"[\u3400-\u9fff]")
+CHINESE_CODES = {
+    "zh", "zho", "chi", "cmn", "cmn-hans", "cmn-hant", "zh-cn", "zh-sg",
+    "zh-my", "zh-hans", "zh-hans-cn", "zh-hant", "zh-tw", "zh-hk", "zh-mo",
+    "yue", "wuu", "nan", "hak", "lzh",
+}
+CHINESE_LANG_KEYWORDS = (
+    "chinese", "mandarin", "cantonese", "min nan", "hakka", "wu chinese",
+    "simplified chinese", "traditional chinese", "中文", "汉语", "漢語", "普通话",
+    "國語", "国语", "粤语", "粵語",
+)
 EXCHANGE_ORDER = ("p", "d", "i", "3", "s")
 DOMAIN_LABELS = {
     "physics": "Physics", "law": "Law", "criminal-law": "criminal law",
@@ -165,6 +175,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--full-translation-source-shards", type=Path)
     parser.add_argument("--full-translation-source", type=Path,
                         help="Current full WordFan SQLite DB used for Chinese fallback.")
+    parser.add_argument("--allow-missing-full-overlay", action="store_true",
+                        help="Allow real builds to proceed without the full WordFan Chinese fallback overlay.")
     parser.add_argument("--slim-translation-source", type=Path)
     parser.add_argument("--max-compact-senses", type=int, default=12)
     parser.add_argument("--max-detailed-senses-per-pos", type=int, default=20)
@@ -370,10 +382,47 @@ def load_overlay_from_sqlite(path: Path) -> dict[str, OverlayRecord]:
     return output
 
 
-def _read_shards(path: Path) -> Iterator[tuple[str, list]]:
+def read_shard_manifest(path: Path) -> dict:
+    manifest_path = path / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Full dictionary shard manifest is missing: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError(f"Full dictionary shard manifest is invalid: {manifest_path}")
+    expected = {
+        "app": "wordlover",
+        "formatVersion": 1,
+        "variant": "full-sharded",
+        "hash": "fnv1a32-utf8-mod",
+        "compression": "gzip",
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ValueError(f"Full dictionary shard manifest has unsupported {key}: {manifest.get(key)!r}")
+    shards = manifest.get("shards")
+    if not isinstance(shards, list) or not shards:
+        raise ValueError("Full dictionary shard manifest has no shards list")
+    shard_count = manifest.get("shardCount")
+    if isinstance(shard_count, int) and shard_count != len(shards):
+        raise ValueError(f"Full dictionary shard manifest shardCount mismatch: {shard_count} != {len(shards)}")
+    for shard in shards:
+        if not isinstance(shard, dict) or not clean_text(shard.get("path")):
+            raise ValueError("Full dictionary shard manifest contains an invalid shard entry")
+    return manifest
+
+
+def _read_shards(path: Path, report: dict | None = None) -> Iterator[tuple[str, list]]:
     if not path.exists():
-        return
-    for shard in sorted(path.glob("shard-*.json.gz")):
+        raise FileNotFoundError(f"Full dictionary shard directory is missing: {path}")
+    manifest = read_shard_manifest(path)
+    if report is not None:
+        report["full_translation_overlay_shard_manifest_version"] = manifest.get("dictionaryDataVersion")
+        report["full_translation_overlay_shard_manifest_variant"] = manifest.get("variant")
+        report["full_translation_overlay_shard_manifest_shards"] = len(manifest.get("shards") or [])
+    for shard_meta in manifest["shards"]:
+        shard = path / str(shard_meta["path"])
+        if not shard.is_file():
+            raise FileNotFoundError(f"Full dictionary shard listed in manifest is missing: {shard}")
         with gzip.open(shard, "rt", encoding="utf-8") as handle:
             payload = json.load(handle)
         for normalized, row in (payload.get("e") or {}).items():
@@ -381,9 +430,9 @@ def _read_shards(path: Path) -> Iterator[tuple[str, list]]:
                 yield normalized, row
 
 
-def load_overlay_from_shards(path: Path) -> dict[str, OverlayRecord]:
+def load_overlay_from_shards(path: Path, report: dict | None = None) -> dict[str, OverlayRecord]:
     output: dict[str, OverlayRecord] = {}
-    for normalized, row in _read_shards(path):
+    for normalized, row in _read_shards(path, report):
         key = normalize_word(normalized or (row[0] if row else ""))
         if not key:
             continue
@@ -415,14 +464,56 @@ def apply_overlay(row_data: RowData, overlay: OverlayRecord | None) -> RowData:
     return row_data
 
 
-def load_translation_overlay_from_shards(path: Path) -> dict[str, TranslationOverlayRecord]:
+def load_translation_overlay_from_shards(path: Path, report: dict | None = None) -> dict[str, TranslationOverlayRecord]:
     return {key: TranslationOverlayRecord(key, value.translation, value.phonetic, value.tag, "wordfan-full-overlay")
-            for key, value in load_overlay_from_shards(path).items()}
+            for key, value in load_overlay_from_shards(path, report).items()}
 
 
 def load_translation_overlay_from_sqlite(path: Path, source: str = "wordfan-slim-overlay") -> dict[str, TranslationOverlayRecord]:
     return {key: TranslationOverlayRecord(key, value.translation, value.phonetic, value.tag, source)
             for key, value in load_overlay_from_sqlite(path).items()}
+
+
+def load_required_full_translation_overlay(
+    *,
+    full_sqlite_path: Path | None,
+    full_shard_path: Path,
+    tag_source_path: Path | None,
+    overlay: dict[str, OverlayRecord],
+    allow_missing: bool,
+    report: dict,
+) -> dict[str, TranslationOverlayRecord]:
+    report["full_translation_overlay_required"] = not allow_missing
+    report["full_translation_overlay_available"] = False
+    report["full_translation_overlay_missing_reason"] = None
+
+    def translations_from_overlay(values: dict[str, OverlayRecord], source: str) -> dict[str, TranslationOverlayRecord]:
+        return {key: TranslationOverlayRecord(key, item.translation, item.phonetic, item.tag, source)
+                for key, item in values.items()}
+
+    try:
+        if full_sqlite_path and full_sqlite_path.exists():
+            report["full_translation_overlay_source"] = str(full_sqlite_path)
+            report["full_translation_overlay_available"] = True
+            if tag_source_path and full_sqlite_path.resolve() == tag_source_path.resolve() and overlay:
+                return translations_from_overlay(overlay, "wordfan-full-overlay")
+            return load_translation_overlay_from_sqlite(full_sqlite_path, "wordfan-full-overlay")
+        if full_shard_path.exists():
+            report["full_translation_overlay_source"] = str(full_shard_path)
+            values = load_translation_overlay_from_shards(full_shard_path, report)
+            report["full_translation_overlay_available"] = True
+            return values
+        reason = f"no --full-translation-source SQLite and shard directory not found: {full_shard_path}"
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as error:
+        reason = str(error)
+    report["full_translation_overlay_missing_reason"] = reason
+    if not allow_missing:
+        raise ValueError(
+            "Full WordFan Chinese overlay is required for Kaikki builds. "
+            f"{reason}. Pass --full-translation-source, provide manifest-driven full shards, "
+            "or use --allow-missing-full-overlay only for intentional fixtures."
+        )
+    return {}
 
 
 def choose_chinese_translation(
@@ -448,19 +539,43 @@ def _as_int(value: object) -> int | None:
         return None
 
 
+def has_han_text(value: object | None) -> bool:
+    return bool(HAN_RE.search(clean_text(value) or ""))
+
+
+def is_chinese_language_label(value: object | None) -> bool:
+    text = normalize_word(str(value or "")).replace("_", "-")
+    if not text:
+        return False
+    if text in CHINESE_CODES:
+        return True
+    return any(keyword in text for keyword in CHINESE_LANG_KEYWORDS)
+
+
+def is_chinese_translation_item(candidate: object) -> bool:
+    if not isinstance(candidate, dict):
+        return has_han_text(candidate)
+    labels = [
+        candidate.get("lang_code"), candidate.get("code"), candidate.get("lang"),
+        candidate.get("language"), candidate.get("name"), candidate.get("roman"),
+    ]
+    language_known = any(is_chinese_language_label(label) for label in labels)
+    text = candidate.get("word") or candidate.get("text") or candidate.get("translation") or candidate.get("value")
+    return has_han_text(text) and (language_known or not any(clean_text(label) for label in labels))
+
+
 def extract_chinese_translations(entry: dict, sense: dict | None = None) -> list[str]:
     candidates: list[object] = []
     target = sense if sense is not None else entry
-    for key in ("translations", "translation", "zh", "zh_translation"):
+    for key in ("translations", "translation", "zh", "zh_translation", "chinese", "mandarin"):
         value = target.get(key) if isinstance(target, dict) else None
         candidates.extend(value if isinstance(value, list) else [value])
     output: list[str] = []
     for candidate in candidates:
+        if not is_chinese_translation_item(candidate):
+            continue
         if isinstance(candidate, dict):
-            lang = str(candidate.get("lang_code") or candidate.get("code") or candidate.get("lang") or "").casefold()
-            if lang and lang not in {"zh", "zh-cn", "zh-hans", "cmn", "yue", "chinese", "mandarin", "chinese mandarin"}:
-                continue
-            candidate = candidate.get("word") or candidate.get("text") or candidate.get("translation")
+            candidate = candidate.get("word") or candidate.get("text") or candidate.get("translation") or candidate.get("value")
         text = clean_text(candidate)
         if text and HAN_RE.search(text) and text not in output:
             output.append(text)
@@ -855,6 +970,11 @@ def _initial_report(args: argparse.Namespace) -> dict:
     }
 
 
+def write_build_report(args: argparse.Namespace, report: dict) -> None:
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def build_database(args: argparse.Namespace) -> dict:
     start = time.monotonic()
     if not args.source.exists():
@@ -894,19 +1014,21 @@ def build_database(args: argparse.Namespace) -> dict:
         full_path = Path(getattr(args, "full_translation_source_shards", None) or args.tag_source_shards)
         full_sqlite_path = getattr(args, "full_translation_source", None)
         full_sqlite_path = Path(full_sqlite_path) if full_sqlite_path else None
+        tag_source_path = Path(args.tag_source) if getattr(args, "tag_source", None) else None
         overlay = load_overlay(args)
+        full_translations = load_required_full_translation_overlay(
+            full_sqlite_path=full_sqlite_path,
+            full_shard_path=full_path,
+            tag_source_path=tag_source_path,
+            overlay=overlay,
+            allow_missing=bool(getattr(args, "allow_missing_full_overlay", False)),
+            report=report,
+        )
+
         def translations_from_overlay(values: dict[str, OverlayRecord], source: str) -> dict[str, TranslationOverlayRecord]:
             return {key: TranslationOverlayRecord(key, item.translation, item.phonetic, item.tag, source)
                     for key, item in values.items()}
 
-        tag_source_path = Path(args.tag_source) if getattr(args, "tag_source", None) else None
-        if full_sqlite_path and full_sqlite_path.exists():
-            if tag_source_path and full_sqlite_path.resolve() == tag_source_path.resolve() and overlay:
-                full_translations = translations_from_overlay(overlay, "wordfan-full-overlay")
-            else:
-                full_translations = load_translation_overlay_from_sqlite(full_sqlite_path, "wordfan-full-overlay")
-        else:
-            full_translations = load_translation_overlay_from_shards(full_path) if full_path.exists() else {}
         if slim_path.exists() and not (full_sqlite_path and slim_path.resolve() == full_sqlite_path.resolve()):
             if tag_source_path and slim_path.resolve() == tag_source_path.resolve() and overlay:
                 slim_translations = translations_from_overlay(overlay, "wordfan-slim-overlay")
@@ -921,15 +1043,31 @@ def build_database(args: argparse.Namespace) -> dict:
             "slim_translation_overlay_records_loaded": len(slim_translations), "current_stem_rows_loaded": len(stem_rows),
             "kaikki_rows_with_stem_overlay": 0,
         })
-        for key in ("rows_with_kaikki_sense_chinese", "rows_with_kaikki_entry_chinese",
-                    "rows_with_full_dictionary_chinese_overlay", "rows_with_slim_dictionary_chinese_overlay"):
+        selected_counter_keys = (
+            "selected_rows_with_kaikki_sense_chinese", "selected_rows_with_kaikki_entry_chinese",
+            "selected_rows_with_full_dictionary_chinese_overlay", "selected_rows_with_slim_dictionary_chinese_overlay",
+        )
+        available_counter_keys = (
+            "available_rows_with_kaikki_sense_chinese", "available_rows_with_kaikki_entry_chinese",
+            "available_rows_with_full_dictionary_chinese_overlay", "available_rows_with_slim_dictionary_chinese_overlay",
+        )
+        for key in selected_counter_keys + available_counter_keys:
             report[key] = 0
         batch: list[tuple] = []
         aggregate_cursor = conn.execute(
             "SELECT normalized_word, word, entries_json, exchange FROM kaikki_aggregates ORDER BY source_order"
         )
         for normalized, word, entries_json, exchange in aggregate_cursor:
-            row = row_from_aggregate(json.loads(entries_json), normalized, word, exchange, args,
+            entries = json.loads(entries_json)
+            if any(sense.zh for entry_item in entries for sense in extract_senses(entry_item, args)):
+                report["available_rows_with_kaikki_sense_chinese"] += 1
+            if any(extract_chinese_translations(entry_item) for entry_item in entries):
+                report["available_rows_with_kaikki_entry_chinese"] += 1
+            if clean_text(full_translations.get(normalized).translation if full_translations.get(normalized) else None):
+                report["available_rows_with_full_dictionary_chinese_overlay"] += 1
+            if clean_text(slim_translations.get(normalized).translation if slim_translations.get(normalized) else None):
+                report["available_rows_with_slim_dictionary_chinese_overlay"] += 1
+            row = row_from_aggregate(entries, normalized, word, exchange, args,
                                      overlay.get(normalized), full_translations.get(normalized), slim_translations.get(normalized))
             if tag_matches_ap_stem(row.tag):
                 report["kaikki_rows_with_stem_overlay"] += 1
@@ -938,10 +1076,10 @@ def build_database(args: argparse.Namespace) -> dict:
                     row.translation, row.zh_source = stem.translation, "wordfan-slim-overlay"
                     row.detail = _merge_detail(row.detail, {"translationFallback": {"zh": row.translation, "zhSource": row.zh_source}})
             source_counter = {
-                "kaikki-sense": "rows_with_kaikki_sense_chinese",
-                "kaikki-entry": "rows_with_kaikki_entry_chinese",
-                "wordfan-full-overlay": "rows_with_full_dictionary_chinese_overlay",
-                "wordfan-slim-overlay": "rows_with_slim_dictionary_chinese_overlay",
+                "kaikki-sense": "selected_rows_with_kaikki_sense_chinese",
+                "kaikki-entry": "selected_rows_with_kaikki_entry_chinese",
+                "wordfan-full-overlay": "selected_rows_with_full_dictionary_chinese_overlay",
+                "wordfan-slim-overlay": "selected_rows_with_slim_dictionary_chinese_overlay",
             }.get(row.zh_source)
             if source_counter:
                 report[source_counter] += 1
@@ -961,7 +1099,8 @@ def build_database(args: argparse.Namespace) -> dict:
             supplement_batch.append(row.tuple())
             report["missing_stem_rows_appended"] += 1
             if row.translation:
-                report["rows_with_slim_dictionary_chinese_overlay"] += 1
+                report["selected_rows_with_slim_dictionary_chinese_overlay"] += 1
+                report["available_rows_with_slim_dictionary_chinese_overlay"] += 1
             if len(supplement_batch) >= args.batch_size:
                 insert_batch(conn, supplement_batch)
                 supplement_batch.clear()
@@ -1000,19 +1139,33 @@ def build_database(args: argparse.Namespace) -> dict:
         report["final_k12_stem_rows"] = sum(any(token.startswith("k12_") for token in tag.split()) for tag in stem_tags)
         report["final_ap_stem_rows"] = sum(any(token.startswith("ap_") for token in tag.split()) for tag in stem_tags)
         report["final_linear_algebra_extension_rows"] = sum(contains_tag(tag, "linear_algebra_extension") for tag in stem_tags)
+        legacy_counter_map = {
+            "rows_with_kaikki_sense_chinese": "selected_rows_with_kaikki_sense_chinese",
+            "rows_with_kaikki_entry_chinese": "selected_rows_with_kaikki_entry_chinese",
+            "rows_with_full_dictionary_chinese_overlay": "selected_rows_with_full_dictionary_chinese_overlay",
+            "rows_with_slim_dictionary_chinese_overlay": "selected_rows_with_slim_dictionary_chinese_overlay",
+        }
+        for legacy, selected in legacy_counter_map.items():
+            report[legacy] = report[selected]
         conn.close()
         conn = None
         os.replace(tmp, args.output)
         report["sqlite_size_bytes"] = args.output.stat().st_size
         report["elapsed_seconds"] = round(time.monotonic() - start, 3)
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_build_report(args, report)
         return report
-    except Exception:
+    except Exception as error:
         if conn is not None:
             conn.close()
         for candidate in (tmp, Path(str(tmp) + "-wal"), Path(str(tmp) + "-shm")):
             candidate.unlink(missing_ok=True)
+        report["failed"] = True
+        report["failure"] = str(error)
+        report["elapsed_seconds"] = round(time.monotonic() - start, 3)
+        try:
+            write_build_report(args, report)
+        except Exception:
+            pass
         raise
 
 

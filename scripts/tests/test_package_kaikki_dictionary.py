@@ -33,7 +33,7 @@ class PackageKaikkiDictionaryTests(unittest.TestCase):
                 "--source", str(source), "--work-dir", str(root / "work"),
                 "--public-dir", str(public), "--tag-source", str(root / "missing.sqlite"),
                 "--tag-source-shards", str(root / "missing-shards"), "--version", "test.kaikki",
-                "--target-rows", "10", "--shard-count", "2",
+                "--target-rows", "10", "--shard-count", "2", "--allow-missing-full-overlay",
             ])
             self.assertEqual(result, 0)
             output = preview_output(public)

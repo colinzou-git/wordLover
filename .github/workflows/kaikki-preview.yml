@@ -1,4 +1,4 @@
-name: Build Kaikki dictionary preview artifact
+name: Build Kaikki fixture preview artifact
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
           cd ../..
           python -m unittest discover -s scripts/tests -p 'test_*.py'
 
-      - name: Build isolated preview dictionary
+      - name: Build isolated fixture preview dictionary
         run: |
           PREPARED="$RUNNER_TEMP/kaikki-prepared"
           python apps/wordlover-pwa/scripts/create-ci-dictionary.py \
@@ -64,9 +64,11 @@ jobs:
       - name: Write preview instructions
         run: |
           {
-            echo "## Kaikki preview artifact"
+            echo "## Kaikki fixture preview artifact"
             echo
             echo "Artifact: \`wordfan-kaikki-preview-${GITHUB_RUN_NUMBER}\`"
+            echo
+            echo "Scope: fixture dictionary generated in CI. This validates isolated preview packaging and UI wiring; it is not the real full Kaikki build."
             echo
             echo "Download and extract the artifact, then run:"
             echo '```bash'
@@ -76,4 +78,6 @@ jobs:
             echo "Open: http://127.0.0.1:4173/?dictionary=kaikki-preview&fresh=latest"
             echo
             echo "This workflow does not write to \`gh-pages\` or production dictionary paths."
+            echo
+            echo "For real full Kaikki validation, run the documented local build and audit commands with the full JSONL and current WordFan SQLite/full-shard overlays."
           } >> "$GITHUB_STEP_SUMMARY"
