@@ -1,1 +1,4 @@
 data/dictionary/sources/*.jsonl filter=lfs diff=lfs merge=lfs -text
+data/*.sqlite filter=lfs diff=lfs merge=lfs -text
+data/*.sqlite.zst filter=lfs diff=lfs merge=lfs -text
+full-dictionary-backup/** filter=lfs diff=lfs merge=lfs -text
