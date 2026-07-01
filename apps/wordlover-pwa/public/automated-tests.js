@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260701-7";
+} from "./fsrs-scheduler.js?v=20260701-8";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260701-7";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260701-7";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260701-8";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260701-8";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260701-7";
+} from "./ui-preferences.js?v=20260701-8";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260701-7";
+} from "./sync.js?v=20260701-8";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260701-7";
+} from "./study-one-more.js?v=20260701-8";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260701-7";
+} from "./goal-forecast.js?v=20260701-8";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,9 +48,9 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260701-7";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260701-7";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260701-7";
+} from "./tracks.js?v=20260701-8";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260701-8";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260701-8";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -64,7 +64,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v146";
+const SHELL_CACHE_NAME = "wordlover-shell-v147";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -81,19 +81,20 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260701-7",
-  "/full-dictionary.js?v=20260701-7",
-  "/persistence.js?v=20260701-7",
-  "/spelling.js?v=20260701-7",
-  "/ui-preferences.js?v=20260701-7",
-  "/review-state.js?v=20260701-7",
-  "/study-one-more.js?v=20260701-7",
-  "/sync.js?v=20260701-7",
-  "/fsrs-scheduler.js?v=20260701-7",
-  "/goal-forecast.js?v=20260701-7",
-  "/tracks.js?v=20260701-7",
-  "/styles.css?v=20260701-7",
-  "/wordlover-config.js?v=20260701-7",
+  "/app.js?v=20260701-8",
+  "/dictionary-rendering.js?v=20260701-8",
+  "/full-dictionary.js?v=20260701-8",
+  "/persistence.js?v=20260701-8",
+  "/spelling.js?v=20260701-8",
+  "/ui-preferences.js?v=20260701-8",
+  "/review-state.js?v=20260701-8",
+  "/study-one-more.js?v=20260701-8",
+  "/sync.js?v=20260701-8",
+  "/fsrs-scheduler.js?v=20260701-8",
+  "/goal-forecast.js?v=20260701-8",
+  "/tracks.js?v=20260701-8",
+  "/styles.css?v=20260701-8",
+  "/wordlover-config.js?v=20260701-8",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -109,7 +110,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260701-7",
+  "/automated-tests.js?v=20260701-8",
 ];
 
 let lastResults = null;
@@ -776,7 +777,7 @@ async function runMockGoogleDriveSyncPoc(exportImportResult) {
 }
 
 async function runMainAppDictionarySmoke() {
-  const terms = ["abandon", "take off", "structuredword"];
+  const terms = ["abandon", "take off", "oldrow", "structuredword", "structuredwords"];
   const results = [];
   for (const term of terms) {
     const frame = document.createElement("iframe");
@@ -800,10 +801,12 @@ async function runMainAppDictionarySmoke() {
             return;
           }
           if (loaded && input && !input.disabled && text.toLowerCase().includes(term.toLowerCase().split(" ")[0])) {
-            if (term === "structuredword") {
-              const compact = frameDocument.querySelector(".structured-meaning-line")?.textContent ?? "";
+            if (term === "structuredword" || term === "structuredwords") {
+              const compactLines = [...frameDocument.querySelectorAll(".structured-meaning-line")];
+              const compact = compactLines[0]?.textContent ?? "";
               const heading = frameDocument.querySelector(".detailed-definitions h4")?.textContent ?? "";
               const example = frameDocument.querySelector(".detailed-definitions blockquote")?.textContent ?? "";
+              const fallback = frameDocument.querySelector(".structured-translation-fallback")?.textContent ?? "";
               const renderer = frameWindow.WordLoverApp.dictionaryRendering;
               const malicious = renderer.renderDisplayMeanings([{ pos: "n.", en: '<img src=x onerror=alert(1)>', zh: null }]);
               const safeEscaping = malicious.includes("&lt;img") && !malicious.includes("<img");
@@ -811,16 +814,24 @@ async function runMainAppDictionarySmoke() {
               Object.assign(frame.style, { position: "fixed", left: "-10000px", width: "390px", height: "844px" });
               const noOverflow = frameDocument.documentElement.scrollWidth <= frameDocument.documentElement.clientWidth;
               frame.hidden = true;
-              if (!compact.includes("结构化词条") || compact.indexOf("结构化词条") > compact.indexOf("structured dictionary")) {
+              if (compactLines.length !== 2 || !compact.includes("结构化词条") || compact.indexOf("结构化词条") > compact.indexOf("structured dictionary")) {
                 window.clearInterval(timer);
                 reject(new Error(`Structured compact meaning is missing or ordered incorrectly: ${compact}`));
                 return;
               }
-              if (!/Noun:/.test(heading) || !example.includes("structured example") || !safeEscaping || !noOverflow) {
+              const fallbackIsGeneral = fallback.includes("通用译文") && !compactLines[1].textContent.includes("通用译文");
+              const enrichedAlias = term !== "structuredwords" || /Resolved through base word structuredword/.test(text);
+              if (!/Noun:/.test(heading) || !example.includes("structured example") || !fallbackIsGeneral || !enrichedAlias || !safeEscaping || !noOverflow || frameDocument.querySelector(".meaning-grid")) {
                 window.clearInterval(timer);
-                reject(new Error(`Structured rendering checks failed: ${JSON.stringify({ heading, example, safeEscaping, noOverflow })}`));
+                reject(new Error(`Structured rendering checks failed: ${JSON.stringify({ heading, example, fallbackIsGeneral, enrichedAlias, safeEscaping, noOverflow })}`));
                 return;
               }
+            }
+            if ((term === "abandon" || term === "oldrow")
+                && (!frameDocument.querySelector(".meaning-grid") || frameDocument.querySelector(".structured-dictionary-result"))) {
+              window.clearInterval(timer);
+              reject(new Error(`Legacy fallback rendering failed for ${term}.`));
+              return;
             }
             window.clearInterval(timer);
             resolve({

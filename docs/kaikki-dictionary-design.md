@@ -128,6 +128,10 @@ Verb:
 When only word-level Chinese exists, the UI shows one “Chinese meanings” block,
 then English meanings. Malformed/missing detail falls back to the old ECDICT UI.
 All source strings are escaped as text, and examples wrap at iPhone width.
+The rendering helpers live in the offline-cached `dictionary-rendering.js`
+module so JSON parsing, bilingual ordering, general fallback placement, POS
+sections, examples, and HTML escaping are unit-testable without loading the
+application shell.
 
 ## Ubuntu build and package
 
@@ -165,7 +169,10 @@ This is the explicit package policy, recorded in
 `kaikki-package-summary.json` as
 `slimDetailPolicy=none-with-full-shard-enrichment`. Full-shard exact and alias
 results carry the optional structured detail; unavailable/malformed detail uses
-the existing legacy renderer.
+the existing legacy renderer. This enrichment applies to exact rows and
+inflected aliases, including automated `?q=` preview smoke lookups. In preview
+or debug mode, a failed full-shard enrichment also shows a small diagnostic note
+instead of silently implying that the legacy layout is the complete Kaikki row.
 
 The wrapper can write only
 `apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production

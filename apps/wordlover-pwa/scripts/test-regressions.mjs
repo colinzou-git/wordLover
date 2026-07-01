@@ -36,6 +36,11 @@ const {
 const {
   fullDictionaryStorageConfig,
 } = await import("../public/full-dictionary.js");
+const {
+  hasStructuredDictionaryDetail,
+  parseDictionaryDetail,
+  renderStructuredDictionaryResult,
+} = await import("../public/dictionary-rendering.js");
 
 const tests = [];
 function test(name, fn) {
@@ -123,6 +128,35 @@ test("Dictionary assets resolve beside the selected manifest", () => {
     resolveDictionaryAssetUrl("/kaikki-preview/local/dictionary-manifest.json", "dictionary.sqlite"),
     "/kaikki-preview/local/dictionary.sqlite",
   );
+});
+
+test("Structured dictionary detail renders bilingual lines, fallback, definitions, and safe HTML", () => {
+  const detail = parseDictionaryDetail(JSON.stringify({
+    displayMeanings: [
+      { pos: "v.", zh: "收费", en: "ask someone to pay", domain: null },
+      { pos: "n.", zh: null, en: "an <unsafe> charge", domain: "Law" },
+    ],
+    translationFallback: { zh: "通用译文", zhSource: "wordfan-full-overlay" },
+    detailedDefinitions: [{
+      pos: "Noun",
+      senses: [{ definition: "an accusation", domain: "Law", examples: ["a <quoted> example"] }],
+    }],
+  }));
+  assert.equal(hasStructuredDictionaryDetail(detail), true);
+  const html = renderStructuredDictionaryResult({}, detail);
+  assert.equal((html.match(/structured-meaning-line/g) ?? []).length, 2);
+  assert.match(html, /收费.*\|.*ask someone to pay/);
+  assert.match(html, /Chinese meanings:<\/strong> 通用译文/);
+  assert.match(html, /<h4>Noun:<\/h4><ol><li>/);
+  assert.match(html, /an &lt;unsafe&gt; charge/);
+  assert.match(html, /a &lt;quoted&gt; example/);
+  assert.doesNotMatch(html, /<unsafe>|<quoted>/);
+});
+
+test("Malformed or legacy dictionary detail does not activate structured rendering", () => {
+  assert.equal(parseDictionaryDetail("{bad"), null);
+  assert.equal(parseDictionaryDetail(null), null);
+  assert.equal(hasStructuredDictionaryDetail(parseDictionaryDetail('{"unrelated":true}')), false);
 });
 
 test("Goals preserve an explicit zero-new-word target", () => {

@@ -1,4 +1,4 @@
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260701-7";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260701-8";
 
 const STATUS_ATTRIBUTE = "data-online-dictionary-auto-status";
 const SOURCE_LABELS = {
