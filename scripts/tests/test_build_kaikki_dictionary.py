@@ -251,6 +251,56 @@ class KaikkiBuilderTests(unittest.TestCase):
             ("n.", "指控", "an accusation"),
         ])
 
+    def test_duplicate_senses_are_removed_and_examples_are_merged(self):
+        value = {
+            "word": "free", "lang_code": "en", "pos": "adjective",
+            "senses": [
+                {"glosses": ["Unconstrained."], "translations": [{"lang_code": "zh", "word": "自由的"}], "examples": ["example one"]},
+                {"glosses": ["unconstrained"], "translations": [{"lang_code": "zh", "word": "自由的"}], "examples": ["example one", "example two"]},
+                {"glosses": ["Unconstrained"], "examples": ["example three"]},
+                {"glosses": ["Unconstrained."], "topics": ["computing"], "translations": [{"lang_code": "zh", "word": "自由的"}]},
+                {"glosses": ["Not imprisoned or enslaved."], "examples": ["the prisoner is free"]},
+                {"glosses": ["Obtainable without payment."], "translations": [{"lang_code": "zh", "word": "免费的"}]},
+            ],
+        }
+        self.build([value])
+        definition, translation, detail_raw = self.query(
+            "SELECT definition,translation,detail FROM dictionary_entries"
+        )[0]
+        detail = json.loads(detail_raw)
+        compact = detail["displayMeanings"]
+        self.assertEqual([(item["zh"], item["en"]) for item in compact], [
+            ("自由的", "Unconstrained."),
+            ("免费的", "Obtainable without payment."),
+        ])
+        detailed = detail["detailedDefinitions"][0]["senses"]
+        self.assertEqual([item["definition"] for item in detailed], [
+            "Unconstrained.", "Unconstrained.", "Not imprisoned or enslaved.",
+            "Obtainable without payment.",
+        ])
+        self.assertEqual([item["domain"] for item in detailed[:2]], [None, "Computing"])
+        self.assertEqual(detailed[0]["examples"], ["example one", "example two", "example three"])
+        self.assertEqual(definition.splitlines(), [
+            "adj. Unconstrained.", "adj. Not imprisoned or enslaved.",
+            "adj. Obtainable without payment.",
+        ])
+        self.assertEqual(translation.splitlines(), ["自由的"])
+
+    def test_wordfan_phonetic_wins_and_kaikki_ipa_remains_fallback(self):
+        overlay = self.make_overlay([
+            {"word": "free", "phonetic": "friː"},
+            {"word": "overlayempty", "phonetic": ""},
+        ])
+        self.build([
+            entry("free", sounds=[{"ipa": "/fɹi/"}]),
+            entry("overlayempty", sounds=[{"ipa": "/oʊvərleɪ/"}]),
+            entry("kaikkionly", sounds=[{"ipa": "/kaɪki/"}]),
+        ], tag_source=overlay)
+        rows = dict(self.query("SELECT normalized_word,phonetic FROM dictionary_entries"))
+        self.assertEqual(rows["free"], "friː")
+        self.assertEqual(rows["overlayempty"], "/oʊvərleɪ/")
+        self.assertEqual(rows["kaikkionly"], "/kaɪki/")
+
     def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
         self.assertTrue(has_han_text("费用"))
         self.assertTrue(has_han_text("\uf900"))
@@ -301,7 +351,7 @@ class KaikkiBuilderTests(unittest.TestCase):
         translation, detail_raw = self.query("SELECT translation,detail FROM dictionary_entries")[0]
         detail = json.loads(detail_raw)
         self.assertEqual(translation, "费用；冲锋")
-        self.assertTrue(all(item["zh"] is None for item in detail["displayMeanings"]))
+        self.assertNotIn("displayMeanings", detail)
         self.assertEqual(detail["translationFallback"], {"zh": "费用；冲锋", "zhSource": "kaikki-entry"})
         self.assertEqual(report["selected_rows_with_kaikki_entry_chinese"], 1)
 

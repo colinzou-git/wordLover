@@ -47,6 +47,11 @@ Curated `tag`, `is_toefl`, `frq`, `bnc`, `collins`, and `oxford` values are
 matched by normalized word. Raw Kaikki tags/topics/categories go only in
 `detail.kaikki`, never `dictionary_entries.tag`.
 
+For pronunciation, the existing WordFan/ECDICT overlay phonetic wins when it is
+available so common words retain the product's established notation. Raw Kaikki
+IPA remains the fallback for Kaikki-only words or overlay rows without phonetic
+data.
+
 Chinese priority is:
 
 1. safely aligned Kaikki sense translation;
@@ -130,6 +135,12 @@ Verb:
 When only word-level Chinese exists, the UI shows one “Chinese meanings” block,
 then English meanings. Malformed/missing detail falls back to the old ECDICT UI.
 All source strings are escaped as text, and examples wrap at iPhone width.
+The compact section contains only rows with Chinese: aligned rows render
+`Chinese | English`, and Chinese-only rows omit the separator. English-only
+senses remain in the detailed definitions. After normalized case/punctuation
+comparison, duplicate compact definitions are removed; duplicate detailed
+definitions merge unique examples in source order. Distinct English senses are
+not collapsed merely because they share a Chinese translation.
 The rendering helpers live in the offline-cached `dictionary-rendering.js`
 module so JSON parsing, bilingual ordering, general fallback placement, POS
 sections, examples, and HTML escaping are unit-testable without loading the

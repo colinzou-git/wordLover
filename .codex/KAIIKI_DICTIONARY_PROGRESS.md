@@ -1,11 +1,11 @@
 # Kaikki Dictionary Progress
 
-- Current issue: #45 — corrected, rebuilt, and validated
+- Current issue: #46 -> #47 -> #48 — implemented, rebuilt, and validated
 - Current branch: `feature/kaikki-dictionary-preview`
-- Latest implementation commit: `6a1997f Balance Kaikki bilingual compact meanings`
-- Files changed: pending builder compact-sense selection fix and regenerated local preview package
+- Latest implementation commit: `3210395 Record corrected Kaikki UI validation`
+- Files changed: pending sense deduplication, Chinese-only compact filtering, renderer hardening, and WordFan phonetic priority
 - Tests added: structured bilingual ordering, general fallback, POS definitions/examples, escaping, malformed/legacy detail, slim-to-full exact enrichment, full-shard alias enrichment, iPhone-width layout
-- Tests run: builder suite (19), full Python discovery (56), app build/unit/static checks (25 JS regressions), Playwright browser CI, full real rebuild/package, strict audit, Chromium 390px live `charge` smoke, code-map regenerate/check, production asset diff
-- Result: PASS. The regenerated 2026.07.02 package shows 12 compact `charge` lines alternating noun/verb senses, including 费用/收费/控告/充电/电荷 with aligned English immediately after each Chinese value; 2 detailed POS sections, no legacy grid, and no horizontal overflow. Strict audit passes 824,747 rows and 128 shards; production snapshots and tracked production assets remain unchanged.
-- Remaining work: no open GitHub issues. Promotion remains prohibited until reviewed and real iPhone DRAM is measured with Safari simulator/Instruments; Android remains deferred.
-- Exact resume step: manually validate the regenerated 2026.07.02 preview through the fresh port-4176 SSH tunnel; do not merge to main
+- Tests run: builder suite (21), full Python discovery (58), JS unit/build/static suite (25 regressions), Playwright browser CI, full real rebuild/package, real-data structural checks, Chromium 390px live `free` smoke, strict audit
+- Result: PASS. Preview 2026.07.02.3/v148 shows WordFan `fri:`, seven Chinese-bearing compact rows, exactly one plain `自由的 | Unconstrained.`, unique detailed keys/examples, no legacy grid, and no overflow. `charge` retains 12 aligned bilingual rows. Strict audit passes 824,747 rows/128 shards; production snapshot unchanged.
+- Remaining work: code-map/production diff, commit/push, close #46–#48. Promotion remains prohibited until reviewed and real iPhone DRAM is measured.
+- Exact resume step: regenerate/check code map, verify production diff, commit and push, then close issues with real-data evidence

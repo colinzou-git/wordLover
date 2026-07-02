@@ -133,8 +133,9 @@ test("Dictionary assets resolve beside the selected manifest", () => {
 test("Structured dictionary detail renders bilingual lines, fallback, definitions, and safe HTML", () => {
   const detail = parseDictionaryDetail(JSON.stringify({
     displayMeanings: [
-      { pos: "v.", zh: "收费", en: "ask someone to pay", domain: null },
+      { pos: "v.", zh: "收费", en: "ask <someone> to pay", domain: null },
       { pos: "n.", zh: null, en: "an <unsafe> charge", domain: "Law" },
+      { pos: "n.", zh: "中文而已", en: "", domain: null },
     ],
     translationFallback: { zh: "通用译文", zhSource: "wordfan-full-overlay" },
     detailedDefinitions: [{
@@ -145,10 +146,12 @@ test("Structured dictionary detail renders bilingual lines, fallback, definition
   assert.equal(hasStructuredDictionaryDetail(detail), true);
   const html = renderStructuredDictionaryResult({}, detail);
   assert.equal((html.match(/structured-meaning-line/g) ?? []).length, 2);
-  assert.match(html, /收费.*\|.*ask someone to pay/);
+  assert.match(html, /收费.*\|.*ask &lt;someone&gt; to pay/);
+  assert.match(html, /中文而已/);
+  assert.doesNotMatch(html, /中文而已.*\|/);
+  assert.doesNotMatch(html, /an &lt;unsafe&gt; charge/);
   assert.match(html, /Chinese meanings:<\/strong> 通用译文/);
   assert.match(html, /<h4>Noun:<\/h4><ol><li>/);
-  assert.match(html, /an &lt;unsafe&gt; charge/);
   assert.match(html, /a &lt;quoted&gt; example/);
   assert.doesNotMatch(html, /<unsafe>|<quoted>/);
 });

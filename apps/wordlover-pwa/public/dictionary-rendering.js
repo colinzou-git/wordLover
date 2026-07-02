@@ -34,10 +34,13 @@ export function formatDomainSuffix(domain) {
 
 export function renderStructuredDisplayMeanings(meanings) {
   if (!Array.isArray(meanings) || !meanings.length) return "";
-  return `<div class="structured-meanings">${meanings.map((meaning) => {
+  const translated = meanings.filter((meaning) => String(meaning?.zh ?? "").trim());
+  if (!translated.length) return "";
+  return `<div class="structured-meanings">${translated.map((meaning) => {
     const pos = meaning?.pos ? `<span class="structured-pos">${escapeDictionaryHtml(meaning.pos)}</span> ` : "";
-    const zh = meaning?.zh ? `${escapeDictionaryHtml(meaning.zh)} <span class="structured-bar">|</span> ` : "";
-    const english = escapeDictionaryHtml(meaning?.en ?? "");
+    const englishValue = String(meaning?.en ?? "").trim();
+    const english = escapeDictionaryHtml(englishValue);
+    const zh = `${escapeDictionaryHtml(meaning.zh)}${englishValue ? ' <span class="structured-bar">|</span> ' : ""}`;
     const domain = meaning?.domain
       ? `<span class="structured-domain">${escapeDictionaryHtml(formatDomainSuffix(meaning.domain))}</span>`
       : "";

@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260701-8";
+} from "./fsrs-scheduler.js?v=20260702-1";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260701-8";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260701-8";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260702-1";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260702-1";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260701-8";
+} from "./ui-preferences.js?v=20260702-1";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260701-8";
+} from "./sync.js?v=20260702-1";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260701-8";
+} from "./study-one-more.js?v=20260702-1";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260701-8";
+} from "./goal-forecast.js?v=20260702-1";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,9 +48,9 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260701-8";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260701-8";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260701-8";
+} from "./tracks.js?v=20260702-1";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260702-1";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260702-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -64,7 +64,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v147";
+const SHELL_CACHE_NAME = "wordlover-shell-v148";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -81,20 +81,20 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260701-8",
-  "/dictionary-rendering.js?v=20260701-8",
-  "/full-dictionary.js?v=20260701-8",
-  "/persistence.js?v=20260701-8",
-  "/spelling.js?v=20260701-8",
-  "/ui-preferences.js?v=20260701-8",
-  "/review-state.js?v=20260701-8",
-  "/study-one-more.js?v=20260701-8",
-  "/sync.js?v=20260701-8",
-  "/fsrs-scheduler.js?v=20260701-8",
-  "/goal-forecast.js?v=20260701-8",
-  "/tracks.js?v=20260701-8",
-  "/styles.css?v=20260701-8",
-  "/wordlover-config.js?v=20260701-8",
+  "/app.js?v=20260702-1",
+  "/dictionary-rendering.js?v=20260702-1",
+  "/full-dictionary.js?v=20260702-1",
+  "/persistence.js?v=20260702-1",
+  "/spelling.js?v=20260702-1",
+  "/ui-preferences.js?v=20260702-1",
+  "/review-state.js?v=20260702-1",
+  "/study-one-more.js?v=20260702-1",
+  "/sync.js?v=20260702-1",
+  "/fsrs-scheduler.js?v=20260702-1",
+  "/goal-forecast.js?v=20260702-1",
+  "/tracks.js?v=20260702-1",
+  "/styles.css?v=20260702-1",
+  "/wordlover-config.js?v=20260702-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -110,7 +110,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260701-8",
+  "/automated-tests.js?v=20260702-1",
 ];
 
 let lastResults = null;
@@ -808,18 +808,19 @@ async function runMainAppDictionarySmoke() {
               const example = frameDocument.querySelector(".detailed-definitions blockquote")?.textContent ?? "";
               const fallback = frameDocument.querySelector(".structured-translation-fallback")?.textContent ?? "";
               const renderer = frameWindow.WordLoverApp.dictionaryRendering;
-              const malicious = renderer.renderDisplayMeanings([{ pos: "n.", en: '<img src=x onerror=alert(1)>', zh: null }]);
+              const malicious = renderer.renderDisplayMeanings([{ pos: "n.", en: '<img src=x onerror=alert(1)>', zh: "测试" }]);
               const safeEscaping = malicious.includes("&lt;img") && !malicious.includes("<img");
               frame.hidden = false;
               Object.assign(frame.style, { position: "fixed", left: "-10000px", width: "390px", height: "844px" });
               const noOverflow = frameDocument.documentElement.scrollWidth <= frameDocument.documentElement.clientWidth;
               frame.hidden = true;
-              if (compactLines.length !== 2 || !compact.includes("结构化词条") || compact.indexOf("结构化词条") > compact.indexOf("structured dictionary")) {
+              if (compactLines.length !== 1 || !compact.includes("结构化词条") || compact.indexOf("结构化词条") > compact.indexOf("structured dictionary")) {
                 window.clearInterval(timer);
                 reject(new Error(`Structured compact meaning is missing or ordered incorrectly: ${compact}`));
                 return;
               }
-              const fallbackIsGeneral = fallback.includes("通用译文") && !compactLines[1].textContent.includes("通用译文");
+              const fallbackIsGeneral = fallback.includes("通用译文")
+                && compactLines.every((line) => !line.textContent.includes("通用译文"));
               const enrichedAlias = term !== "structuredwords" || /Resolved through base word structuredword/.test(text);
               if (!/Noun:/.test(heading) || !example.includes("structured example") || !fallbackIsGeneral || !enrichedAlias || !safeEscaping || !noOverflow || frameDocument.querySelector(".meaning-grid")) {
                 window.clearInterval(timer);

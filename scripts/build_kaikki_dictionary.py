@@ -13,7 +13,7 @@ import sys
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Iterator, TextIO
 
@@ -461,7 +461,7 @@ def apply_overlay(row_data: RowData, overlay: OverlayRecord | None) -> RowData:
     row_data.is_toefl = max(row_data.is_toefl, overlay.is_toefl, int(contains_tag(row_data.tag, "toefl")))
     row_data.frq, row_data.bnc = overlay.frq, overlay.bnc
     row_data.collins, row_data.oxford = overlay.collins, overlay.oxford
-    row_data.phonetic = row_data.phonetic or overlay.phonetic
+    row_data.phonetic = overlay.phonetic or row_data.phonetic
     return row_data
 
 
@@ -628,6 +628,49 @@ def compact_english_definition(gloss: str) -> str:
     return (clean_text(gloss) or "")[:240]
 
 
+def normalize_sense_key(text: object | None) -> str:
+    value = normalize_word(clean_text(text) or "")
+    return " ".join(re.sub(r"[^\w]+", " ", value, flags=re.UNICODE).split())
+
+
+def dedupe_compact_senses(senses: list[SenseRecord]) -> list[SenseRecord]:
+    output: list[SenseRecord] = []
+    positions: dict[tuple[str, str], int] = {}
+    for sense in senses:
+        key = (
+            normalize_sense_key(sense.display_pos or sense.raw_pos),
+            normalize_sense_key(sense.compact_gloss),
+        )
+        existing_index = positions.get(key)
+        if existing_index is None:
+            positions[key] = len(output)
+            output.append(sense)
+            continue
+        existing = output[existing_index]
+        if not existing.zh and sense.zh:
+            output[existing_index] = sense
+    return output
+
+
+def dedupe_detailed_senses(senses: list[SenseRecord], max_examples: int) -> list[SenseRecord]:
+    output: list[SenseRecord] = []
+    positions: dict[tuple[str, str], int] = {}
+    for sense in senses:
+        key = (normalize_sense_key(sense.gloss), normalize_sense_key(sense.domain))
+        existing_index = positions.get(key)
+        if existing_index is None:
+            positions[key] = len(output)
+            output.append(replace(sense, examples=list(dict.fromkeys(sense.examples))[:max_examples]))
+            continue
+        existing = output[existing_index]
+        merged = list(existing.examples)
+        for example in sense.examples:
+            if example not in merged and len(merged) < max_examples:
+                merged.append(example)
+        output[existing_index] = replace(existing, examples=merged)
+    return output
+
+
 def select_compact_senses(senses: list[SenseRecord], limit: int) -> list[SenseRecord]:
     """Select learner-facing senses without letting one POS exhaust the limit.
 
@@ -641,13 +684,12 @@ def select_compact_senses(senses: list[SenseRecord], limit: int) -> list[SenseRe
     if limit <= 0:
         return []
     groups: OrderedDict[str, list[SenseRecord]] = OrderedDict()
-    for sense in senses:
+    for sense in dedupe_compact_senses(senses):
+        if not clean_text(sense.zh):
+            continue
         key = sense.display_pos or sense.raw_pos or ""
         groups.setdefault(key, []).append(sense)
-    queues = [
-        [item for item in group if item.zh] + [item for item in group if not item.zh]
-        for group in groups.values()
-    ]
+    queues = [list(group) for group in groups.values()]
     selected: list[SenseRecord] = []
     while len(selected) < limit and any(queues):
         for queue in queues:
@@ -695,16 +737,35 @@ def build_display_meanings(entries: list[dict], args: argparse.Namespace) -> lis
     return output
 
 
+def build_legacy_meanings(entries: list[dict], args: argparse.Namespace) -> list[dict]:
+    senses: list[SenseRecord] = []
+    for entry in entries:
+        senses.extend(extract_senses(entry, args, len(senses)))
+    return [
+        {
+            "pos": sense.display_pos, "zh": sense.zh, "en": sense.compact_gloss,
+            "domain": sense.domain,
+        }
+        for sense in dedupe_compact_senses(senses)[:args.max_compact_senses]
+    ]
+
+
 def build_detailed_definitions(entries: list[dict], args: argparse.Namespace) -> list[dict]:
-    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    groups: OrderedDict[str, list[SenseRecord]] = OrderedDict()
     for entry in entries:
         heading = pos_heading(entry.get("pos"))
         group = groups.setdefault(heading, [])
-        for sense in extract_senses(entry, args):
-            if len(group) >= args.max_detailed_senses_per_pos:
-                break
-            group.append({"definition": sense.gloss, "domain": sense.domain, "examples": sense.examples, "source": SOURCE_NAME})
-    return [{"pos": pos, "senses": senses} for pos, senses in groups.items() if senses]
+        group.extend(extract_senses(entry, args))
+    output = []
+    for pos, senses in groups.items():
+        unique = dedupe_detailed_senses(senses, args.max_examples_per_sense)
+        serialized = [
+            {"definition": sense.gloss, "domain": sense.domain, "examples": sense.examples, "source": SOURCE_NAME}
+            for sense in unique[:args.max_detailed_senses_per_pos]
+        ]
+        if serialized:
+            output.append({"pos": pos, "senses": serialized})
+    return output
 
 
 def serialize_legacy_definition(display_meanings: list[dict]) -> str | None:
@@ -909,6 +970,7 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
                        full_translation: TranslationOverlayRecord | None = None,
                        slim_translation: TranslationOverlayRecord | None = None) -> RowData:
     display = build_display_meanings(entries, args)
+    legacy = build_legacy_meanings(entries, args)
     detailed = build_detailed_definitions(entries, args)
     sense_zh = next((item["zh"] for item in display
                      if item.get("zh") and item.get("zhSource") == "kaikki-sense"), None)
@@ -934,7 +996,7 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
     phonetic = next((first_ipa(entry) for entry in entries if first_ipa(entry)), None)
     row = RowData(
         word=word, normalized_word=normalized, phonetic=phonetic,
-        definition=serialize_legacy_definition(display),
+        definition=serialize_legacy_definition(legacy),
         translation=translation or serialize_legacy_translation(display),
         pos=merge_tag_tokens(map_pos(entry.get("pos")) for entry in entries),
         exchange=exchange,
