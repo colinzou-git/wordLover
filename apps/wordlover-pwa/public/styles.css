@@ -2672,6 +2672,23 @@ li button {
   min-width: 0;
 }
 
+.pos-pronunciations {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pronunciation-pos {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.pronunciation-divider {
+  color: var(--muted);
+}
+
 .structured-meanings,
 .detailed-definitions {
   min-width: 0;

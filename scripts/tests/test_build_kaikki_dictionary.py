@@ -286,20 +286,27 @@ class KaikkiBuilderTests(unittest.TestCase):
         ])
         self.assertEqual(translation.splitlines(), ["自由的"])
 
-    def test_wordfan_phonetic_wins_and_kaikki_ipa_remains_fallback(self):
+    def test_kaikki_pos_pronunciations_win_and_overlay_is_fallback(self):
         overlay = self.make_overlay([
-            {"word": "free", "phonetic": "friː"},
-            {"word": "overlayempty", "phonetic": ""},
+            {"word": "record", "phonetic": "generic-overlay"},
+            {"word": "overlayonly", "phonetic": "overlay-ipa"},
         ])
         self.build([
-            entry("free", sounds=[{"ipa": "/fɹi/"}]),
-            entry("overlayempty", sounds=[{"ipa": "/oʊvərleɪ/"}]),
-            entry("kaikkionly", sounds=[{"ipa": "/kaɪki/"}]),
+            entry("record", "noun", sounds=[{"ipa": "/ˈɹɛkɔɹd/", "tags": ["US"]}]),
+            entry("record", "verb", sounds=[{"ipa": "/ɹɪˈkɔɹd/", "tags": ["US"]}]),
+            entry("record", "noun", sounds=[{"ipa": "/ˈɹɛkɔɹd/", "tags": ["US"]}]),
+            entry("overlayonly"),
+            entry("kaikkionly", sounds=[{"ipa": "/t͡ʃaɹd͡ʒ/"}]),
         ], tag_source=overlay)
-        rows = dict(self.query("SELECT normalized_word,phonetic FROM dictionary_entries"))
-        self.assertEqual(rows["free"], "friː")
-        self.assertEqual(rows["overlayempty"], "/oʊvərleɪ/")
-        self.assertEqual(rows["kaikkionly"], "/kaɪki/")
+        rows = {row[0]: row for row in self.query("SELECT normalized_word,phonetic,detail FROM dictionary_entries")}
+        self.assertEqual(rows["record"][1], "/ˈrɛkɔrd/")
+        pronunciations = json.loads(rows["record"][2])["pronunciations"]
+        self.assertEqual(pronunciations, [
+            {"pos": "n.", "ipa": "/ˈrɛkɔrd/", "rawIpa": "/ˈɹɛkɔɹd/", "source": "kaikki", "accent": "US"},
+            {"pos": "v.", "ipa": "/rɪˈkɔrd/", "rawIpa": "/ɹɪˈkɔɹd/", "source": "kaikki", "accent": "US"},
+        ])
+        self.assertEqual(rows["overlayonly"][1], "overlay-ipa")
+        self.assertEqual(rows["kaikkionly"][1], "/tʃardʒ/")
 
     def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
         self.assertTrue(has_han_text("费用"))

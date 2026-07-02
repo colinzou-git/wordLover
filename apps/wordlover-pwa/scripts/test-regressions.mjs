@@ -39,6 +39,7 @@ const {
 const {
   hasStructuredDictionaryDetail,
   parseDictionaryDetail,
+  renderPronunciationLine,
   renderStructuredDictionaryResult,
 } = await import("../public/dictionary-rendering.js");
 
@@ -160,6 +161,22 @@ test("Malformed or legacy dictionary detail does not activate structured renderi
   assert.equal(parseDictionaryDetail("{bad"), null);
   assert.equal(parseDictionaryDetail(null), null);
   assert.equal(hasStructuredDictionaryDetail(parseDictionaryDetail('{"unrelated":true}')), false);
+});
+
+test("POS-specific pronunciations render inline with one speaker per pronunciation", () => {
+  const detail = {
+    pronunciations: [
+      { pos: "n.", ipa: "/ˈrɛkɔrd/", source: "kaikki" },
+      { pos: "v.", ipa: "/rɪˈkɔrd/", source: "kaikki" },
+      { pos: "n.", ipa: "/ˈrɛkɔrd/", source: "kaikki" },
+    ],
+  };
+  const html = renderPronunciationLine("record", detail);
+  assert.match(html, /n\..*\/ˈrɛkɔrd\/.*\|.*v\..*\/rɪˈkɔrd\//);
+  assert.equal((html.match(/pronunciation-speaker/g) ?? []).length, 2);
+  assert.equal((html.match(/data-speak-term="record"/g) ?? []).length, 2);
+  assert.equal(renderPronunciationLine("free", { pronunciations: [{ pos: "adj.", ipa: "/fri/" }] }), "");
+  assert.equal(renderPronunciationLine("legacy", null), "");
 });
 
 test("Goals preserve an explicit zero-new-word target", () => {

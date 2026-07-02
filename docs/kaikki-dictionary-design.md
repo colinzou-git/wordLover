@@ -47,10 +47,12 @@ Curated `tag`, `is_toefl`, `frq`, `bnc`, `collins`, and `oxford` values are
 matched by normalized word. Raw Kaikki tags/topics/categories go only in
 `detail.kaikki`, never `dictionary_entries.tag`.
 
-For pronunciation, the existing WordFan/ECDICT overlay phonetic wins when it is
-available so common words retain the product's established notation. Raw Kaikki
-IPA remains the fallback for Kaikki-only words or overlay rows without phonetic
-data.
+For pronunciation, Kaikki IPA from the exact entry/POS is the source of truth.
+The builder conservatively normalizes rhotic/affricate symbols for display,
+preserves the original value in `detail.pronunciations[].rawIpa`, and stores all
+distinct POS-specific pronunciations. The WordFan/ECDICT phonetic is used only
+when Kaikki has no IPA. One pronunciation keeps the compact title layout;
+multiple pronunciations render inline by POS with a speaker button for each.
 
 Chinese priority is:
 

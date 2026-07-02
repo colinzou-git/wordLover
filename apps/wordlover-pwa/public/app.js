@@ -2,17 +2,18 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260702-1";
+} from "./fsrs-scheduler.js?v=20260702-2";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260702-1";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260702-2";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
   parseDictionaryDetail,
+  renderPronunciationLine,
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260702-1";
+} from "./dictionary-rendering.js?v=20260702-2";
 
 import {
   isEncryptedRecord,
@@ -21,12 +22,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260702-1";
+} from "./persistence.js?v=20260702-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260702-1";
+} from "./spelling.js?v=20260702-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -41,14 +42,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260702-1";
+} from "./ui-preferences.js?v=20260702-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260702-1";
+} from "./review-state.js?v=20260702-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -69,7 +70,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260702-1";
+} from "./study-one-more.js?v=20260702-2";
 
 import {
   studyEventTrack,
@@ -81,11 +82,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260702-1";
+} from "./sync.js?v=20260702-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260702-1";
+} from "./goal-forecast.js?v=20260702-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -97,11 +98,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260702-1";
+} from "./tracks.js?v=20260702-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260702-1";
+} from "./full-dictionary.js?v=20260702-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -243,7 +244,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260702-1-v148";
+const APP_VERSION = "0.6.2-product.20260702-2-v149";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -251,7 +252,7 @@ const APP_VERSION = "0.6.2-product.20260702-1-v148";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v148";
+const SHELL_CACHE_VERSION = "wordlover-shell-v149";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
@@ -1587,6 +1588,7 @@ function renderResult(data) {
   const spellingItem = getSpellingItem(data.term);
   const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
   const structuredDetail = parseDictionaryDetail(data.detail);
+  const pronunciationHtml = renderPronunciationLine(data.term, structuredDetail);
   const structuredHtml = hasStructuredDictionaryDetail(structuredDetail)
     ? renderStructuredDictionaryResult(data, structuredDetail)
     : "";
@@ -1594,10 +1596,11 @@ function renderResult(data) {
     <div class="result-head">
       <div class="result-title-row">
         <h2>${escapeHtml(data.term)}</h2>
-        ${data.phonetic ? `<span class="word-ipa">${escapeHtml(data.phonetic)}</span>` : ""}
-        ${renderSpeakerButton(data.term)}
+        ${pronunciationHtml ? "" : data.phonetic ? `<span class="word-ipa">${escapeHtml(data.phonetic)}</span>` : ""}
+        ${pronunciationHtml ? "" : renderSpeakerButton(data.term)}
         ${renderAiChatButton(data.term)}
       </div>
+      ${pronunciationHtml}
       <p class="result-entry-type">${escapeHtml(data.entryType)}</p>
       ${data.dictionaryCoverage === "full" ? `<p class="small muted">Full 770,770-entry dictionary</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
@@ -9550,6 +9553,7 @@ window.WordLoverApp = {
     renderDisplayMeanings: renderStructuredDisplayMeanings,
     renderDetailedDefinitions: renderStructuredDetailedDefinitions,
     renderStructuredResult: renderStructuredDictionaryResult,
+    renderPronunciationLine,
   },
   ensureDictionaryLoaded,
   // Offline-readiness probe for tests: asks the active worker which required shell

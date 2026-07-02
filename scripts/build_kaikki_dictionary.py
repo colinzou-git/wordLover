@@ -303,6 +303,54 @@ def first_ipa(entry: dict) -> str | None:
     return clean_text(entry.get("ipa"))
 
 
+def normalize_kaikki_ipa_to_wordfan_style(value: str | None) -> str | None:
+    raw = clean_text(value)
+    if not raw:
+        return None
+    text = raw.strip().strip("[]/")
+    for old, new in (("ɹ", "r"), ("t͡ʃ", "tʃ"), ("d͡ʒ", "dʒ")):
+        text = text.replace(old, new)
+    text = re.sub(r"\s+", " ", text).strip()
+    return f"/{text}/" if text else None
+
+
+def extract_pronunciations(entries: list[dict]) -> list[dict]:
+    pronunciations: list[dict] = []
+    for entry in entries:
+        raw_values: list[tuple[str, str | None]] = []
+        for sound in entry.get("sounds") or []:
+            if not isinstance(sound, dict):
+                continue
+            raw = clean_text(sound.get("ipa"))
+            if raw:
+                accent = clean_text("/".join(str(tag) for tag in sound.get("tags") or []))
+                raw_values.append((raw, accent))
+        if not raw_values and clean_text(entry.get("ipa")):
+            raw_values.append((clean_text(entry.get("ipa")) or "", None))
+        for raw, accent in raw_values:
+            normalized = normalize_kaikki_ipa_to_wordfan_style(raw)
+            if normalized:
+                item = {
+                    "pos": map_pos(entry.get("pos")), "ipa": normalized,
+                    "rawIpa": raw, "source": "kaikki",
+                }
+                if accent:
+                    item["accent"] = accent
+                pronunciations.append(item)
+    return dedupe_pronunciations(pronunciations)
+
+
+def dedupe_pronunciations(pronunciations: list[dict]) -> list[dict]:
+    output: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in pronunciations:
+        key = tuple(normalize_sense_key(item.get(name)) for name in ("pos", "ipa", "rawIpa", "accent"))
+        if key not in seen:
+            seen.add(key)
+            output.append(item)
+    return output
+
+
 def extract_definition_lines(entry: dict) -> list[str]:
     prefix = map_pos(entry.get("pos"))
     lines: list[str] = []
@@ -461,7 +509,7 @@ def apply_overlay(row_data: RowData, overlay: OverlayRecord | None) -> RowData:
     row_data.is_toefl = max(row_data.is_toefl, overlay.is_toefl, int(contains_tag(row_data.tag, "toefl")))
     row_data.frq, row_data.bnc = overlay.frq, overlay.bnc
     row_data.collins, row_data.oxford = overlay.collins, overlay.oxford
-    row_data.phonetic = overlay.phonetic or row_data.phonetic
+    row_data.phonetic = row_data.phonetic or overlay.phonetic
     return row_data
 
 
@@ -777,7 +825,7 @@ def serialize_legacy_translation(display_meanings: list[dict]) -> str | None:
     return "\n".join(value or "" for value in values) if any(values) else None
 
 
-def serialize_detail(display_meanings: list[dict], detailed_definitions: list[dict], entries: list[dict], translation_fallback: tuple[str, str] | None = None, supplement: dict | None = None) -> str | None:
+def serialize_detail(display_meanings: list[dict], detailed_definitions: list[dict], entries: list[dict], translation_fallback: tuple[str, str] | None = None, supplement: dict | None = None, pronunciations: list[dict] | None = None) -> str | None:
     raw_pos, topics, tags, categories = [], [], [], []
     for entry in entries:
         _append_unique(raw_pos, [entry.get("pos")], 12)
@@ -792,6 +840,8 @@ def serialize_detail(display_meanings: list[dict], detailed_definitions: list[di
         detail["displayMeanings"] = display_meanings
     if detailed_definitions:
         detail["detailedDefinitions"] = detailed_definitions
+    if pronunciations:
+        detail["pronunciations"] = pronunciations
     kaikki = {key: value for key, value in (("rawPos", raw_pos), ("topics", topics), ("senseTags", tags), ("categories", categories)) if value}
     if kaikki:
         detail["kaikki"] = kaikki
@@ -972,6 +1022,7 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
     display = build_display_meanings(entries, args)
     legacy = build_legacy_meanings(entries, args)
     detailed = build_detailed_definitions(entries, args)
+    pronunciations = extract_pronunciations(entries)
     sense_zh = next((item["zh"] for item in display
                      if item.get("zh") and item.get("zhSource") == "kaikki-sense"), None)
     aligned_entry_zh = next((item["zh"] for item in display
@@ -993,14 +1044,14 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
         for item in display:
             if not item.get("zh"):
                 item["zhSource"] = "none"
-    phonetic = next((first_ipa(entry) for entry in entries if first_ipa(entry)), None)
+    phonetic = pronunciations[0]["ipa"] if pronunciations else None
     row = RowData(
         word=word, normalized_word=normalized, phonetic=phonetic,
         definition=serialize_legacy_definition(legacy),
         translation=translation or serialize_legacy_translation(display),
         pos=merge_tag_tokens(map_pos(entry.get("pos")) for entry in entries),
         exchange=exchange,
-        detail=serialize_detail(display, detailed, entries, fallback), zh_source=zh_source,
+        detail=serialize_detail(display, detailed, entries, fallback, pronunciations=pronunciations), zh_source=zh_source,
     )
     return apply_overlay(row, overlay)
 
