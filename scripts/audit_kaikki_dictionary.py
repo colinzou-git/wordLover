@@ -109,6 +109,7 @@ def audit_chinese_and_detail(conn: sqlite3.Connection, total: int) -> tuple[dict
         for source, key in (
             ("kaikki-sense", "rows_with_kaikki_sense_chinese"),
             ("kaikki-entry", "rows_with_kaikki_entry_chinese"),
+            ("kaikki-entry-sense", "rows_with_kaikki_entry_chinese"),
             ("wordfan-full-overlay", "rows_with_wordfan_full_overlay_chinese"),
             ("wordfan-slim-overlay", "rows_with_wordfan_slim_overlay_chinese"),
         ):

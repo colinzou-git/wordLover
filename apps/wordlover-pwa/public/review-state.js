@@ -6,7 +6,7 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260702-2";
+} from "./fsrs-scheduler.js?v=20260702-3";
 
 const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const FSRS_RATINGS = ["again", "hard", "good", "easy"];

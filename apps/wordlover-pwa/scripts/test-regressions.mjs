@@ -37,6 +37,8 @@ const {
   fullDictionaryStorageConfig,
 } = await import("../public/full-dictionary.js");
 const {
+  canonicalPronunciationKey,
+  groupPronunciationsByIpa,
   hasStructuredDictionaryDetail,
   parseDictionaryDetail,
   renderPronunciationLine,
@@ -177,6 +179,36 @@ test("POS-specific pronunciations render inline with one speaker per pronunciati
   assert.equal((html.match(/data-speak-term="record"/g) ?? []).length, 2);
   assert.equal(renderPronunciationLine("free", { pronunciations: [{ pos: "adj.", ipa: "/fri/" }] }), "");
   assert.equal(renderPronunciationLine("legacy", null), "");
+});
+
+test("Identical cross-POS pronunciations collapse and mixed IPA groups combine POS labels", () => {
+  assert.equal(canonicalPronunciationKey("ˈsame/"), "/ˈsame/");
+  assert.equal(canonicalPronunciationKey("/ˈsame"), "/ˈsame/");
+  assert.equal(canonicalPronunciationKey("[ˈsame]"), "/ˈsame/");
+  const same = { pronunciations: [{ pos: "n.", ipa: "ˈsame/" }, { pos: "v.", ipa: "/ˈsame" }] };
+  assert.equal(renderPronunciationLine("dictionary", same), "");
+  const grouped = groupPronunciationsByIpa([
+    { pos: "n.", ipa: "/A/" }, { pos: "adj.", ipa: "[A]" }, { pos: "v.", ipa: "/B/" },
+  ]);
+  assert.deepEqual(grouped, [
+    { ipa: "/A/", positions: ["n.", "adj."] },
+    { ipa: "/B/", positions: ["v."] },
+  ]);
+  const html = renderPronunciationLine("record", { pronunciations: [
+    { pos: "n.", ipa: "/A/" }, { pos: "adj.", ipa: "A/" }, { pos: "v.", ipa: "/B" },
+  ] });
+  assert.match(html, /n\., adj\..*\/A\/.*\|.*v\..*\/B\//);
+  assert.equal((html.match(/pronunciation-speaker/g) ?? []).length, 2);
+});
+
+test("Entry translation sense labels render as compact bilingual meanings", () => {
+  const html = renderStructuredDictionaryResult({}, {
+    displayMeanings: [{
+      pos: "n.", zh: "字典, 词典, 辞典, 辞林",
+      en: "publication that explains the meanings of an ordered list of words",
+    }],
+  });
+  assert.match(html, /字典, 词典, 辞典, 辞林.*\|.*publication that explains/);
 });
 
 test("Goals preserve an explicit zero-new-word target", () => {

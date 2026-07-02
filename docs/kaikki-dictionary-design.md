@@ -53,6 +53,10 @@ preserves the original value in `detail.pronunciations[].rawIpa`, and stores all
 distinct POS-specific pronunciations. The WordFan/ECDICT phonetic is used only
 when Kaikki has no IPA. One pronunciation keeps the compact title layout;
 multiple pronunciations render inline by POS with a speaker button for each.
+Pronunciation display groups records by canonical slash-wrapped IPA. If every
+POS shares one IPA, the normal single title pronunciation is used. When IPA
+differs, POS labels sharing one IPA are combined (for example `n., adj. /A/ |
+v. /B/`) with one speaker per unique pronunciation.
 
 Chinese priority is:
 
@@ -90,6 +94,10 @@ strongly sense-matched entry translations appear inside
 `detail.displayMeanings[]`. Their provenance remains `kaikki-entry`; only
 Chinese attached directly to a Kaikki sense uses `kaikki-sense`. The selected
 source counters follow the same distinction.
+Entry-level Chinese translations with their own useful English `sense` label
+also become compact bilingual rows with `zhSource=kaikki-entry-sense`, even when
+that concise label is a paraphrase of the longer detailed gloss. Chinese entry
+translations without a sense label remain general fallback only.
 
 ## STEM and inflection preservation
 

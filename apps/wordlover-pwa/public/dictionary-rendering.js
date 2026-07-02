@@ -67,26 +67,53 @@ export function renderStructuredDictionaryResult(_data, detail) {
   return `<div class="structured-dictionary-result">${fallback}${renderStructuredDisplayMeanings(detail?.displayMeanings)}${renderStructuredDetailedDefinitions(detail?.detailedDefinitions)}</div>`;
 }
 
+export function canonicalPronunciationKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const inner = raw.replace(/^[\/[]+/, "").replace(/[\/\]]+$/, "").trim();
+  return inner ? `/${inner}/` : "";
+}
+
 export function structuredPronunciations(detail) {
   if (!Array.isArray(detail?.pronunciations)) return [];
   const seen = new Set();
   return detail.pronunciations.filter((item) => {
-    const ipa = String(item?.ipa ?? "").trim();
+    const ipa = canonicalPronunciationKey(item?.ipa);
     if (!ipa) return false;
     const key = `${String(item?.pos ?? "").trim()}\u0000${ipa}`;
     if (seen.has(key)) return false;
     seen.add(key);
+    item.ipa = ipa;
     return true;
   });
 }
 
+export function groupPronunciationsByIpa(pronunciations) {
+  const groups = [];
+  const byIpa = new Map();
+  for (const item of pronunciations ?? []) {
+    const ipa = canonicalPronunciationKey(item?.ipa);
+    if (!ipa) continue;
+    let group = byIpa.get(ipa);
+    if (!group) {
+      group = { ipa, positions: [] };
+      byIpa.set(ipa, group);
+      groups.push(group);
+    }
+    const pos = String(item?.pos ?? "").trim();
+    if (pos && !group.positions.includes(pos)) group.positions.push(pos);
+  }
+  return groups;
+}
+
 export function renderPronunciationLine(term, detail) {
-  const pronunciations = structuredPronunciations(detail);
-  if (pronunciations.length < 2) return "";
+  const groups = groupPronunciationsByIpa(structuredPronunciations(detail));
+  if (groups.length < 2) return "";
   const safeTerm = escapeDictionaryHtml(term);
-  return `<div class="pos-pronunciations">${pronunciations.map((item, index) => {
-    const pos = item?.pos ? `<span class="pronunciation-pos">${escapeDictionaryHtml(item.pos)}</span> ` : "";
-    const speaker = `<button type="button" class="speaker-button pronunciation-speaker" data-speak-term="${safeTerm}" aria-label="Pronounce ${safeTerm} ${escapeDictionaryHtml(item?.pos ?? "")}" title="Pronounce">🔊</button>`;
-    return `${index ? '<span class="pronunciation-divider">|</span> ' : ""}${pos}<span class="word-ipa">${escapeDictionaryHtml(item.ipa)}</span>${speaker}`;
+  return `<div class="pos-pronunciations">${groups.map((group, index) => {
+    const label = group.positions.join(", ");
+    const pos = label ? `<span class="pronunciation-pos">${escapeDictionaryHtml(label)}</span> ` : "";
+    const speaker = `<button type="button" class="speaker-button pronunciation-speaker" data-speak-term="${safeTerm}" aria-label="Pronounce ${safeTerm} ${escapeDictionaryHtml(label)}" title="Pronounce">🔊</button>`;
+    return `${index ? '<span class="pronunciation-divider">|</span> ' : ""}${pos}<span class="word-ipa">${escapeDictionaryHtml(group.ipa)}</span>${speaker}`;
   }).join(" ")}</div>`;
 }

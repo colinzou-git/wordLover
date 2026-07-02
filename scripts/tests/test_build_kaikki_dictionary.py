@@ -308,6 +308,55 @@ class KaikkiBuilderTests(unittest.TestCase):
         self.assertEqual(rows["overlayonly"][1], "overlay-ipa")
         self.assertEqual(rows["kaikkionly"][1], "/tʃardʒ/")
 
+    def test_same_ipa_across_pos_is_canonical_but_keeps_pos_metadata(self):
+        self.build([
+            entry("dictionary", "noun", sounds=[{"ipa": "ˈdɪkʃənɛri/"}]),
+            entry("dictionary", "verb", sounds=[{"ipa": "/ˈdɪkʃənɛri"}]),
+            entry("dictionary", "noun", sounds=[{"ipa": "[ˈdɪkʃənɛri]"}]),
+        ])
+        phonetic, detail_raw = self.query("SELECT phonetic,detail FROM dictionary_entries")[0]
+        self.assertEqual(phonetic, "/ˈdɪkʃənɛri/")
+        pronunciations = json.loads(detail_raw)["pronunciations"]
+        self.assertEqual([item["ipa"] for item in pronunciations], [
+            "/ˈdɪkʃənɛri/", "/ˈdɪkʃənɛri/",
+        ])
+        self.assertEqual([item["pos"] for item in pronunciations], ["n.", "v."])
+
+    def test_entry_translation_sense_label_becomes_compact_meaning(self):
+        long_gloss = (
+            "A reference work listing words or names from one or more languages, usually ordered "
+            "alphabetically, explaining each word's meanings or senses."
+        )
+        value = {
+            "word": "dictionary", "lang_code": "en", "pos": "noun",
+            "senses": [{"glosses": [long_gloss]}],
+            "translations": [{
+                "lang": "Chinese Mandarin", "lang_code": "zh",
+                "sense": "publication that explains the meanings of an ordered list of words",
+                "word": "字典, 词典, 辞典, 辞林",
+            }],
+        }
+        self.build([value])
+        definition, translation, detail_raw = self.query("SELECT definition,translation,detail FROM dictionary_entries")[0]
+        detail = json.loads(detail_raw)
+        self.assertEqual(detail["displayMeanings"], [{
+            "rank": 1, "pos": "n.", "zh": "字典, 词典, 辞典, 辞林",
+            "zhSource": "kaikki-entry-sense",
+            "en": "publication that explains the meanings of an ordered list of words",
+            "domain": None, "source": "Kaikki/Wiktextract",
+        }])
+        self.assertEqual(detail["detailedDefinitions"][0]["senses"][0]["definition"], long_gloss)
+        self.assertNotIn("translationFallback", detail)
+        self.assertIn("A reference work", definition)
+        self.assertEqual(translation, "字典, 词典, 辞典, 辞林")
+
+    def test_entry_translation_without_sense_remains_fallback_only(self):
+        value = entry("dictionary", translations=[{"lang_code": "zh", "word": "字典"}])
+        self.build([value])
+        detail = json.loads(self.query("SELECT detail FROM dictionary_entries")[0][0])
+        self.assertNotIn("displayMeanings", detail)
+        self.assertEqual(detail["translationFallback"], {"zh": "字典", "zhSource": "kaikki-entry"})
+
     def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
         self.assertTrue(has_han_text("费用"))
         self.assertTrue(has_han_text("\uf900"))

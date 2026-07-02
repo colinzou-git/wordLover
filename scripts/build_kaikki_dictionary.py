@@ -771,10 +771,29 @@ def extract_senses(entry: dict, args: argparse.Namespace | None = None, start_or
     return output
 
 
+def extract_entry_translation_sense_records(entry: dict, args: argparse.Namespace | None = None, start_order: int = 0) -> list[SenseRecord]:
+    output: list[SenseRecord] = []
+    for candidate in entry.get("translations") or []:
+        if not isinstance(candidate, dict) or not is_chinese_translation_item(candidate):
+            continue
+        english = clean_text(candidate.get("sense"))
+        chinese_values = extract_chinese_translations({"translations": [candidate]})
+        if not english or not chinese_values:
+            continue
+        output.append(SenseRecord(
+            clean_text(entry.get("pos")), map_pos(entry.get("pos")), english,
+            compact_english_definition(english), chinese_values[0], "kaikki-entry-sense",
+            None, [], [], [], [str(x) for x in entry.get("categories") or []],
+            start_order + len(output),
+        ))
+    return output
+
+
 def build_display_meanings(entries: list[dict], args: argparse.Namespace) -> list[dict]:
     senses: list[SenseRecord] = []
     for entry in entries:
         senses.extend(extract_senses(entry, args, len(senses)))
+        senses.extend(extract_entry_translation_sense_records(entry, args, len(senses)))
     output: list[dict] = []
     for rank, sense in enumerate(select_compact_senses(senses, args.max_compact_senses), 1):
         output.append({
@@ -1025,8 +1044,9 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
     pronunciations = extract_pronunciations(entries)
     sense_zh = next((item["zh"] for item in display
                      if item.get("zh") and item.get("zhSource") == "kaikki-sense"), None)
-    aligned_entry_zh = next((item["zh"] for item in display
-                             if item.get("zh") and item.get("zhSource") == "kaikki-entry"), None)
+    aligned_entry_item = next((item for item in display
+                               if item.get("zh") and item.get("zhSource") in {"kaikki-entry", "kaikki-entry-sense"}), None)
+    aligned_entry_zh = aligned_entry_item["zh"] if aligned_entry_item else None
     entry_zh_values: list[str] = []
     for entry in entries:
         entry_zh_values.extend(extract_chinese_translations(entry))
@@ -1034,6 +1054,8 @@ def row_from_aggregate(entries: list[dict], normalized: str, word: str, exchange
     translation, zh_source = choose_chinese_translation(
         sense_zh, aligned_entry_zh or entry_zh, full_translation, slim_translation
     )
+    if not sense_zh and aligned_entry_item:
+        translation, zh_source = aligned_entry_zh, aligned_entry_item["zhSource"]
     fallback = (
         (translation, zh_source)
         if zh_source.startswith("wordfan-")
@@ -1230,6 +1252,7 @@ def build_database(args: argparse.Namespace) -> dict:
             source_counter = {
                 "kaikki-sense": "selected_rows_with_kaikki_sense_chinese",
                 "kaikki-entry": "selected_rows_with_kaikki_entry_chinese",
+                "kaikki-entry-sense": "selected_rows_with_kaikki_entry_chinese",
                 "wordfan-full-overlay": "selected_rows_with_full_dictionary_chinese_overlay",
                 "wordfan-slim-overlay": "selected_rows_with_slim_dictionary_chinese_overlay",
             }.get(row.zh_source)
