@@ -106,8 +106,10 @@ an adjective `excited` always beat aliases.
 ## Structured display
 
 `detail.displayMeanings` stores compact meanings in learner/source order without
-POS grouping. `detail.detailedDefinitions` groups full English senses/examples
-by POS. The target is:
+POS grouping. Translated senses are prioritized within each POS and selected in
+round-robin POS order, so a long noun entry cannot hide useful verb translations
+behind the compact-sense limit. `detail.detailedDefinitions` groups full English
+senses/examples by POS. The target is:
 
 ```text
 charge [tʃɑːrdʒ]

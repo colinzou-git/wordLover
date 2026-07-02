@@ -628,6 +628,34 @@ def compact_english_definition(gloss: str) -> str:
     return (clean_text(gloss) or "")[:240]
 
 
+def select_compact_senses(senses: list[SenseRecord], limit: int) -> list[SenseRecord]:
+    """Select learner-facing senses without letting one POS exhaust the limit.
+
+    Kaikki emits separate entry objects by POS. A plain source-order slice can
+    therefore consume the entire compact display with noun senses before any
+    translated verb sense is considered. Prefer translated senses within each
+    POS, then take one sense per POS in round-robin order. This preserves source
+    order inside each POS while producing the bilingual, mixed-POS sequence the
+    compact display is intended to provide.
+    """
+    if limit <= 0:
+        return []
+    groups: OrderedDict[str, list[SenseRecord]] = OrderedDict()
+    for sense in senses:
+        key = sense.display_pos or sense.raw_pos or ""
+        groups.setdefault(key, []).append(sense)
+    queues = [
+        [item for item in group if item.zh] + [item for item in group if not item.zh]
+        for group in groups.values()
+    ]
+    selected: list[SenseRecord] = []
+    while len(selected) < limit and any(queues):
+        for queue in queues:
+            if queue and len(selected) < limit:
+                selected.append(queue.pop(0))
+    return selected
+
+
 def extract_senses(entry: dict, args: argparse.Namespace | None = None, start_order: int = 0) -> list[SenseRecord]:
     args = args or argparse.Namespace(max_examples_per_sense=3, max_example_chars=240)
     output: list[SenseRecord] = []
@@ -658,7 +686,7 @@ def build_display_meanings(entries: list[dict], args: argparse.Namespace) -> lis
     for entry in entries:
         senses.extend(extract_senses(entry, args, len(senses)))
     output: list[dict] = []
-    for rank, sense in enumerate(senses[: args.max_compact_senses], 1):
+    for rank, sense in enumerate(select_compact_senses(senses, args.max_compact_senses), 1):
         output.append({
             "rank": rank, "pos": sense.display_pos, "zh": sense.zh,
             "zhSource": sense.zh_source if sense.zh else "none", "en": sense.compact_gloss,

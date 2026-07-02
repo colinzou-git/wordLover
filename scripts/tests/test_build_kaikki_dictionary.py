@@ -224,6 +224,33 @@ class KaikkiBuilderTests(unittest.TestCase):
         self.assertEqual(report["selected_rows_with_kaikki_sense_chinese"], 1)
         self.assertEqual(report["available_rows_with_kaikki_sense_chinese"], 1)
 
+    def test_compact_meanings_interleave_translated_senses_across_pos(self):
+        noun = {
+            "word": "charge", "lang_code": "en", "pos": "noun",
+            "senses": [
+                {"glosses": ["amount of money paid"], "translations": [{"lang_code": "zh", "word": "费用"}]},
+                {"glosses": ["electric property"], "translations": [{"lang_code": "zh", "word": "电荷"}]},
+                {"glosses": ["an accusation"], "translations": [{"lang_code": "zh", "word": "指控"}]},
+            ],
+        }
+        verb = {
+            "word": "charge", "lang_code": "en", "pos": "verb",
+            "senses": [
+                {"glosses": ["ask someone to pay"], "translations": [{"lang_code": "zh", "word": "收费"}]},
+                {"glosses": ["supply electricity"], "translations": [{"lang_code": "zh", "word": "充电"}]},
+            ],
+        }
+        self.build([noun, verb], max_compact_senses=5)
+        detail = json.loads(self.query("SELECT detail FROM dictionary_entries")[0][0])
+        compact = [(item["pos"], item["zh"], item["en"]) for item in detail["displayMeanings"]]
+        self.assertEqual(compact, [
+            ("n.", "费用", "amount of money paid"),
+            ("v.", "收费", "ask someone to pay"),
+            ("n.", "电荷", "electric property"),
+            ("v.", "充电", "supply electricity"),
+            ("n.", "指控", "an accusation"),
+        ])
+
     def test_broad_chinese_detection_rejects_non_han_and_non_chinese(self):
         self.assertTrue(has_han_text("费用"))
         self.assertTrue(has_han_text("\uf900"))
