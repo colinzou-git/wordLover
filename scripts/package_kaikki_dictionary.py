@@ -15,6 +15,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PUBLIC = REPO_ROOT / "apps/wordlover-pwa/public"
 PREVIEW_RELATIVE = Path("kaikki-preview/local")
+RELEASE_RELATIVE = Path("kaikki")
+ALLOWED_OUTPUT_SUBDIRS = {PREVIEW_RELATIVE.as_posix(), RELEASE_RELATIVE.as_posix()}
 KAIKKI_SOURCES = ["Kaikki/Wiktextract", "current WordFan tag/translation overlay", "WordFan K-12/AP STEM"]
 SLIM_DETAIL_POLICY = "full"
 PROTECTED_PRODUCTION_PATHS = (
@@ -36,25 +38,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Allow fixture packaging without the current full WordFan Chinese fallback overlay.")
     parser.add_argument("--work-dir", type=Path, default=Path("data/kaikki-build"))
     parser.add_argument("--public-dir", type=Path, default=DEFAULT_PUBLIC)
+    parser.add_argument("--output-subdir", default=PREVIEW_RELATIVE.as_posix(),
+                        help="Safe public output: kaikki-preview/local (default) or kaikki.")
     parser.add_argument("--version", default=f"{time.strftime('%Y.%m.%d')}.kaikki")
     parser.add_argument("--target-rows", type=int, default=50_000,
                         help="Requested core size; mandatory ranked/STEM rows may make the final count larger.")
     parser.add_argument("--shard-count", type=int, default=128)
     parser.add_argument("--slim-detail-policy", choices=("full", "none"), default=SLIM_DETAIL_POLICY,
                         help="Keep structured detail in the preview slim DB by default.")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.output_subdir not in ALLOWED_OUTPUT_SUBDIRS:
+        parser.error("--output-subdir must be 'kaikki-preview/local' or 'kaikki'")
+    return args
 
 
 def run_command(command: list[str]) -> None:
     subprocess.run(command, cwd=REPO_ROOT, check=True)
 
 
-def preview_output(public_dir: Path) -> Path:
-    return (public_dir / PREVIEW_RELATIVE).resolve()
+def preview_output(public_dir: Path, output_subdir: str = PREVIEW_RELATIVE.as_posix()) -> Path:
+    if output_subdir not in ALLOWED_OUTPUT_SUBDIRS:
+        raise ValueError(f"Unsafe Kaikki output subdir: {output_subdir}")
+    return (public_dir / output_subdir).resolve()
 
 
-def validate_preview_output(output: Path, public_dir: Path) -> Path:
-    expected = preview_output(public_dir)
+def validate_preview_output(output: Path, public_dir: Path,
+                            output_subdir: str = PREVIEW_RELATIVE.as_posix()) -> Path:
+    expected = preview_output(public_dir, output_subdir)
     if output.resolve() != expected:
         raise ValueError(f"Kaikki output must be exactly {expected}")
     return expected
@@ -89,7 +99,9 @@ def build_slim_kaikki(args: argparse.Namespace, full_db: Path) -> Path:
 
 
 def package_slim_web(args: argparse.Namespace, slim_db: Path) -> Path:
-    output = validate_preview_output(preview_output(args.public_dir), args.public_dir)
+    output = validate_preview_output(
+        preview_output(args.public_dir, args.output_subdir), args.public_dir, args.output_subdir,
+    )
     run_command([
         sys.executable, "scripts/package_dictionary_web.py", "--input", str(slim_db),
         "--output-dir", str(output), "--version", f"{args.version}.slim", "--variant", "kaikki-slim",
@@ -100,12 +112,14 @@ def package_slim_web(args: argparse.Namespace, slim_db: Path) -> Path:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["variant"] = "kaikki-slim"
     manifest["sources"] = KAIKKI_SOURCES
+    manifest["dictionaryId"] = "kaikki"
+    manifest["dictionaryLabel"] = "Kaikki / Wiktextract"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
 
 
 def package_full_shards(args: argparse.Namespace, full_db: Path) -> Path:
-    output = preview_output(args.public_dir) / "dictionary-full"
+    output = preview_output(args.public_dir, args.output_subdir) / "dictionary-full"
     run_command([
         sys.executable, "scripts/package_dictionary_shards.py", "--input", str(full_db),
         "--output-dir", str(output), "--version", f"{args.version}.full-sharded",
@@ -116,6 +130,8 @@ def package_full_shards(args: argparse.Namespace, full_db: Path) -> Path:
     manifest_path = output / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["sources"] = KAIKKI_SOURCES
+    manifest["dictionaryId"] = "kaikki"
+    manifest["dictionaryLabel"] = "Kaikki / Wiktextract"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
 
@@ -148,7 +164,9 @@ def snapshot_production_paths(public_dir: Path) -> dict:
 
 
 def validate_outputs(args: argparse.Namespace, production_before: dict | None = None) -> dict:
-    output = validate_preview_output(preview_output(args.public_dir), args.public_dir)
+    output = validate_preview_output(
+        preview_output(args.public_dir, args.output_subdir), args.public_dir, args.output_subdir,
+    )
     run_command([sys.executable, "scripts/validate_dictionary_shards.py", str(output / "dictionary-full")])
     required = [output / "dictionary.sqlite", output / "dictionary.sqlite.zst", output / "dictionary-manifest.json", output / "dictionary-full/manifest.json"]
     missing = [str(path) for path in required if not path.is_file()]
@@ -165,6 +183,7 @@ def validate_outputs(args: argparse.Namespace, production_before: dict | None = 
     changed = production_before is not None and production_before != production_after
     return {
         "output": str(output),
+        "outputSubdir": args.output_subdir,
         "files": len(list(output.rglob("*"))),
         "productionPathsChanged": changed,
         "slimDetailPolicy": args.slim_detail_policy,

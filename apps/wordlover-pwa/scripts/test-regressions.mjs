@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 process.env.TZ = "America/Los_Angeles";
 
@@ -34,6 +35,16 @@ const {
   resolveDictionaryConfig,
 } = await import("../public/dictionary-config.js");
 const {
+  DEFAULT_DICTIONARY_ID,
+  DICTIONARY_REGISTRY,
+  userSelectableDictionaries,
+} = await import("../public/dictionary-registry.js");
+const {
+  dictionaryRecordMetadata,
+  readSelectedDictionaryId,
+  saveSelectedDictionaryId,
+} = await import("../public/dictionary-selection.js");
+const {
   fullDictionaryStorageConfig,
 } = await import("../public/full-dictionary.js");
 const {
@@ -55,6 +66,54 @@ test("Dictionary configuration keeps production URLs by default", () => {
   assert.equal(config.dictionaryManifestUrl, "/dictionary-manifest.json");
   assert.equal(config.fullDictionaryBaseUrl, "/dictionary-full");
   assert.equal(config.mode, "production");
+  assert.equal(config.id, "ecdict");
+  assert.equal(DEFAULT_DICTIONARY_ID, "ecdict");
+});
+
+test("Kaikki release config and resolver priorities are stable", () => {
+  const kaikki = resolveDictionaryConfig("", { savedDictionaryId: "kaikki" });
+  assert.equal(kaikki.id, "kaikki");
+  assert.equal(kaikki.dictionaryManifestUrl, "/kaikki/dictionary-manifest.json");
+  assert.equal(kaikki.fullDictionaryBaseUrl, "/kaikki/dictionary-full");
+  assert.equal(kaikki.storageScope, "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki", { savedDictionaryId: "ecdict" }).id, "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki", {
+    dictionaryId: "ecdict", savedDictionaryId: "kaikki",
+  }).id, "ecdict");
+  assert.equal(resolveDictionaryConfig("?dictionary=unknown", { savedDictionaryId: "kaikki" }).id, "ecdict");
+  assert.deepEqual(userSelectableDictionaries().map((entry) => entry.id), ["ecdict", "kaikki"]);
+  assert.equal(DICTIONARY_REGISTRY["kaikki-preview"].isPreview, true);
+});
+
+test("Dictionary selection persists normal ids without letting preview queries overwrite it", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  assert.equal(readSelectedDictionaryId(storage), "ecdict");
+  assert.equal(saveSelectedDictionaryId("kaikki", storage), "kaikki");
+  assert.equal(readSelectedDictionaryId(storage), "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki-preview-local", {
+    savedDictionaryId: readSelectedDictionaryId(storage),
+  }).id, "kaikki-preview-local");
+  assert.equal(readSelectedDictionaryId(storage), "kaikki");
+  assert.equal(saveSelectedDictionaryId("kaikki-preview", storage), "ecdict");
+});
+
+test("Dictionary record metadata is additive and legacy records remain valid", () => {
+  const legacy = { term: "charge", normalizedTerm: "charge" };
+  assert.equal(legacy.dictionaryId, undefined);
+  assert.deepEqual(dictionaryRecordMetadata(DICTIONARY_REGISTRY.kaikki, "v2"), {
+    dictionaryId: "kaikki",
+    dictionaryLabel: "Kaikki / Wiktextract",
+    dictionaryDataVersion: "v2",
+  });
+  const sameTermAcrossDictionaries = [
+    { ...legacy, dictionaryId: "ecdict" },
+    { ...legacy, dictionaryId: "kaikki" },
+  ];
+  assert.equal(new Set(sameTermAcrossDictionaries.map((item) => item.normalizedTerm)).size, 1);
 });
 
 test("Production dictionary storage keys remain backward compatible", () => {
@@ -95,6 +154,26 @@ test("Kaikki preview storage keys are isolated from production", () => {
     versionKey: "kaikki-preview-local.dictionaryDataVersion",
     installedKey: "kaikki-preview-local.dictionaryInstalled",
   });
+});
+
+test("Kaikki release SQLite and full-shard storage keys are isolated", () => {
+  assert.deepEqual(dictionaryStorageKeys("kaikki"), {
+    dictionaryKey: "kaikki.dictionary.sqlite",
+    progressKey: "kaikki.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki.dictionary.sqlite.chunk.",
+    versionKey: "kaikki.dictionaryDataVersion",
+    installedKey: "kaikki.dictionaryInstalled",
+  });
+  assert.equal(fullDictionaryStorageConfig("kaikki").manifestKey, "wordfan.fullDictionary.kaikki.manifest.v1");
+  assert.equal(fullDictionaryStorageConfig("kaikki").cachePrefix, "wordfan-full-dictionary-kaikki-v1-");
+});
+
+test("Service worker bypasses cache for release and preview dictionary packages", async () => {
+  const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(source, /path\.startsWith\("\/kaikki\/"\)/);
+  assert.match(source, /path\.startsWith\("\/kaikki-preview\/"\)/);
+  assert.match(source, /path\.startsWith\("\/dictionary-full\/"\)/);
+  assert.match(source, /isDictionaryAssetPath\(url\.pathname\)/);
 });
 
 test("Full dictionary shard storage follows dictionary mode", () => {

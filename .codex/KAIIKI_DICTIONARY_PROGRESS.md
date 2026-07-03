@@ -21,3 +21,15 @@
 - Latest implementation commit: `abc3756`
 - Remaining work: none for #53-#59; all seven issues are closed with validation evidence
 - Exact resume step: wait for new bug reports; do not rebuild generated Kaikki assets unless explicitly requested
+
+# Selectable dictionary run (2026-07-03)
+
+- Current issues: #60, #61, #62, #63, #64, #65, #66, #67
+- Current branch: `feature/kaikki-dictionary-preview`
+- Starting commit: `393f6f0`
+- Files changed: dictionary registry/config/selection; app Settings/runtime/save metadata; service worker; Kaikki packager; docs; JS/Python tests; shell version assets
+- Tests added: config priority/default/preview, selection persistence, storage isolation, service-worker bypass, record provenance, release/preview packaging, unsafe output rejection
+- Tests run: focused JS/Python; full Python discovery (76); PWA build/unit/shell validation; Playwright browser CI
+- Result: all required gates passed; browser `waSqliteOpfs` retains its pre-existing `investigate` verdict
+- Remaining work: regenerate/check code map, inspect diff, commit/push, close #60-#67
+- Exact resume step: run code-map generation/check and production asset diff, then commit feature branch

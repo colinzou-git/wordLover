@@ -296,6 +296,30 @@ git diff -- apps/wordlover-pwa/public/dictionary.sqlite \
 
 ## Promotion, attribution, and limitations
 
+The app registry exposes ECDICT / WordFan as the default and Kaikki /
+Wiktextract as an explicit Settings choice. The selection is stored as
+`selectedDictionaryId`; preview query parameters override only the current page
+and never rewrite that setting. SQLite and full-shard storage remain scoped per
+dictionary, while vocabulary, known words, review events, spelling, history,
+goals, and learning tracks stay shared.
+
+After the release audit passes, build the selectable Kaikki package under its
+isolated runtime directory:
+
+```bash
+python scripts/package_kaikki_dictionary.py \
+  --source "$KAIIKI_SOURCE" \
+  --tag-source "$HOME/dictBackup/dictionary.sqlite" \
+  --full-translation-source "$HOME/dictBackup/dictionary.sqlite" \
+  --work-dir data/kaikki-build \
+  --public-dir apps/wordlover-pwa/public \
+  --output-subdir kaikki
+```
+
+This writes only `public/kaikki/`; root ECDICT assets remain unchanged. The
+generated release package is gitignored and must be produced by the reviewed
+deployment process rather than committed.
+
 Do not use Git LFS for GitHub Pages runtime assets and do not commit generated
 SQLite, zstd, shards, or reports. After the audit passes, promotion requires a
 separate reviewed release that verifies source attribution, manifest hashes,

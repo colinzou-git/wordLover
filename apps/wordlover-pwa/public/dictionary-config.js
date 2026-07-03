@@ -1,36 +1,30 @@
-export const PRODUCTION_DICTIONARY_CONFIG = Object.freeze({
-  dictionaryManifestUrl: "/dictionary-manifest.json",
-  fullDictionaryBaseUrl: "/dictionary-full",
-  mode: "production",
-});
+import {
+  DEFAULT_DICTIONARY_ID,
+  DICTIONARY_REGISTRY,
+} from "./dictionary-registry.js";
 
-export const KAIKKI_PREVIEW_DICTIONARY_CONFIG = Object.freeze({
-  dictionaryManifestUrl: "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-manifest.json",
-  fullDictionaryBaseUrl: "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-full",
-  mode: "kaikki-preview",
-});
+export const PRODUCTION_DICTIONARY_CONFIG = DICTIONARY_REGISTRY.ecdict;
+export const KAIKKI_DICTIONARY_CONFIG = DICTIONARY_REGISTRY.kaikki;
+export const KAIKKI_PREVIEW_DICTIONARY_CONFIG = DICTIONARY_REGISTRY["kaikki-preview"];
+export const KAIKKI_LOCAL_PREVIEW_DICTIONARY_CONFIG = DICTIONARY_REGISTRY["kaikki-preview-local"];
 
-export const KAIKKI_LOCAL_PREVIEW_DICTIONARY_CONFIG = Object.freeze({
-  dictionaryManifestUrl: "/kaikki-preview/local/dictionary-manifest.json",
-  fullDictionaryBaseUrl: "/kaikki-preview/local/dictionary-full",
-  mode: "kaikki-preview-local",
-});
+export function normalizeDictionaryId(value) {
+  const id = String(value ?? "").trim().toLowerCase();
+  return DICTIONARY_REGISTRY[id] ? id : DEFAULT_DICTIONARY_ID;
+}
 
 export function resolveDictionaryConfig(search = "", explicitConfig = {}) {
-  const selected = new URLSearchParams(search).get("dictionary");
-  const defaults = selected === "kaikki-preview"
-    ? KAIKKI_PREVIEW_DICTIONARY_CONFIG
-    : selected === "kaikki-preview-local"
-      ? KAIKKI_LOCAL_PREVIEW_DICTIONARY_CONFIG
-      : PRODUCTION_DICTIONARY_CONFIG;
+  const queryId = new URLSearchParams(search).get("dictionary");
+  const selectedId = explicitConfig.dictionaryId != null
+    ? normalizeDictionaryId(explicitConfig.dictionaryId)
+    : queryId != null
+      ? normalizeDictionaryId(queryId)
+      : normalizeDictionaryId(explicitConfig.savedDictionaryId);
+  const base = DICTIONARY_REGISTRY[selectedId];
   return Object.freeze({
-    ...defaults,
-    ...(explicitConfig.dictionaryManifestUrl
-      ? { dictionaryManifestUrl: explicitConfig.dictionaryManifestUrl }
-      : {}),
-    ...(explicitConfig.fullDictionaryBaseUrl
-      ? { fullDictionaryBaseUrl: explicitConfig.fullDictionaryBaseUrl }
-      : {}),
+    ...base,
+    dictionaryManifestUrl: explicitConfig.dictionaryManifestUrl ?? base.dictionaryManifestUrl,
+    fullDictionaryBaseUrl: explicitConfig.fullDictionaryBaseUrl ?? base.fullDictionaryBaseUrl,
   });
 }
 

@@ -2,9 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260703-1";
+} from "./fsrs-scheduler.js?v=20260703-2";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260703-1";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260703-2";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260703-2";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260703-2";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -13,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260703-1";
+} from "./dictionary-rendering.js?v=20260703-2";
 
 import {
   isEncryptedRecord,
@@ -22,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260703-1";
+} from "./persistence.js?v=20260703-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260703-1";
+} from "./spelling.js?v=20260703-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -42,14 +44,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260703-1";
+} from "./ui-preferences.js?v=20260703-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260703-1";
+} from "./review-state.js?v=20260703-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -70,7 +72,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260703-1";
+} from "./study-one-more.js?v=20260703-2";
 
 import {
   studyEventTrack,
@@ -82,11 +84,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260703-1";
+} from "./sync.js?v=20260703-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260703-1";
+} from "./goal-forecast.js?v=20260703-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -98,11 +100,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260703-1";
+} from "./tracks.js?v=20260703-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260703-1";
+} from "./full-dictionary.js?v=20260703-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -168,6 +170,8 @@ const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
 const onReturnSelect = document.querySelector("#onReturnSelect");
 const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
+const dictionarySelect = document.querySelector("#dictionarySelect");
+const dictionarySelectionStatus = document.querySelector("#dictionarySelectionStatus");
 const fullDictionaryStatus = document.querySelector("#fullDictionaryStatus");
 const fullDictionaryProgress = document.querySelector("#fullDictionaryProgress");
 const fullDictionaryInstallButton = document.querySelector("#fullDictionaryInstall");
@@ -244,7 +248,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260703-1-v151";
+const APP_VERSION = "0.6.2-product.20260703-2-v152";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -252,19 +256,23 @@ const APP_VERSION = "0.6.2-product.20260703-1-v151";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v151";
+const SHELL_CACHE_VERSION = "wordlover-shell-v152";
 const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
 const MEMORY_TARGET_NOTE =
   "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
-const dictionaryConfig = resolveDictionaryConfig(window.location.search, CONFIG);
-const dictionaryStorage = dictionaryStorageKeys(dictionaryConfig.mode);
-const DICTIONARY_KEY = dictionaryStorage.dictionaryKey;
-const DICTIONARY_PROGRESS_KEY = dictionaryStorage.progressKey;
-const DICTIONARY_CHUNK_PREFIX = dictionaryStorage.chunkPrefix;
-const fullDictionary = createFullDictionaryClient({
+let selectedDictionaryId = readSelectedDictionaryId();
+let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
+  ...CONFIG,
+  savedDictionaryId: selectedDictionaryId,
+});
+let dictionaryStorage = dictionaryStorageKeys(dictionaryConfig.storageScope ?? dictionaryConfig.mode);
+let DICTIONARY_KEY = dictionaryStorage.dictionaryKey;
+let DICTIONARY_PROGRESS_KEY = dictionaryStorage.progressKey;
+let DICTIONARY_CHUNK_PREFIX = dictionaryStorage.chunkPrefix;
+let fullDictionary = createFullDictionaryClient({
   baseUrl: dictionaryConfig.fullDictionaryBaseUrl,
-  storageScope: dictionaryConfig.mode,
+  storageScope: dictionaryConfig.storageScope ?? dictionaryConfig.mode,
   onStateChange: (state) => renderFullDictionarySettings(state),
 });
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
@@ -274,9 +282,9 @@ const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
 const REVIEW_REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000;
 const DICTIONARY_ESTIMATED_BYTES = 40 * 1024 * 1024;
-const DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
-const DICTIONARY_VERSION_KEY = dictionaryStorage.versionKey;
-const DICTIONARY_INSTALLED_KEY = dictionaryStorage.installedKey;
+let DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
+let DICTIONARY_VERSION_KEY = dictionaryStorage.versionKey;
+let DICTIONARY_INSTALLED_KEY = dictionaryStorage.installedKey;
 const MAX_CHECKPOINTS = 5;
 const MAX_USER_DATA_IMPORT_BYTES = 25 * 1024 * 1024;
 const PRODUCTION_GOOGLE_CLIENT_ID = "665953045468-gem626o90ch863ktk2686fb58qa9ql31.apps.googleusercontent.com";
@@ -323,6 +331,7 @@ const GEMINI_RESPONSE_SCHEMA = {
 let SQL = null;
 let dictionaryDb = null;
 let loaded = false;
+let currentDictionaryVersion = null;
 let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
@@ -1252,6 +1261,78 @@ function renderFullDictionarySettings(state = fullDictionary.status()) {
   }
 }
 
+function createConfiguredFullDictionaryClient() {
+  return createFullDictionaryClient({
+    baseUrl: dictionaryConfig.fullDictionaryBaseUrl,
+    storageScope: dictionaryConfig.storageScope ?? dictionaryConfig.mode,
+    onStateChange: (state) => renderFullDictionarySettings(state),
+  });
+}
+
+function applyDictionaryConfig(nextConfig) {
+  dictionaryConfig = nextConfig;
+  dictionaryStorage = dictionaryStorageKeys(dictionaryConfig.storageScope ?? dictionaryConfig.mode);
+  DICTIONARY_KEY = dictionaryStorage.dictionaryKey;
+  DICTIONARY_PROGRESS_KEY = dictionaryStorage.progressKey;
+  DICTIONARY_CHUNK_PREFIX = dictionaryStorage.chunkPrefix;
+  DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
+  DICTIONARY_VERSION_KEY = dictionaryStorage.versionKey;
+  DICTIONARY_INSTALLED_KEY = dictionaryStorage.installedKey;
+}
+
+function resetDictionaryRuntimeState() {
+  lookupRequestSequence += 1;
+  dictionaryDb?.close();
+  dictionaryDb = null;
+  loaded = false;
+  currentDictionaryVersion = null;
+  ftsSearchAvailable = null;
+  lastMetrics = null;
+  fullDictionary = createConfiguredFullDictionaryClient();
+  setSearchLoading(false);
+  loadButton.hidden = false;
+  loadButton.disabled = false;
+  loadButton.textContent = "Install/load dictionary";
+  dictionaryState.textContent = "Not loaded";
+  dictionarySource.textContent = dictionaryConfig.label;
+  renderFullDictionarySettings();
+}
+
+function renderDictionarySelectionSettings() {
+  if (!dictionarySelect) return;
+  const options = userSelectableDictionaries();
+  dictionarySelect.innerHTML = options
+    .map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</option>`)
+    .join("");
+  dictionarySelect.value = dictionaryConfig.isPreview ? selectedDictionaryId : dictionaryConfig.id;
+}
+
+async function switchDictionary(nextId, { persist = true } = {}) {
+  selectedDictionaryId = persist ? saveSelectedDictionaryId(nextId) : nextId;
+  applyDictionaryConfig(resolveDictionaryConfig("", { dictionaryId: selectedDictionaryId }));
+  resetDictionaryRuntimeState();
+  renderDictionarySelectionSettings();
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = `Loading ${dictionaryConfig.label}… Saved words and review history are unchanged.`;
+  }
+  const ready = await ensureDictionaryLoaded();
+  if (ready && termInput.value.trim()) await runLookup({ commit: false, allowFull: true });
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = ready
+      ? `${dictionaryConfig.label} is active. Saved words and review history remain shared.`
+      : `${dictionaryConfig.label} could not be loaded.`;
+  }
+  renderAppMenu();
+  return ready;
+}
+
+dictionarySelect?.addEventListener("change", () => {
+  dictionarySelect.disabled = true;
+  void switchDictionary(dictionarySelect.value).finally(() => {
+    dictionarySelect.disabled = false;
+  });
+});
+
 async function refreshFullDictionaryStatus(force = false) {
   await fullDictionary.ensureManifest({ force });
   renderFullDictionarySettings();
@@ -1330,6 +1411,7 @@ function renderAppMenu() {
     }
   }
   memoryNote.textContent = MEMORY_TARGET_NOTE;
+  renderDictionarySelectionSettings();
   renderFullDictionarySettings();
   googleStatus.textContent = `This device's web origin is ${window.location.origin} — it must be listed under "Authorized JavaScript origins" on your Google OAuth client for sign-in to work. Offline dictionary and study features stay local.`;
   googleAccount.textContent = googleAuth.profile?.email ?? "Not signed in";
@@ -1758,6 +1840,7 @@ async function loadDictionary() {
   const remoteManifest = await fetchRemoteDictionaryManifest();
   const localVersion = await loadValue(DICTIONARY_VERSION_KEY, null);
   const remoteVersion = remoteManifest?.dictionaryDataVersion ?? null;
+  currentDictionaryVersion = remoteVersion ?? localVersion;
   const versionChanged = Boolean(remoteVersion && localVersion && remoteVersion !== localVersion);
 
   let bytes = null;
@@ -2572,6 +2655,7 @@ function resultToVocabularyItem(data) {
     savedAt: now,
     updatedAt: now,
     archivedAt: null,
+    ...dictionaryRecordMetadata(dictionaryConfig, currentDictionaryVersion),
     original: {
       phonetic: data.phonetic ?? "",
       englishMeanings: data.englishMeanings ?? [],
@@ -5317,6 +5401,7 @@ async function addHistory(item) {
   const at = item.queriedAt ?? item.searchedAt ?? nowIso();
   const normalizedItem = markDebugRecord({
     ...item,
+    ...dictionaryRecordMetadata(dictionaryConfig, currentDictionaryVersion),
     searchedAt: item.searchedAt ?? at,
     queriedAt: item.queriedAt ?? at,
   });
@@ -9577,6 +9662,19 @@ window.WordLoverApp = {
     lookup: (term) => fullDictionary.lookup(term),
     install: () => installFullDictionaryOffline(),
     remove: () => removeFullDictionaryOffline(),
+  },
+  dictionaries: {
+    active: () => ({ ...dictionaryConfig }),
+    selected: () => selectedDictionaryId,
+    available: () => userSelectableDictionaries().map((entry) => ({ ...entry })),
+    switch: (id) => switchDictionary(id),
+    learningCounts: () => ({
+      vocabulary: vocabularyItems.length,
+      known: knownWords.length,
+      studyEvents: studyEvents.length,
+      spelling: spellingItems.length,
+      history: historyItems.length,
+    }),
   },
   saveVocabularyItem,
   saveManualVocabularyItem,

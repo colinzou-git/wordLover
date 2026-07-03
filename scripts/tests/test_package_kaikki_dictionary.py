@@ -92,7 +92,48 @@ class PackageKaikkiDictionaryTests(unittest.TestCase):
             self.assertEqual(production_manifest.read_text(encoding="utf-8"), "production")
             summary = json.loads((root / "work/kaikki-package-summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["slimDetailPolicy"], SLIM_DETAIL_POLICY)
+            self.assertEqual(summary["outputSubdir"], "kaikki-preview/local")
             self.assertEqual(summary["fullTranslationOverlaySource"]["type"], "tag-source-shards-default")
+
+    def test_release_builds_under_kaikki_and_preserves_root_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "kaikki.jsonl"
+            source.write_text(json.dumps({
+                "word": "free", "lang_code": "en", "pos": "adj",
+                "senses": [{"glosses": ["without needing to pay"]}],
+            }) + "\n", encoding="utf-8")
+            public = root / "public"
+            production_manifest = public / "dictionary-manifest.json"
+            production_manifest.parent.mkdir(parents=True)
+            production_manifest.write_text("production-root", encoding="utf-8")
+            result = main([
+                "--source", str(source), "--work-dir", str(root / "work"),
+                "--public-dir", str(public), "--output-subdir", "kaikki",
+                "--tag-source", str(root / "missing.sqlite"),
+                "--tag-source-shards", str(root / "missing-shards"),
+                "--version", "release.test", "--target-rows", "10", "--shard-count", "2",
+                "--allow-missing-full-overlay",
+            ])
+            self.assertEqual(result, 0)
+            output = public / "kaikki"
+            self.assertTrue((output / "dictionary.sqlite").is_file())
+            self.assertTrue((output / "dictionary.sqlite.zst").is_file())
+            self.assertTrue((output / "dictionary-full/manifest.json").is_file())
+            manifest = json.loads((output / "dictionary-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["dictionaryId"], "kaikki")
+            self.assertEqual(manifest["dictionaryLabel"], "Kaikki / Wiktextract")
+            self.assertEqual(production_manifest.read_text(encoding="utf-8"), "production-root")
+            summary = json.loads((root / "work/kaikki-package-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["outputSubdir"], "kaikki")
+            self.assertFalse(summary["productionPathsChanged"])
+
+    def test_unsafe_output_subdir_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--source", "kaikki.jsonl", "--output-subdir", "../dictionary-full"])
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(ValueError, "Unsafe Kaikki output"):
+                preview_output(Path(temp), "../unsafe")
 
     def test_production_snapshot_detects_manifest_and_full_shard_changes(self):
         with tempfile.TemporaryDirectory() as temp:
