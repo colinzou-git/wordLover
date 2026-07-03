@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PUBLIC = REPO_ROOT / "apps/wordlover-pwa/public"
 PREVIEW_RELATIVE = Path("kaikki-preview/local")
 KAIKKI_SOURCES = ["Kaikki/Wiktextract", "current WordFan tag/translation overlay", "WordFan K-12/AP STEM"]
-SLIM_DETAIL_POLICY = "none-with-full-shard-enrichment"
+SLIM_DETAIL_POLICY = "full"
 PROTECTED_PRODUCTION_PATHS = (
     Path("dictionary.sqlite"), Path("dictionary.sqlite.zst"),
     Path("dictionary-manifest.json"), Path("dictionary-full"),
@@ -40,6 +40,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target-rows", type=int, default=50_000,
                         help="Requested core size; mandatory ranked/STEM rows may make the final count larger.")
     parser.add_argument("--shard-count", type=int, default=128)
+    parser.add_argument("--slim-detail-policy", choices=("full", "none"), default=SLIM_DETAIL_POLICY,
+                        help="Keep structured detail in the preview slim DB by default.")
     return parser.parse_args(argv)
 
 
@@ -81,7 +83,7 @@ def build_slim_kaikki(args: argparse.Namespace, full_db: Path) -> Path:
     run_command([
         sys.executable, "scripts/build_slim_dictionary.py", "--input", str(full_db),
         "--output", str(slim), "--target-rows", str(args.target_rows),
-        "--data-version", f"{args.version}.slim", "--detail-policy", "none",
+        "--data-version", f"{args.version}.slim", "--detail-policy", args.slim_detail_policy,
     ])
     return slim
 
@@ -165,7 +167,7 @@ def validate_outputs(args: argparse.Namespace, production_before: dict | None = 
         "output": str(output),
         "files": len(list(output.rglob("*"))),
         "productionPathsChanged": changed,
-        "slimDetailPolicy": SLIM_DETAIL_POLICY,
+        "slimDetailPolicy": args.slim_detail_policy,
         "fullTranslationOverlaySource": overlay_source,
     }
 

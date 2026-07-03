@@ -61,10 +61,11 @@ export function renderStructuredDetailedDefinitions(groups) {
 }
 
 export function renderStructuredDictionaryResult(_data, detail) {
+  const meanings = renderStructuredDisplayMeanings(detail?.displayMeanings);
   const fallback = detail?.translationFallback?.zh
-    ? `<p class="structured-translation-fallback"><strong>Chinese meanings:</strong> ${escapeDictionaryHtml(detail.translationFallback.zh)}</p>`
+    ? `<p class="structured-translation-fallback"><strong>Other Chinese meanings:</strong> ${escapeDictionaryHtml(detail.translationFallback.zh)}</p>`
     : "";
-  return `<div class="structured-dictionary-result">${fallback}${renderStructuredDisplayMeanings(detail?.displayMeanings)}${renderStructuredDetailedDefinitions(detail?.detailedDefinitions)}</div>`;
+  return `<div class="structured-dictionary-result">${meanings}${fallback}${renderStructuredDetailedDefinitions(detail?.detailedDefinitions)}</div>`;
 }
 
 export function canonicalPronunciationKey(value) {

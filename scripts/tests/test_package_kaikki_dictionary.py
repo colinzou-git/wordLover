@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from scripts.package_kaikki_dictionary import (
     SLIM_DETAIL_POLICY,
+    build_slim_kaikki,
     build_full_kaikki,
     main,
     parse_args,
@@ -26,6 +27,14 @@ class PackageKaikkiDictionaryTests(unittest.TestCase):
         ])
         self.assertEqual(args.full_translation_source, Path("full.sqlite"))
         self.assertEqual(args.full_translation_source_shards, Path("dictionary-full"))
+        self.assertEqual(args.slim_detail_policy, "full")
+
+    def test_slim_builder_passes_selected_detail_policy(self):
+        args = Namespace(work_dir=Path("work"), version="test", target_rows=10, slim_detail_policy="none")
+        with patch("scripts.package_kaikki_dictionary.run_command") as run:
+            build_slim_kaikki(args, Path("full.sqlite"))
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--detail-policy") + 1], "none")
 
     def test_build_wrapper_passes_full_overlay_arguments(self):
         args = Namespace(

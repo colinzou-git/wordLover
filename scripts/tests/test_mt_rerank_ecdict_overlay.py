@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.rerank_ecdict_overlay_with_mt import (
+    CharacterRateLimiter,
     MockMTProvider,
     GoogleTranslateProvider,
     choose_mt_source_text,
@@ -14,11 +15,19 @@ from scripts.rerank_ecdict_overlay_with_mt import (
     rerank_candidates_by_mt,
     run,
     split_zh_candidates,
+    _batches,
 )
 
 
 class CountingMockProvider(MockMTProvider):
     pass
+
+
+class FailingSecondBatchProvider(MockMTProvider):
+    def translate_batch(self, texts, source_lang, target_lang):
+        if self.request_count == 1:
+            raise RuntimeError("deterministic second-batch failure")
+        return super().translate_batch(texts, source_lang, target_lang)
 
 
 class MtRerankTests(unittest.TestCase):
@@ -84,6 +93,23 @@ class MtRerankTests(unittest.TestCase):
         multiple = rerank_candidates_by_mt(candidates, "收费；免费", 0.85)
         self.assertEqual(multiple.reordered_candidates, ["收费", "免费的", "自由的", "空闲的"])
 
+    def test_character_overlap_is_disabled_by_default_and_opt_in(self):
+        self.assertIsNone(match_mt_to_candidates("费用", ["自由的"], min_confidence=0.75))
+        self.assertIsNone(match_mt_to_candidates("科学", ["学科"], min_confidence=0.85))
+        self.assertIsNone(match_mt_to_candidates("甲", ["乙"], min_confidence=0))
+        opted_in = match_mt_to_candidates(
+            "科学研究", ["研究科学"], min_confidence=0.85, allow_character_overlap=True,
+        )
+        self.assertEqual(opted_in.matched_candidates, ["研究科学"])
+
+    def test_rate_limit_and_batch_size_validation(self):
+        with self.assertRaisesRegex(ValueError, "above chars-per-minute"):
+            CharacterRateLimiter(10).wait_for(11)
+        with self.assertRaisesRegex(ValueError, "above request-chars-max"):
+            list(_batches([{"source_text": "eleven chars"}], 10, 5))
+        with self.assertRaises(SystemExit):
+            self.args("--request-chars-max", "101", "--chars-per-minute", "100")
+
     def test_source_text_priority_and_cleanup(self):
         self.add_row(detail={
             "displayMeanings": [{"en": "v. concise sense"}],
@@ -123,6 +149,65 @@ class MtRerankTests(unittest.TestCase):
         self.assertEqual(fallback["mtRerank"]["matchedCandidate"], "免费的")
         self.assertEqual(fallback["mtRerank"]["confidence"], 0.95)
         self.assertTrue(fallback["mtRerank"]["changed"])
+        self.assertTrue(cached_report["resumeRequested"])
+        self.assertTrue(cached_report["cacheReuseEnabled"])
+        self.assertEqual(cached_report["rowsApplied"], 1)
+
+    def test_apply_is_atomic_on_provider_failure_and_partial_is_explicit(self):
+        self.add_row(word="free", definition="without needing to pay")
+        self.add_row(word="charge", translation="负责, 收费", definition="to ask someone to pay money")
+        original = {}
+        with sqlite3.connect(self.db) as conn:
+            original = dict(conn.execute("SELECT word,translation FROM dictionary_entries"))
+        report, passed = run(
+            self.args("--apply", "--batch-size", "1"),
+            FailingSecondBatchProvider({"without needing to pay": "免费"}),
+        )
+        self.assertFalse(passed)
+        self.assertTrue(report["providerFailed"])
+        self.assertTrue(report["applyRolledBack"])
+        self.assertEqual(report["rowsApplied"], 0)
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(dict(conn.execute("SELECT word,translation FROM dictionary_entries")), original)
+
+        partial, passed = run(
+            self.args("--apply", "--batch-size", "1", "--force-refresh", "--continue-on-errors"),
+            FailingSecondBatchProvider({"without needing to pay": "免费"}),
+        )
+        self.assertTrue(passed)
+        self.assertEqual(partial["status"], "partial")
+        self.assertTrue(partial["providerFailed"])
+        self.assertGreaterEqual(partial["rowsApplied"], 1)
+
+    def test_resume_reporting_cache_reuse_and_force_refresh(self):
+        self.add_row()
+        first, _ = run(self.args(), CountingMockProvider({"without needing to pay": "免费"}))
+        self.assertFalse(first["resumeRequested"])
+        self.assertTrue(first["cacheReuseEnabled"])
+        cached_provider = CountingMockProvider({})
+        cached, _ = run(self.args(), cached_provider)
+        self.assertEqual(cached["cacheHits"], 1)
+        self.assertEqual(cached_provider.request_count, 0)
+        refreshed_provider = CountingMockProvider({"without needing to pay": "免费"})
+        refreshed, _ = run(self.args("--force-refresh"), refreshed_provider)
+        self.assertFalse(refreshed["cacheReuseEnabled"])
+        self.assertEqual(refreshed_provider.request_count, 1)
+
+    def test_decision_audit_key_includes_source_text(self):
+        self.add_row()
+        run(self.args(), CountingMockProvider({"without needing to pay": "免费"}))
+        with sqlite3.connect(self.db) as conn:
+            detail = json.loads(conn.execute("SELECT detail FROM dictionary_entries").fetchone()[0])
+            detail["detailedDefinitions"][0]["senses"][0]["definition"] = "available without payment"
+            conn.execute("UPDATE dictionary_entries SET definition=?, detail=?", (
+                "available without payment", json.dumps(detail, ensure_ascii=False),
+            ))
+        run(self.args("--force-refresh"), CountingMockProvider({"available without payment": "免费"}))
+        with sqlite3.connect(self.cache) as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM mt_rerank_decisions").fetchone()[0], 2)
+        run(self.args("--force-refresh"), CountingMockProvider({"available without payment": "免费"}))
+        with sqlite3.connect(self.cache) as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM mt_rerank_decisions").fetchone()[0], 2)
 
     def test_native_malformed_single_and_no_gloss_are_counted(self):
         self.add_row(word="native", source="kaikki-entry")

@@ -153,7 +153,9 @@ test("Structured dictionary detail renders bilingual lines, fallback, definition
   assert.match(html, /中文而已/);
   assert.doesNotMatch(html, /中文而已.*\|/);
   assert.doesNotMatch(html, /an &lt;unsafe&gt; charge/);
-  assert.match(html, /Chinese meanings:<\/strong> 通用译文/);
+  assert.match(html, /Other Chinese meanings:<\/strong> 通用译文/);
+  assert.ok(html.indexOf("structured-meaning-line") < html.indexOf("structured-translation-fallback"));
+  assert.ok(html.indexOf("structured-translation-fallback") < html.indexOf("detailed-definitions"));
   assert.match(html, /<h4>Noun:<\/h4><ol><li>/);
   assert.match(html, /a &lt;quoted&gt; example/);
   assert.doesNotMatch(html, /<unsafe>|<quoted>/);

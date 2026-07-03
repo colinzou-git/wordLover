@@ -81,6 +81,11 @@ class CharacterRateLimiter:
         self.events: deque[tuple[float, int]] = deque()
 
     def wait_for(self, chars: int) -> None:
+        if chars > self.limit:
+            raise ValueError(
+                f"Request has {chars} chars, above chars-per-minute limit {self.limit}; "
+                "increase --chars-per-minute or lower --request-chars-max."
+            )
         while True:
             now = time.monotonic()
             while self.events and now - self.events[0][0] >= 60:
@@ -155,6 +160,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("--continue-on-errors", action="store_true")
+    parser.add_argument(
+        "--allow-character-overlap-match", action="store_true",
+        help="Allow high-overlap fuzzy Chinese matches. Off by default because they can reorder wrong meanings.",
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args(argv)
     args.dry_run = not args.apply
@@ -163,6 +172,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if not 0 <= args.min_confidence <= 1:
         parser.error("--min-confidence must be between 0 and 1")
+    if args.request_chars_max > args.chars_per_minute:
+        parser.error("--request-chars-max must not exceed --chars-per-minute")
     return args
 
 
@@ -177,6 +188,11 @@ def connect_db(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def ensure_cache_schema(cache_db: sqlite3.Connection) -> None:
+    decision_columns = {
+        row[1] for row in cache_db.execute("PRAGMA table_info(mt_rerank_decisions)")
+    }
+    if decision_columns and "decision_key" not in decision_columns:
+        cache_db.execute("DROP TABLE mt_rerank_decisions")
     cache_db.executescript("""
     CREATE TABLE IF NOT EXISTS mt_translation_cache (
       cache_key TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_model TEXT,
@@ -187,8 +203,9 @@ def ensure_cache_schema(cache_db: sqlite3.Connection) -> None:
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS mt_rerank_decisions (
-      normalized_word TEXT PRIMARY KEY, word TEXT NOT NULL, provider TEXT NOT NULL,
-      source_text TEXT NOT NULL, mt_output TEXT, original_translation TEXT NOT NULL,
+      decision_key TEXT PRIMARY KEY, normalized_word TEXT NOT NULL, word TEXT NOT NULL,
+      provider TEXT NOT NULL, lang TEXT NOT NULL, source_text TEXT NOT NULL,
+      mt_output TEXT, original_translation TEXT NOT NULL,
       reordered_translation TEXT NOT NULL, matched_candidate TEXT,
       confidence REAL NOT NULL, changed INTEGER NOT NULL, reason TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -250,7 +267,7 @@ def split_mt_output(text: str) -> list[str]:
     return split_zh_candidates(text)
 
 
-def _match_score(mt: str, candidate: str) -> tuple[float, str]:
+def _match_score(mt: str, candidate: str, *, allow_character_overlap: bool = False) -> tuple[float, str]:
     if mt == candidate:
         return 1.0, "exact"
     if candidate.endswith("的") and candidate[:-1] == mt:
@@ -259,12 +276,16 @@ def _match_score(mt: str, candidate: str) -> tuple[float, str]:
         return 0.90, "substring"
     if candidate and candidate in mt:
         return 0.88, "reverse-substring"
-    left, right = set(mt), set(candidate)
-    overlap = len(left & right) / max(1, len(left | right))
-    return min(0.85, 0.75 + overlap * 0.10), "character-overlap"
+    if allow_character_overlap:
+        left, right = set(mt), set(candidate)
+        overlap = len(left & right) / max(1, len(left | right))
+        if overlap >= 0.90:
+            return 0.86, "character-overlap"
+    return 0.0, "no-match"
 
 
-def match_mt_to_candidates(mt_output: str, candidates: list[str], min_confidence: float = 0.85) -> MatchDecision | None:
+def match_mt_to_candidates(mt_output: str, candidates: list[str], min_confidence: float = 0.85,
+                           *, allow_character_overlap: bool = False) -> MatchDecision | None:
     matched: list[str] = []
     confidences: list[float] = []
     reasons: list[str] = []
@@ -274,10 +295,12 @@ def match_mt_to_candidates(mt_output: str, candidates: list[str], min_confidence
         for candidate in candidates:
             if candidate in matched:
                 continue
-            score, reason = _match_score(mt, normalize_zh_for_match(candidate))
+            score, reason = _match_score(
+                mt, normalize_zh_for_match(candidate), allow_character_overlap=allow_character_overlap,
+            )
             if best is None or score > best[0]:
                 best = (score, candidate, reason)
-        if best and best[0] >= min_confidence:
+        if best and best[0] > 0 and best[0] >= min_confidence:
             confidences.append(best[0])
             matched.append(best[1])
             reasons.append(best[2])
@@ -286,8 +309,11 @@ def match_mt_to_candidates(mt_output: str, candidates: list[str], min_confidence
     return MatchDecision(matched, min(confidences), "+".join(dict.fromkeys(reasons)))
 
 
-def rerank_candidates_by_mt(candidates: list[str], mt_output: str, min_confidence: float) -> RerankDecision:
-    match = match_mt_to_candidates(mt_output, candidates, min_confidence)
+def rerank_candidates_by_mt(candidates: list[str], mt_output: str, min_confidence: float,
+                            *, allow_character_overlap: bool = False) -> RerankDecision:
+    match = match_mt_to_candidates(
+        mt_output, candidates, min_confidence, allow_character_overlap=allow_character_overlap,
+    )
     if match is None:
         return RerankDecision(list(candidates), [], 0.0, False, "no-match")
     reordered = match.matched_candidates + [item for item in candidates if item not in match.matched_candidates]
@@ -298,6 +324,10 @@ def rerank_candidates_by_mt(candidates: list[str], mt_output: str, min_confidenc
 
 def make_cache_key(provider: str, target_lang: str, normalized_word: str, source_text: str) -> str:
     return hashlib.sha256("\n".join((provider, target_lang, normalized_word, source_text)).encode()).hexdigest()
+
+
+def make_decision_key(provider: str, target_lang: str, normalized_word: str, source_text: str) -> str:
+    return make_cache_key(provider, target_lang, normalized_word, source_text)
 
 
 def load_cached_translation(cache_conn: sqlite3.Connection, cache_key: str) -> str | None:
@@ -323,11 +353,12 @@ def store_cached_translation(cache_conn: sqlite3.Connection, *, cache_key: str, 
 
 
 def store_rerank_decision(cache_conn: sqlite3.Connection, *, row: sqlite3.Row, provider: MTProvider,
-                          source_text: str, mt_output: str, original: str,
+                          target_lang: str, source_text: str, mt_output: str, original: str,
                           reordered: str, decision: RerankDecision) -> None:
+    decision_key = make_decision_key(provider.name, target_lang, row["normalized_word"], source_text)
     cache_conn.execute("""
-      INSERT OR REPLACE INTO mt_rerank_decisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (row["normalized_word"], row["word"], provider.name, source_text, mt_output,
+      INSERT OR REPLACE INTO mt_rerank_decisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (decision_key, row["normalized_word"], row["word"], provider.name, target_lang, source_text, mt_output,
           original, reordered, ", ".join(decision.matched_candidates) or None,
           decision.confidence, int(decision.changed), decision.reason, _now()))
 
@@ -349,6 +380,11 @@ def _batches(items: list[dict], max_count: int, max_chars: int) -> Iterable[list
     chars = 0
     for item in items:
         size = len(item["source_text"])
+        if size > max_chars:
+            raise ValueError(
+                f"Source text has {size} chars, above request-chars-max {max_chars}; "
+                "increase --request-chars-max or shorten the source text."
+            )
         if batch and (len(batch) >= max_count or chars + size > max_chars):
             yield batch
             batch, chars = [], 0
@@ -382,12 +418,15 @@ def run(args: argparse.Namespace, provider: MTProvider | None = None) -> tuple[d
         "provider": provider.name, "providerModel": provider.model,
         "targetLang": args.target_lang, "sourceLang": args.source_lang,
         "dryRun": args.dry_run, "startedAt": started, "candidateRows": 0,
+        "resumeRequested": bool(args.resume), "cacheReuseEnabled": not args.force_refresh,
+        "forceRefresh": bool(args.force_refresh),
         "cacheHits": 0, "apiRequests": 0, "apiCharacters": 0,
         "rowsTranslated": 0, "rowsMatched": 0, "rowsChanged": 0,
         "rowsUnchangedAlreadyFirst": 0, "rowsNoMatch": 0,
         "rowsSkippedSingleCandidate": 0, "rowsSkippedNoGloss": 0,
         "rowsSkippedNonOverlaySource": 0, "rowsSkippedMalformedDetail": 0,
-        "rowsSkippedAlreadyReranked": 0, "errors": [], "sampleChanges": [],
+        "rowsSkippedAlreadyReranked": 0, "providerFailed": False,
+        "applyRolledBack": False, "rowsApplied": 0, "errors": [], "sampleChanges": [],
     }
     success = True
     with connect_db(args.db, readonly=args.dry_run) as conn, connect_db(args.cache) as cache:
@@ -429,26 +468,45 @@ def run(args: argparse.Namespace, provider: MTProvider | None = None) -> tuple[d
                 report["cacheHits"] += 1
             prepared.append(item)
         pending = [item for item in prepared if item["mt_output"] is None]
-        for batch in _batches(pending, args.batch_size, args.request_chars_max):
-            try:
-                outputs = provider.translate_batch([item["source_text"] for item in batch], args.source_lang, args.target_lang)
-                for item, output in zip(batch, outputs):
-                    item["mt_output"] = output
-                    store_cached_translation(cache, cache_key=item["cache_key"], provider=provider,
-                                             source_lang=args.source_lang, target_lang=args.target_lang,
-                                             row=item["row"], source_text=item["source_text"], mt_output=output)
-                    report["rowsTranslated"] += 1
-                cache.commit()
-            except Exception as error:
-                success = False
-                report["errors"].append(str(error))
-                if not args.continue_on_errors:
-                    break
-        for item in prepared:
+        try:
+            for batch in _batches(pending, args.batch_size, args.request_chars_max):
+                try:
+                    outputs = provider.translate_batch(
+                        [item["source_text"] for item in batch], args.source_lang, args.target_lang,
+                    )
+                    for item, output in zip(batch, outputs):
+                        item["mt_output"] = output
+                        store_cached_translation(
+                            cache, cache_key=item["cache_key"], provider=provider,
+                            source_lang=args.source_lang, target_lang=args.target_lang,
+                            row=item["row"], source_text=item["source_text"], mt_output=output,
+                        )
+                        report["rowsTranslated"] += 1
+                    cache.commit()
+                except Exception as error:
+                    success = False
+                    report["providerFailed"] = True
+                    report["errors"].append(str(error))
+                    if not args.continue_on_errors:
+                        break
+        except Exception as error:
+            success = False
+            report["providerFailed"] = True
+            report["errors"].append(str(error))
+
+        abort_apply = not success and not args.continue_on_errors
+        if abort_apply:
+            conn.rollback()
+            report["applyRolledBack"] = bool(args.apply)
+
+        for item in ([] if abort_apply else prepared):
             if item["mt_output"] is None:
                 continue
             row = item["row"]
-            decision = rerank_candidates_by_mt(item["candidates"], item["mt_output"], args.min_confidence)
+            decision = rerank_candidates_by_mt(
+                item["candidates"], item["mt_output"], args.min_confidence,
+                allow_character_overlap=args.allow_character_overlap_match,
+            )
             reordered = ", ".join(decision.reordered_candidates)
             if decision.matched_candidates:
                 report["rowsMatched"] += 1
@@ -472,14 +530,16 @@ def run(args: argparse.Namespace, provider: MTProvider | None = None) -> tuple[d
                         "confidence": decision.confidence, "changed": True,
                     }
                     update_dictionary_row(conn, row["id"], reordered, item["detail"])
+                    report["rowsApplied"] += 1
             elif decision.matched_candidates:
                 report["rowsUnchangedAlreadyFirst"] += 1
             else:
                 report["rowsNoMatch"] += 1
-            store_rerank_decision(cache, row=row, provider=provider, source_text=item["source_text"],
+            store_rerank_decision(cache, row=row, provider=provider, target_lang=args.target_lang,
+                                  source_text=item["source_text"],
                                   mt_output=item["mt_output"], original=row["translation"],
                                   reordered=reordered, decision=decision)
-        if args.apply:
+        if args.apply and not abort_apply:
             conn.commit()
         cache.commit()
     report["apiRequests"] = provider.request_count

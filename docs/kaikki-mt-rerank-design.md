@@ -62,10 +62,13 @@ python scripts/rerank_ecdict_overlay_with_mt.py \
   --report data/kaikki-build/mt-rerank-report.dry-run.json
 ```
 
-Review the dry-run report before replacing `--dry-run` with `--apply`. Use
-`--resume` to document a continuation run and `--force-refresh` only when cached
-translations must be replaced. `--continue-on-errors` records provider failures
-and continues with successful/cached batches.
+Review the dry-run report before replacing `--dry-run` with `--apply`. Cache
+reuse is automatic. `--resume` is accepted for readability and records the
+operator's intent in the report; it does not change cache behavior. Use
+`--force-refresh` when cached translations must be replaced.
+`--continue-on-errors` records provider failures and continues with
+successful/cached batches. Reports include `resumeRequested`,
+`cacheReuseEnabled`, and `forceRefresh` so the effective mode is explicit.
 
 The report's Google cost field estimates `$20 / million` characters after
 500,000 characters. Actual cost depends on provider pricing, account, monthly
