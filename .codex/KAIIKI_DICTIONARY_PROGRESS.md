@@ -31,5 +31,6 @@
 - Tests added: config priority/default/preview, selection persistence, storage isolation, service-worker bypass, record provenance, release/preview packaging, unsafe output rejection
 - Tests run: focused JS/Python; full Python discovery (76); PWA build/unit/shell validation; Playwright browser CI
 - Result: all required gates passed; browser `waSqliteOpfs` retains its pre-existing `investigate` verdict
-- Remaining work: regenerate/check code map, inspect diff, commit/push, close #60-#67
-- Exact resume step: run code-map generation/check and production asset diff, then commit feature branch
+- Latest implementation commit: `a7180b0`
+- Remaining work: none for #60-#67; all issues are closed with validation evidence
+- Exact resume step: wait for new issues; generate release assets only when explicitly requested after audit
