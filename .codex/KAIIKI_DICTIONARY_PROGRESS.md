@@ -18,5 +18,6 @@
 - Tests added: conservative matching, zero-score rejection, rate/batch guards, atomic apply failure, explicit partial mode, resume/cache reporting, decision audit keys, slim detail policy, rendering order
 - Tests run: focused MT/package tests; full Python discovery (74); PWA unit/build/shell validation; Playwright browser CI; code-map check
 - Result: all passed; browser `waSqliteOpfs` remains the suite's pre-existing `investigate` verdict and all required gates passed
-- Remaining work: commit, push, close #53-#59 with validation evidence
-- Exact resume step: inspect final status, commit and push feature branch, close issues #53 through #59
+- Latest implementation commit: `abc3756`
+- Remaining work: none for #53-#59; all seven issues are closed with validation evidence
+- Exact resume step: wait for new bug reports; do not rebuild generated Kaikki assets unless explicitly requested
