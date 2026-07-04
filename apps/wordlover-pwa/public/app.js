@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260703-2";
+} from "./fsrs-scheduler.js?v=20260704-1";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260703-2";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260703-2";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260703-2";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260704-1";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260704-1";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260704-1";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260703-2";
+} from "./dictionary-rendering.js?v=20260704-1";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260703-2";
+} from "./persistence.js?v=20260704-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260703-2";
+} from "./spelling.js?v=20260704-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -44,14 +44,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260703-2";
+} from "./ui-preferences.js?v=20260704-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260703-2";
+} from "./review-state.js?v=20260704-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -72,7 +72,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260703-2";
+} from "./study-one-more.js?v=20260704-1";
 
 import {
   studyEventTrack,
@@ -84,11 +84,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260703-2";
+} from "./sync.js?v=20260704-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260703-2";
+} from "./goal-forecast.js?v=20260704-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -100,11 +100,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260703-2";
+} from "./tracks.js?v=20260704-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260703-2";
+} from "./full-dictionary.js?v=20260704-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -176,6 +176,7 @@ const fullDictionaryStatus = document.querySelector("#fullDictionaryStatus");
 const fullDictionaryProgress = document.querySelector("#fullDictionaryProgress");
 const fullDictionaryInstallButton = document.querySelector("#fullDictionaryInstall");
 const fullDictionaryRemoveButton = document.querySelector("#fullDictionaryRemove");
+const fullDictionaryHelp = document.querySelector("#fullDictionaryHelp");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
@@ -248,7 +249,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260703-2-v152";
+const APP_VERSION = "0.6.2-product.20260704-1-v153";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -256,10 +257,7 @@ const APP_VERSION = "0.6.2-product.20260703-2-v152";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v152";
-const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
-const MEMORY_TARGET_NOTE =
-  "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
+const SHELL_CACHE_VERSION = "wordlover-shell-v153";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -1259,6 +1257,32 @@ function renderFullDictionarySettings(state = fullDictionary.status()) {
     fullDictionaryRemoveButton.hidden = !state.offlineInstalled;
     fullDictionaryRemoveButton.disabled = Boolean(state.busy);
   }
+  if (fullDictionaryHelp) {
+    fullDictionaryHelp.textContent = dictionaryConfig.id === "kaikki"
+      ? "Online exact lookup downloads only one Kaikki shard. Optional offline download stores all Kaikki full-dictionary shards, not the 1.1 GB build SQLite."
+      : "Online exact lookup downloads only one ECDICT shard. Optional offline download stores all ECDICT full-dictionary shards.";
+  }
+}
+
+function activeDictionaryEngineText() {
+  if (dictionaryConfig.id === "kaikki") {
+    return "Kaikki slim core + sharded exact lookup; gzip shards cache on demand. The full Kaikki SQLite is never loaded in the browser.";
+  }
+  return "ECDICT ranked core + sharded exact lookup; gzip shards cache on demand.";
+}
+
+function activeMemoryTargetNote() {
+  if (dictionaryConfig.id === "kaikki") {
+    return "Kaikki uses a slim local SQLite core for common lookup and fetches full exact entries from small gzip shards, avoiding the 1.1 GB full build SQLite on iPhone.";
+  }
+  return "ECDICT uses a ranked local SQLite core for suggestions and study selection. Exact English lookup opens one small gzip shard instead of a large in-memory SQLite database.";
+}
+
+function fullDictionaryCoverageLabel() {
+  const rows = Number(fullDictionary.status().rowCount ?? 0);
+  return rows > 0
+    ? `Full ${rows.toLocaleString()}-entry ${dictionaryConfig.label} dictionary`
+    : `Full ${dictionaryConfig.label} dictionary`;
 }
 
 function createConfiguredFullDictionaryClient() {
@@ -1308,15 +1332,47 @@ function renderDictionarySelectionSettings() {
 }
 
 async function switchDictionary(nextId, { persist = true } = {}) {
-  selectedDictionaryId = persist ? saveSelectedDictionaryId(nextId) : nextId;
-  applyDictionaryConfig(resolveDictionaryConfig("", { dictionaryId: selectedDictionaryId }));
+  const previousSelectedId = selectedDictionaryId;
+  const previousConfig = dictionaryConfig;
+  const requestedConfig = resolveDictionaryConfig("", { dictionaryId: nextId });
+  if (requestedConfig.id === dictionaryConfig.id) {
+    renderDictionarySelectionSettings();
+    return true;
+  }
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = `Checking ${requestedConfig.label}…`;
+  }
+  const availability = await checkDictionaryPackageAvailable(requestedConfig);
+  if (!availability.ok) {
+    renderDictionarySelectionSettings();
+    if (dictionarySelectionStatus) dictionarySelectionStatus.textContent = availability.message;
+    return false;
+  }
+
+  selectedDictionaryId = requestedConfig.id;
+  applyDictionaryConfig(requestedConfig);
   resetDictionaryRuntimeState();
   renderDictionarySelectionSettings();
   if (dictionarySelectionStatus) {
     dictionarySelectionStatus.textContent = `Loading ${dictionaryConfig.label}… Saved words and review history are unchanged.`;
   }
   const ready = await ensureDictionaryLoaded();
-  if (ready && termInput.value.trim()) await runLookup({ commit: false, allowFull: true });
+  if (!ready) {
+    selectedDictionaryId = previousSelectedId;
+    applyDictionaryConfig(previousConfig);
+    resetDictionaryRuntimeState();
+    renderDictionarySelectionSettings();
+    if (persist && !previousConfig.isPreview) saveSelectedDictionaryId(previousSelectedId);
+    if (dictionarySelectionStatus) {
+      dictionarySelectionStatus.textContent = `${requestedConfig.label} could not be loaded. Switched back to ${previousConfig.label}.`;
+    }
+    if (await hasInstalledDictionary()) void ensureDictionaryLoaded();
+    return false;
+  }
+  if (persist && !requestedConfig.isPreview) {
+    selectedDictionaryId = saveSelectedDictionaryId(requestedConfig.id);
+  }
+  if (termInput.value.trim()) await runLookup({ commit: false, allowFull: true });
   if (dictionarySelectionStatus) {
     dictionarySelectionStatus.textContent = ready
       ? `${dictionaryConfig.label} is active. Saved words and review history remain shared.`
@@ -1324,6 +1380,46 @@ async function switchDictionary(nextId, { persist = true } = {}) {
   }
   renderAppMenu();
   return ready;
+}
+
+async function hasInstalledDictionaryForConfig(config) {
+  const keys = dictionaryStorageKeys(config.storageScope ?? config.mode);
+  return Boolean(await loadValue(keys.installedKey, false));
+}
+
+async function checkDictionaryPackageAvailable(config) {
+  if (await hasInstalledDictionaryForConfig(config)) return { ok: true, source: "local" };
+  if (!navigator.onLine) {
+    return {
+      ok: false,
+      message: `${config.label} is not installed on this device yet. Connect to the internet once to install it.`,
+    };
+  }
+  try {
+    const response = await fetchWithTimeout(config.dictionaryManifestUrl, { cache: "no-store" }, 6000);
+    if (!response.ok) {
+      return {
+        ok: false,
+        message: `${config.label} package is missing at ${config.dictionaryManifestUrl} (HTTP ${response.status}). Build/package it first.`,
+      };
+    }
+    const manifest = await response.json();
+    if (!manifest || typeof manifest.dictionaryDataVersion !== "string") {
+      return { ok: false, message: `${config.label} manifest is invalid or missing dictionaryDataVersion.` };
+    }
+    if (manifest.dictionaryId && manifest.dictionaryId !== config.id) {
+      return {
+        ok: false,
+        message: `${config.label} manifest dictionaryId is "${manifest.dictionaryId}", expected "${config.id}".`,
+      };
+    }
+    return { ok: true, source: "network", manifest };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `${config.label} package could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 dictionarySelect?.addEventListener("change", () => {
@@ -1376,7 +1472,7 @@ fullDictionaryRemoveButton?.addEventListener("click", () => { void removeFullDic
 function renderAppMenu() {
   appVersion.textContent = BUILD_STAMP === "dev" ? APP_VERSION : `${APP_VERSION} · ${BUILD_STAMP}`;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
-  dictionaryEngine.textContent = DICTIONARY_ENGINE;
+  dictionaryEngine.textContent = activeDictionaryEngineText();
   const signedInOrGranted = Boolean(googleAuth.accessToken) || hasGoogleGrant();
   syncStatus.textContent = !signedInOrGranted
     ? "Local only"
@@ -1410,7 +1506,7 @@ function renderAppMenu() {
       syncDetails.textContent = syncEncryptionNotice();
     }
   }
-  memoryNote.textContent = MEMORY_TARGET_NOTE;
+  memoryNote.textContent = activeMemoryTargetNote();
   renderDictionarySelectionSettings();
   renderFullDictionarySettings();
   googleStatus.textContent = `This device's web origin is ${window.location.origin} — it must be listed under "Authorized JavaScript origins" on your Google OAuth client for sign-in to work. Offline dictionary and study features stay local.`;
@@ -1684,7 +1780,7 @@ function renderResult(data) {
       </div>
       ${pronunciationHtml}
       <p class="result-entry-type">${escapeHtml(data.entryType)}</p>
-      ${data.dictionaryCoverage === "full" ? `<p class="small muted">Full 770,770-entry dictionary</p>` : ""}
+      ${data.dictionaryCoverage === "full" ? `<p class="small muted">${escapeHtml(fullDictionaryCoverageLabel())}</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
     ${structuredHtml || `<div class="meaning-grid">

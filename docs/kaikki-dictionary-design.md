@@ -31,6 +31,7 @@ data/dictionary-kaikki-slim.sqlite
 data/kaikki-dictionary-report.json
 data/kaikki-dictionary-audit.json
 apps/wordlover-pwa/public/kaikki-preview/local/
+apps/wordlover-pwa/public/kaikki/
 ```
 
 The local package contains a slim SQLite core and complete gzip JSON shards.
@@ -183,23 +184,19 @@ python scripts/package_kaikki_dictionary.py \
   --shard-count 128
 ```
 
-The Kaikki core omits duplicated structured `detail` and requests 50,000 rows;
-mandatory ranked/STEM rows may raise the final count. Exact core results fetch
-their structured detail from the corresponding full shard when online/cached,
-while the legacy core fields remain usable offline. This keeps sql.js near the
-iPhone memory envelope; real iPhone DRAM still requires Instruments validation.
-This is the explicit package policy, recorded in
-`kaikki-package-summary.json` as
-`slimDetailPolicy=none-with-full-shard-enrichment`. Full-shard exact and alias
-results carry the optional structured detail; unavailable/malformed detail uses
-the existing legacy renderer. This enrichment applies to exact rows and
-inflected aliases, including automated `?q=` preview smoke lookups. In preview
-or debug mode, a failed full-shard enrichment also shows a small diagnostic note
-instead of silently implying that the legacy layout is the complete Kaikki row.
+The Kaikki core requests 50,000 rows and keeps structured detail by default;
+mandatory ranked/STEM rows may raise the final count. Full-shard exact and alias
+results also carry optional structured detail. Unavailable or malformed detail
+uses the legacy renderer. Real iPhone DRAM still requires Instruments validation.
+The selected policy is recorded in `kaikki-package-summary.json` as
+`slimDetailPolicy=full`.
 
-The wrapper can write only
-`apps/wordlover-pwa/public/kaikki-preview/local/`. It cannot target production
-root assets. It snapshots each protected production file plus every file under
+The wrapper can write only these safe generated Kaikki subdirectories:
+
+- `apps/wordlover-pwa/public/kaikki-preview/local/`
+- `apps/wordlover-pwa/public/kaikki/`
+
+It cannot target production root assets. It snapshots each protected production file plus every file under
 `dictionary-full/` before and after packaging using relative paths, sizes, and
 SHA-256 checksums. The summary's `productionPathsChanged` value is therefore a
 verified comparison, and any change fails the packaging command after writing
@@ -293,6 +290,28 @@ git diff -- apps/wordlover-pwa/public/dictionary.sqlite \
   apps/wordlover-pwa/public/dictionary-manifest.json \
   apps/wordlover-pwa/public/dictionary-full/
 ```
+
+## Kaikki runtime package policy
+
+The full Kaikki SQLite database is a build artifact only. It generates the slim
+SQLite core and full gzip JSON shards; it must never be copied into the browser
+runtime package. The packager rejects extra public SQLite files and rejects a
+runtime `dictionary.sqlite` larger than 200 MiB.
+
+Runtime package:
+
+```text
+apps/wordlover-pwa/public/kaikki/dictionary.sqlite
+apps/wordlover-pwa/public/kaikki/dictionary.sqlite.zst
+apps/wordlover-pwa/public/kaikki/dictionary-manifest.json
+apps/wordlover-pwa/public/kaikki/dictionary-full/manifest.json
+apps/wordlover-pwa/public/kaikki/dictionary-full/*.json.gz
+```
+
+The app installs only the slim SQLite core. Exact full lookup fetches one shard
+from `/kaikki/dictionary-full`, keeping iPhone memory and network usage bounded.
+Do not use the abandoned Google/MT rerank output for production dictionary
+quality.
 
 ## Promotion, attribution, and limitations
 

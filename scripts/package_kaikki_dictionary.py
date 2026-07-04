@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and package Kaikki only under the isolated WordFan preview path."""
+"""Build and package Kaikki under a safe isolated WordFan public subdirectory."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ DEFAULT_PUBLIC = REPO_ROOT / "apps/wordlover-pwa/public"
 PREVIEW_RELATIVE = Path("kaikki-preview/local")
 RELEASE_RELATIVE = Path("kaikki")
 ALLOWED_OUTPUT_SUBDIRS = {PREVIEW_RELATIVE.as_posix(), RELEASE_RELATIVE.as_posix()}
+MAX_PUBLIC_SQLITE_BYTES = 200 * 1024 * 1024
+EXPECTED_RUNTIME_SQLITE = Path("dictionary.sqlite")
 KAIKKI_SOURCES = ["Kaikki/Wiktextract", "current WordFan tag/translation overlay", "WordFan K-12/AP STEM"]
 SLIM_DETAIL_POLICY = "full"
 PROTECTED_PRODUCTION_PATHS = (
@@ -163,6 +165,37 @@ def snapshot_production_paths(public_dir: Path) -> dict:
     return snapshot
 
 
+def validate_public_sqlite_assets(output: Path) -> dict:
+    output = output.resolve()
+    expected = output / EXPECTED_RUNTIME_SQLITE
+    sqlite_files = sorted(path for path in output.rglob("*.sqlite") if path.is_file())
+    unexpected = [
+        path.relative_to(output).as_posix()
+        for path in sqlite_files
+        if path.resolve() != expected.resolve()
+    ]
+    if unexpected:
+        raise RuntimeError(
+            "Unexpected SQLite file(s) in Kaikki runtime package: "
+            + ", ".join(unexpected)
+            + ". Only the slim dictionary.sqlite may be public."
+        )
+    if not expected.is_file():
+        raise FileNotFoundError(f"Missing Kaikki runtime SQLite: {expected}")
+    size = expected.stat().st_size
+    if size > MAX_PUBLIC_SQLITE_BYTES:
+        raise RuntimeError(
+            f"Kaikki runtime SQLite is too large: {size} bytes > {MAX_PUBLIC_SQLITE_BYTES}. "
+            "The public Kaikki package must contain the slim DB only, not the full build DB."
+        )
+    return {
+        "runtimeSqlite": expected.relative_to(output).as_posix(),
+        "runtimeSqliteBytes": size,
+        "maxPublicSqliteBytes": MAX_PUBLIC_SQLITE_BYTES,
+        "sqliteFiles": [path.relative_to(output).as_posix() for path in sqlite_files],
+    }
+
+
 def validate_outputs(args: argparse.Namespace, production_before: dict | None = None) -> dict:
     output = validate_preview_output(
         preview_output(args.public_dir, args.output_subdir), args.public_dir, args.output_subdir,
@@ -172,6 +205,14 @@ def validate_outputs(args: argparse.Namespace, production_before: dict | None = 
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing Kaikki preview outputs: " + ", ".join(missing))
+    sqlite_safety = validate_public_sqlite_assets(output)
+    slim_manifest = json.loads((output / "dictionary-manifest.json").read_text(encoding="utf-8"))
+    full_manifest = json.loads((output / "dictionary-full/manifest.json").read_text(encoding="utf-8"))
+    for manifest_name, manifest in (("slim", slim_manifest), ("full", full_manifest)):
+        if manifest.get("dictionaryId") != "kaikki":
+            raise RuntimeError(f"{manifest_name} manifest dictionaryId is not kaikki")
+        if manifest.get("dictionaryLabel") != "Kaikki / Wiktextract":
+            raise RuntimeError(f"{manifest_name} manifest dictionaryLabel is wrong")
     overlay_source = (
         {"type": "sqlite", "path": str(args.full_translation_source)}
         if args.full_translation_source
@@ -186,6 +227,11 @@ def validate_outputs(args: argparse.Namespace, production_before: dict | None = 
         "outputSubdir": args.output_subdir,
         "files": len(list(output.rglob("*"))),
         "productionPathsChanged": changed,
+        "publicSqliteSafety": sqlite_safety,
+        "slimRowCount": slim_manifest.get("rowCount"),
+        "fullShardRowCount": full_manifest.get("rowCount"),
+        "fullShardCount": full_manifest.get("shardCount"),
+        "fullShardCompressedBytes": full_manifest.get("totalCompressedBytes"),
         "slimDetailPolicy": args.slim_detail_policy,
         "fullTranslationOverlaySource": overlay_source,
     }

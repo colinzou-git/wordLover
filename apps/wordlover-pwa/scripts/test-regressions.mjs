@@ -210,6 +210,27 @@ test("Dictionary assets resolve beside the selected manifest", () => {
     resolveDictionaryAssetUrl("/kaikki-preview/local/dictionary-manifest.json", "dictionary.sqlite"),
     "/kaikki-preview/local/dictionary.sqlite",
   );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki/dictionary.sqlite",
+  );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki/dictionary-manifest.json", "dictionary.sqlite.zst"),
+    "/kaikki/dictionary.sqlite.zst",
+  );
+});
+
+test("Kaikki runtime text does not hardcode ECDICT full row count", async () => {
+  const appSource = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const htmlSource = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(appSource, /Full 770,770-entry dictionary/);
+  assert.doesNotMatch(htmlSource, /770,770 entries/);
+  assert.match(appSource, /fullDictionaryCoverageLabel/);
+  assert.match(appSource, /checkDictionaryPackageAvailable\(requestedConfig\)/);
+  assert.ok(
+    appSource.indexOf("checkDictionaryPackageAvailable(requestedConfig)")
+      < appSource.indexOf("saveSelectedDictionaryId(requestedConfig.id)"),
+  );
 });
 
 test("Structured dictionary detail renders bilingual lines, fallback, definitions, and safe HTML", () => {

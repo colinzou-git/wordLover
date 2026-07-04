@@ -55,6 +55,11 @@ assert.deepEqual(fullDictionaryStorageConfig("production"), {
   installedVersionKey: "wordfan.fullDictionary.installedVersion.v1",
   cachePrefix: "wordfan-full-dictionary-v1-",
 });
+assert.deepEqual(fullDictionaryStorageConfig("kaikki"), {
+  manifestKey: "wordfan.fullDictionary.kaikki.manifest.v1",
+  installedVersionKey: "wordfan.fullDictionary.kaikki.installedVersion.v1",
+  cachePrefix: "wordfan-full-dictionary-kaikki-v1-",
+});
 assert.deepEqual(fullDictionaryStorageConfig("kaikki-preview"), {
   manifestKey: "wordfan.fullDictionary.kaikki-preview.manifest.v1",
   installedVersionKey: "wordfan.fullDictionary.kaikki-preview.installedVersion.v1",

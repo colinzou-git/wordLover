@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.package_kaikki_dictionary import (
+    MAX_PUBLIC_SQLITE_BYTES,
     SLIM_DETAIL_POLICY,
     build_slim_kaikki,
     build_full_kaikki,
@@ -14,6 +15,7 @@ from scripts.package_kaikki_dictionary import (
     preview_output,
     snapshot_production_paths,
     validate_preview_output,
+    validate_public_sqlite_assets,
 )
 import scripts.package_kaikki_dictionary as package_module
 
@@ -127,6 +129,36 @@ class PackageKaikkiDictionaryTests(unittest.TestCase):
             summary = json.loads((root / "work/kaikki-package-summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["outputSubdir"], "kaikki")
             self.assertFalse(summary["productionPathsChanged"])
+            self.assertEqual(summary["publicSqliteSafety"]["runtimeSqlite"], "dictionary.sqlite")
+            self.assertGreater(summary["publicSqliteSafety"]["runtimeSqliteBytes"], 0)
+            self.assertEqual(summary["slimRowCount"], manifest["rowCount"])
+            self.assertEqual(summary["fullShardCount"], 2)
+            self.assertGreater(summary["fullShardRowCount"], 0)
+
+    def test_public_sqlite_guard_allows_only_slim_dictionary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "kaikki"
+            output.mkdir()
+            (output / "dictionary.sqlite").write_bytes(b"slim")
+            result = validate_public_sqlite_assets(output)
+            self.assertEqual(result["sqliteFiles"], ["dictionary.sqlite"])
+
+            (output / "dictionary-kaikki.sqlite").write_bytes(b"full")
+            with self.assertRaisesRegex(RuntimeError, "Unexpected SQLite"):
+                validate_public_sqlite_assets(output)
+
+    def test_public_sqlite_guard_rejects_large_runtime_sqlite(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "kaikki"
+            output.mkdir()
+            (output / "dictionary.sqlite").write_bytes(b"12345")
+            original_limit = package_module.MAX_PUBLIC_SQLITE_BYTES
+            try:
+                package_module.MAX_PUBLIC_SQLITE_BYTES = 4
+                with self.assertRaisesRegex(RuntimeError, "too large"):
+                    validate_public_sqlite_assets(output)
+            finally:
+                package_module.MAX_PUBLIC_SQLITE_BYTES = original_limit
 
     def test_unsafe_output_subdir_is_rejected(self):
         with self.assertRaises(SystemExit):
