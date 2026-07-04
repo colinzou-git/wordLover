@@ -202,7 +202,6 @@ jobs:
 
                   search = page.locator("#termInput")
                   search.fill("abandon")
-                  search.press("Enter")
                   page.wait_for_function(
                       """() => {
                           const text = document.querySelector("#result")?.textContent?.toLowerCase() ?? "";
@@ -212,7 +211,18 @@ jobs:
                   )
                   report["searchResult"] = page.locator("#result").inner_text()[:500]
 
-                  page.locator("#clearSearch").click()
+                  # Verify Return-to-save separately. The default action intentionally clears
+                  # the input/result after saving, so waiting for rendered text after pressing
+                  # Return races that clear (fast Chromium used to fail intermittently).
+                  search.press("Enter")
+                  page.wait_for_function(
+                      """() => window.WordLoverApp.getVocabulary()
+                          .some((item) => item.normalizedTerm === "abandon")""",
+                      timeout=15_000,
+                  )
+
+                  if search.input_value() != "":
+                      page.locator("#clearSearch").click()
                   if search.input_value() != "":
                       raise AssertionError("Clear search did not empty the search field.")
 
