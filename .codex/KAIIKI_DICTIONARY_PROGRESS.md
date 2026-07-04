@@ -10,8 +10,8 @@
 - Tests added: publication SQLite/hash/shard/path/branch-scope safety gates
 - Tests run: 82 Python tests; 37 JS regressions plus PWA unit/build/shell/version checks; strict real-data audit; publisher dry run; gh-pages diff audit; live HTTP and manifest hash verification
 - Result: PASS. Clean non-MT build has 824,747 full rows and matching FTS, 55,642 slim rows (39,915,520 bytes), all STEM/inflection strict gates, and no malformed detail. Published only `/kaikki/` at gh-pages `fd1aeb9`; Pages run `28712121300` passed on retry and all live URLs/hashes pass.
-- Remaining work: commit/push the feature-branch publisher/docs/tests and close #75; do not merge to main
-- Exact resume step: commit and push the scoped publisher changes, confirm branch CI, then close #75 with evidence
+- Remaining work: push the clean-worktree symbol-map correction, confirm branch CI, then close #75; do not merge to main
+- Exact resume step: commit the symbol map after the new publisher became tracked, push, and rerun CI
 
 - Current issue: #52 — implementation in progress
 - Current branch: `feature/kaikki-dictionary-preview`
