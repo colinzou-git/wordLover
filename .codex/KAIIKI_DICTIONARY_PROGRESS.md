@@ -59,5 +59,7 @@
 - Files changed: CI deploy workflow, deploy/Kaikki docs, JS deploy/SW/gitignore regression coverage
 - Tests run: workflow shell syntax; focused package/full-dictionary/JS; full Python discovery (78); PWA build/unit/shell validation (35 JS regressions)
 - Result: local gates passed
-- Remaining work: regenerate/check code map, commit/push, inspect actual GitHub Actions, close #69-#73
-- Exact resume step: final production diff and code map, then push tracked files while preserving user-owned untracked scripts
+- Latest commits: `e36f8a7` deploy preservation; `d39bef1` deterministic visible browser flow
+- GitHub Actions: run `28697410436` passed static and Chromium/WebKit browser jobs
+- Remaining work: none for #69-#73; all blockers closed with validation evidence
+- Exact resume step: wait for new issues; preserve user-owned untracked rerank scripts and do not commit generated dictionary assets
