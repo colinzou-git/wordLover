@@ -45,5 +45,6 @@
 - Tests added: extra/oversize SQLite guards, manifest/summary metrics, release asset URLs, Kaikki cache scope, dynamic labels, real missing-package rollback and learning-data preservation
 - Tests run: focused package/shard/audit and JS tests; full Python discovery (78); PWA build/unit/shell validation; Playwright browser CI including rollback path
 - Result: all required gates passed; browser `waSqliteOpfs` retains its pre-existing `investigate` verdict
-- Remaining work: regenerate/check code map, inspect production diff, commit/push, close #68
-- Exact resume step: final safety checks, commit only tracked issue files, preserve user-owned untracked rerank scripts
+- Latest implementation commit: `118a1d4`
+- Remaining work: none for #68; issue closed with validation evidence
+- Exact resume step: wait for new issues; preserve user-owned untracked rerank scripts and do not use MT output
