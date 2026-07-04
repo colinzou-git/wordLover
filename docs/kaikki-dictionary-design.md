@@ -339,6 +339,12 @@ This writes only `public/kaikki/`; root ECDICT assets remain unchanged. The
 generated release package is gitignored and must be produced by the reviewed
 deployment process rather than committed.
 
+After that package is published separately to `gh-pages`, normal shell deploys
+carry the complete `/kaikki/` directory forward and validate its required slim
+files, manifest hashes, and full shards. If `/kaikki/` has not been published,
+deployment still succeeds; the app's transactional switch preflight leaves
+ECDICT selected and reports that Kaikki is unavailable.
+
 Do not use Git LFS for GitHub Pages runtime assets and do not commit generated
 SQLite, zstd, shards, or reports. After the audit passes, promotion requires a
 separate reviewed release that verifies source attribution, manifest hashes,

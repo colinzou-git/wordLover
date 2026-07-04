@@ -174,6 +174,31 @@ test("Service worker bypasses cache for release and preview dictionary packages"
   assert.match(source, /path\.startsWith\("\/kaikki-preview\/"\)/);
   assert.match(source, /path\.startsWith\("\/dictionary-full\/"\)/);
   assert.match(source, /isDictionaryAssetPath\(url\.pathname\)/);
+  const shellLists = source.slice(
+    source.indexOf("const REQUIRED_SHELL_ASSETS"),
+    source.indexOf("const NAV_TIMEOUT_MS"),
+  );
+  for (const runtimeAsset of [
+    "/dictionary-manifest.json", "/dictionary.sqlite", "/dictionary.sqlite.zst",
+    "/dictionary-full/manifest.json", "/kaikki/dictionary-manifest.json",
+    "/kaikki/dictionary.sqlite", "/kaikki/dictionary.sqlite.zst",
+    "/kaikki/dictionary-full/manifest.json",
+  ]) {
+    assert.doesNotMatch(shellLists, new RegExp(`"${runtimeAsset.replaceAll("/", "\\/")}"`));
+  }
+});
+
+test("Deploy workflow preserves root ECDICT and optional Kaikki runtime packages", async () => {
+  const workflow = await readFile(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const ignore = await readFile(new URL("../../../.gitignore", import.meta.url), "utf8");
+  assert.match(workflow, /origin\/gh-pages:dictionary\.sqlite/);
+  assert.match(workflow, /origin\/gh-pages dictionary-full/);
+  assert.match(workflow, /validate_dictionary_shards\.py "\$SITE\/dictionary-full"/);
+  assert.match(workflow, /origin\/gh-pages kaikki/);
+  assert.match(workflow, /validate_dictionary_shards\.py "\$SITE\/kaikki\/dictionary-full"/);
+  assert.match(workflow, /test -f "\$SITE\/kaikki\/dictionary\.sqlite"/);
+  assert.match(ignore, /^apps\/wordlover-pwa\/public\/kaikki\/$/m);
+  assert.match(ignore, /^apps\/wordlover-pwa\/public\/kaikki-preview\/$/m);
 });
 
 test("Full dictionary shard storage follows dictionary mode", () => {

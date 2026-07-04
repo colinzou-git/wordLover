@@ -428,6 +428,26 @@ jobs:
             python scripts/validate_dictionary_shards.py "$SITE/dictionary-full"
           fi
 
+          # Preserve the separately-published selectable Kaikki runtime package.
+          # It is generated outside normal CI and must survive orphan shell deploys.
+          if git ls-tree -d --name-only origin/gh-pages kaikki | grep -q '^kaikki$'; then
+            git archive origin/gh-pages kaikki | tar -x -C "$SITE"
+            test -f "$SITE/kaikki/dictionary-manifest.json"
+            test -f "$SITE/kaikki/dictionary.sqlite"
+            test -f "$SITE/kaikki/dictionary-full/manifest.json"
+            python scripts/validate_dictionary_shards.py "$SITE/kaikki/dictionary-full"
+            for key in sqlite zstd; do
+              file=$(jq -r ".$key.path // empty" "$SITE/kaikki/dictionary-manifest.json")
+              [ -z "$file" ] && continue
+              want=$(jq -r ".$key.sha256" "$SITE/kaikki/dictionary-manifest.json")
+              got=$(sha256sum "$SITE/kaikki/$file" | cut -d' ' -f1)
+              test "$want" = "$got"
+            done
+            echo "Preserved and validated existing /kaikki/ runtime package."
+          else
+            echo "No Kaikki package found on gh-pages; rollback-safe switching keeps ECDICT active."
+          fi
+
           # GitHub Pages config.
           tr -d '\n' < CNAME > "$SITE/CNAME"
           : > "$SITE/.nojekyll"
