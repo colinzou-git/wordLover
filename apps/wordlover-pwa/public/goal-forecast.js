@@ -11,7 +11,7 @@
 import {
   getCardRetrievability,
   scheduleForecastReview,
-} from "./fsrs-scheduler.js?v=20260624-4";
+} from "./fsrs-scheduler.js?v=20260704-2";
 
 // Per-item study-time estimates (seconds). New words cost more than reviews.
 const NEW_WORD_SECONDS = { low: 30, high: 60 };

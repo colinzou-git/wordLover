@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 process.env.TZ = "America/Los_Angeles";
 
@@ -28,11 +29,338 @@ const {
 const {
   validateBackup,
 } = await import("../public/tracks.js");
+const {
+  dictionaryStorageKeys,
+  resolveDictionaryAssetUrl,
+  resolveDictionaryConfig,
+} = await import("../public/dictionary-config.js");
+const {
+  DEFAULT_DICTIONARY_ID,
+  DICTIONARY_REGISTRY,
+  userSelectableDictionaries,
+} = await import("../public/dictionary-registry.js");
+const {
+  dictionaryRecordMetadata,
+  readSelectedDictionaryId,
+  saveSelectedDictionaryId,
+} = await import("../public/dictionary-selection.js");
+const {
+  fullDictionaryStorageConfig,
+} = await import("../public/full-dictionary.js");
+const {
+  canonicalPronunciationKey,
+  groupPronunciationsByIpa,
+  hasStructuredDictionaryDetail,
+  parseDictionaryDetail,
+  renderPronunciationLine,
+  renderStructuredDictionaryResult,
+} = await import("../public/dictionary-rendering.js");
 
 const tests = [];
 function test(name, fn) {
   tests.push({ name, fn });
 }
+
+test("Dictionary configuration keeps production URLs by default", () => {
+  const config = resolveDictionaryConfig("?fresh=test");
+  assert.equal(config.dictionaryManifestUrl, "/dictionary-manifest.json");
+  assert.equal(config.fullDictionaryBaseUrl, "/dictionary-full");
+  assert.equal(config.mode, "production");
+  assert.equal(config.id, "ecdict");
+  assert.equal(DEFAULT_DICTIONARY_ID, "ecdict");
+});
+
+test("Kaikki release config and resolver priorities are stable", () => {
+  const kaikki = resolveDictionaryConfig("", { savedDictionaryId: "kaikki" });
+  assert.equal(kaikki.id, "kaikki");
+  assert.equal(kaikki.dictionaryManifestUrl, "/kaikki/dictionary-manifest.json");
+  assert.equal(kaikki.fullDictionaryBaseUrl, "/kaikki/dictionary-full");
+  assert.equal(kaikki.storageScope, "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki", { savedDictionaryId: "ecdict" }).id, "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki", {
+    dictionaryId: "ecdict", savedDictionaryId: "kaikki",
+  }).id, "ecdict");
+  assert.equal(resolveDictionaryConfig("?dictionary=unknown", { savedDictionaryId: "kaikki" }).id, "ecdict");
+  assert.deepEqual(userSelectableDictionaries().map((entry) => entry.id), ["ecdict", "kaikki"]);
+  assert.equal(DICTIONARY_REGISTRY["kaikki-preview"].isPreview, true);
+});
+
+test("Dictionary selection persists normal ids without letting preview queries overwrite it", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  assert.equal(readSelectedDictionaryId(storage), "ecdict");
+  assert.equal(saveSelectedDictionaryId("kaikki", storage), "kaikki");
+  assert.equal(readSelectedDictionaryId(storage), "kaikki");
+  assert.equal(resolveDictionaryConfig("?dictionary=kaikki-preview-local", {
+    savedDictionaryId: readSelectedDictionaryId(storage),
+  }).id, "kaikki-preview-local");
+  assert.equal(readSelectedDictionaryId(storage), "kaikki");
+  assert.equal(saveSelectedDictionaryId("kaikki-preview", storage), "ecdict");
+});
+
+test("Dictionary record metadata is additive and legacy records remain valid", () => {
+  const legacy = { term: "charge", normalizedTerm: "charge" };
+  assert.equal(legacy.dictionaryId, undefined);
+  assert.deepEqual(dictionaryRecordMetadata(DICTIONARY_REGISTRY.kaikki, "v2"), {
+    dictionaryId: "kaikki",
+    dictionaryLabel: "Kaikki / Wiktextract",
+    dictionaryDataVersion: "v2",
+  });
+  const sameTermAcrossDictionaries = [
+    { ...legacy, dictionaryId: "ecdict" },
+    { ...legacy, dictionaryId: "kaikki" },
+  ];
+  assert.equal(new Set(sameTermAcrossDictionaries.map((item) => item.normalizedTerm)).size, 1);
+});
+
+test("Production dictionary storage keys remain backward compatible", () => {
+  assert.deepEqual(dictionaryStorageKeys("production"), {
+    dictionaryKey: "dictionary.sqlite",
+    progressKey: "dictionary.sqlite.downloadProgress",
+    chunkPrefix: "dictionary.sqlite.chunk.",
+    versionKey: "dictionaryDataVersion",
+    installedKey: "dictionaryInstalled",
+  });
+});
+
+test("Kaikki preview configuration uses only isolated URLs", () => {
+  const config = resolveDictionaryConfig("?dictionary=kaikki-preview");
+  assert.equal(
+    config.dictionaryManifestUrl,
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-manifest.json",
+  );
+  assert.equal(
+    config.fullDictionaryBaseUrl,
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-full",
+  );
+  assert.equal(config.mode, "kaikki-preview");
+});
+
+test("Kaikki preview storage keys are isolated from production", () => {
+  assert.deepEqual(dictionaryStorageKeys("kaikki-preview"), {
+    dictionaryKey: "kaikki-preview.dictionary.sqlite",
+    progressKey: "kaikki-preview.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki-preview.dictionary.sqlite.chunk.",
+    versionKey: "kaikki-preview.dictionaryDataVersion",
+    installedKey: "kaikki-preview.dictionaryInstalled",
+  });
+  assert.deepEqual(dictionaryStorageKeys("kaikki-preview-local"), {
+    dictionaryKey: "kaikki-preview-local.dictionary.sqlite",
+    progressKey: "kaikki-preview-local.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki-preview-local.dictionary.sqlite.chunk.",
+    versionKey: "kaikki-preview-local.dictionaryDataVersion",
+    installedKey: "kaikki-preview-local.dictionaryInstalled",
+  });
+});
+
+test("Kaikki release SQLite and full-shard storage keys are isolated", () => {
+  assert.deepEqual(dictionaryStorageKeys("kaikki"), {
+    dictionaryKey: "kaikki.dictionary.sqlite",
+    progressKey: "kaikki.dictionary.sqlite.downloadProgress",
+    chunkPrefix: "kaikki.dictionary.sqlite.chunk.",
+    versionKey: "kaikki.dictionaryDataVersion",
+    installedKey: "kaikki.dictionaryInstalled",
+  });
+  assert.equal(fullDictionaryStorageConfig("kaikki").manifestKey, "wordfan.fullDictionary.kaikki.manifest.v1");
+  assert.equal(fullDictionaryStorageConfig("kaikki").cachePrefix, "wordfan-full-dictionary-kaikki-v1-");
+});
+
+test("Service worker bypasses cache for release and preview dictionary packages", async () => {
+  const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(source, /path\.startsWith\("\/kaikki\/"\)/);
+  assert.match(source, /path\.startsWith\("\/kaikki-preview\/"\)/);
+  assert.match(source, /path\.startsWith\("\/dictionary-full\/"\)/);
+  assert.match(source, /isDictionaryAssetPath\(url\.pathname\)/);
+  const shellLists = source.slice(
+    source.indexOf("const REQUIRED_SHELL_ASSETS"),
+    source.indexOf("const NAV_TIMEOUT_MS"),
+  );
+  for (const runtimeAsset of [
+    "/dictionary-manifest.json", "/dictionary.sqlite", "/dictionary.sqlite.zst",
+    "/dictionary-full/manifest.json", "/kaikki/dictionary-manifest.json",
+    "/kaikki/dictionary.sqlite", "/kaikki/dictionary.sqlite.zst",
+    "/kaikki/dictionary-full/manifest.json",
+  ]) {
+    assert.doesNotMatch(shellLists, new RegExp(`"${runtimeAsset.replaceAll("/", "\\/")}"`));
+  }
+});
+
+test("Deploy workflow preserves root ECDICT and optional Kaikki runtime packages", async () => {
+  const workflow = await readFile(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const ignore = await readFile(new URL("../../../.gitignore", import.meta.url), "utf8");
+  assert.match(workflow, /origin\/gh-pages:dictionary\.sqlite/);
+  assert.match(workflow, /origin\/gh-pages dictionary-full/);
+  assert.match(workflow, /validate_dictionary_shards\.py "\$SITE\/dictionary-full"/);
+  assert.match(workflow, /origin\/gh-pages kaikki/);
+  assert.match(workflow, /validate_dictionary_shards\.py "\$SITE\/kaikki\/dictionary-full"/);
+  assert.match(workflow, /test -f "\$SITE\/kaikki\/dictionary\.sqlite"/);
+  assert.match(ignore, /^apps\/wordlover-pwa\/public\/kaikki\/$/m);
+  assert.match(ignore, /^apps\/wordlover-pwa\/public\/kaikki-preview\/$/m);
+});
+
+test("Kaikki publisher validates and stages only its gh-pages subdirectory", async () => {
+  const publisher = await readFile(
+    new URL("../../../scripts/publish_kaikki_to_gh_pages.sh", import.meta.url), "utf8",
+  );
+  assert.match(publisher, /validate_public_sqlite_assets/);
+  assert.match(publisher, /validate_dictionary_shards\.py/);
+  assert.match(publisher, /SHA-256 mismatch/);
+  assert.match(publisher, /git worktree add --detach/);
+  assert.match(publisher, /git add -A -- kaikki/);
+  assert.match(publisher, /grep -Ev '\^kaikki\/'/);
+  assert.match(publisher, /git push "\$REMOTE" "HEAD:\$PAGES_BRANCH"/);
+  assert.doesNotMatch(publisher, /git add -A\s*$/m);
+  assert.doesNotMatch(publisher, /git push[^\n]*--force/);
+});
+
+test("Full dictionary shard storage follows dictionary mode", () => {
+  assert.equal(fullDictionaryStorageConfig("production").manifestKey, "wordfan.fullDictionary.manifest.v1");
+  assert.equal(fullDictionaryStorageConfig("production").cachePrefix, "wordfan-full-dictionary-v1-");
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview").manifestKey,
+    "wordfan.fullDictionary.kaikki-preview.manifest.v1",
+  );
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview-local").installedVersionKey,
+    "wordfan.fullDictionary.kaikki-preview-local.installedVersion.v1",
+  );
+  assert.equal(
+    fullDictionaryStorageConfig("kaikki-preview").cachePrefix,
+    "wordfan-full-dictionary-kaikki-preview-v1-",
+  );
+});
+
+test("Local Kaikki preview configuration uses the isolated local package", () => {
+  const config = resolveDictionaryConfig("?dictionary=kaikki-preview-local");
+  assert.equal(config.dictionaryManifestUrl, "/kaikki-preview/local/dictionary-manifest.json");
+  assert.equal(config.fullDictionaryBaseUrl, "/kaikki-preview/local/dictionary-full");
+  assert.equal(config.mode, "kaikki-preview-local");
+});
+
+test("Dictionary assets resolve beside the selected manifest", () => {
+  assert.equal(resolveDictionaryAssetUrl("/dictionary-manifest.json", "dictionary.sqlite"), "/dictionary.sqlite");
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki-preview/feature-kaikki-dictionary-preview/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki-preview/feature-kaikki-dictionary-preview/dictionary.sqlite",
+  );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki-preview/local/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki-preview/local/dictionary.sqlite",
+  );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki/dictionary-manifest.json", "dictionary.sqlite"),
+    "/kaikki/dictionary.sqlite",
+  );
+  assert.equal(
+    resolveDictionaryAssetUrl("/kaikki/dictionary-manifest.json", "dictionary.sqlite.zst"),
+    "/kaikki/dictionary.sqlite.zst",
+  );
+});
+
+test("Kaikki runtime text does not hardcode ECDICT full row count", async () => {
+  const appSource = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const htmlSource = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(appSource, /Full 770,770-entry dictionary/);
+  assert.doesNotMatch(htmlSource, /770,770 entries/);
+  assert.match(appSource, /fullDictionaryCoverageLabel/);
+  assert.match(appSource, /checkDictionaryPackageAvailable\(requestedConfig\)/);
+  assert.ok(
+    appSource.indexOf("checkDictionaryPackageAvailable(requestedConfig)")
+      < appSource.indexOf("saveSelectedDictionaryId(requestedConfig.id)"),
+  );
+});
+
+test("Local SQLite inflection labels prefer plural for ambiguous s forms", async () => {
+  const appSource = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const labelFunction = appSource.slice(
+    appSource.indexOf("function exchangeCodeLabel"),
+    appSource.indexOf("function lookupInflectedTerm"),
+  );
+  assert.ok(labelFunction.indexOf('code.includes("s")') < labelFunction.indexOf('code.includes("3")'));
+});
+
+test("Structured dictionary detail renders bilingual lines, fallback, definitions, and safe HTML", () => {
+  const detail = parseDictionaryDetail(JSON.stringify({
+    displayMeanings: [
+      { pos: "v.", zh: "收费", en: "ask <someone> to pay", domain: null },
+      { pos: "n.", zh: null, en: "an <unsafe> charge", domain: "Law" },
+      { pos: "n.", zh: "中文而已", en: "", domain: null },
+    ],
+    translationFallback: { zh: "通用译文", zhSource: "wordfan-full-overlay" },
+    detailedDefinitions: [{
+      pos: "Noun",
+      senses: [{ definition: "an accusation", domain: "Law", examples: ["a <quoted> example"] }],
+    }],
+  }));
+  assert.equal(hasStructuredDictionaryDetail(detail), true);
+  const html = renderStructuredDictionaryResult({}, detail);
+  assert.equal((html.match(/structured-meaning-line/g) ?? []).length, 2);
+  assert.match(html, /收费.*\|.*ask &lt;someone&gt; to pay/);
+  assert.match(html, /中文而已/);
+  assert.doesNotMatch(html, /中文而已.*\|/);
+  assert.doesNotMatch(html, /an &lt;unsafe&gt; charge/);
+  assert.match(html, /Other Chinese meanings:<\/strong> 通用译文/);
+  assert.ok(html.indexOf("structured-meaning-line") < html.indexOf("structured-translation-fallback"));
+  assert.ok(html.indexOf("structured-translation-fallback") < html.indexOf("detailed-definitions"));
+  assert.match(html, /<h4>Noun:<\/h4><ol><li>/);
+  assert.match(html, /a &lt;quoted&gt; example/);
+  assert.doesNotMatch(html, /<unsafe>|<quoted>/);
+});
+
+test("Malformed or legacy dictionary detail does not activate structured rendering", () => {
+  assert.equal(parseDictionaryDetail("{bad"), null);
+  assert.equal(parseDictionaryDetail(null), null);
+  assert.equal(hasStructuredDictionaryDetail(parseDictionaryDetail('{"unrelated":true}')), false);
+});
+
+test("POS-specific pronunciations render inline with one speaker per pronunciation", () => {
+  const detail = {
+    pronunciations: [
+      { pos: "n.", ipa: "/ˈrɛkɔrd/", source: "kaikki" },
+      { pos: "v.", ipa: "/rɪˈkɔrd/", source: "kaikki" },
+      { pos: "n.", ipa: "/ˈrɛkɔrd/", source: "kaikki" },
+    ],
+  };
+  const html = renderPronunciationLine("record", detail);
+  assert.match(html, /n\..*\/ˈrɛkɔrd\/.*\|.*v\..*\/rɪˈkɔrd\//);
+  assert.equal((html.match(/pronunciation-speaker/g) ?? []).length, 2);
+  assert.equal((html.match(/data-speak-term="record"/g) ?? []).length, 2);
+  assert.equal(renderPronunciationLine("free", { pronunciations: [{ pos: "adj.", ipa: "/fri/" }] }), "");
+  assert.equal(renderPronunciationLine("legacy", null), "");
+});
+
+test("Identical cross-POS pronunciations collapse and mixed IPA groups combine POS labels", () => {
+  assert.equal(canonicalPronunciationKey("ˈsame/"), "/ˈsame/");
+  assert.equal(canonicalPronunciationKey("/ˈsame"), "/ˈsame/");
+  assert.equal(canonicalPronunciationKey("[ˈsame]"), "/ˈsame/");
+  const same = { pronunciations: [{ pos: "n.", ipa: "ˈsame/" }, { pos: "v.", ipa: "/ˈsame" }] };
+  assert.equal(renderPronunciationLine("dictionary", same), "");
+  const grouped = groupPronunciationsByIpa([
+    { pos: "n.", ipa: "/A/" }, { pos: "adj.", ipa: "[A]" }, { pos: "v.", ipa: "/B/" },
+  ]);
+  assert.deepEqual(grouped, [
+    { ipa: "/A/", positions: ["n.", "adj."] },
+    { ipa: "/B/", positions: ["v."] },
+  ]);
+  const html = renderPronunciationLine("record", { pronunciations: [
+    { pos: "n.", ipa: "/A/" }, { pos: "adj.", ipa: "A/" }, { pos: "v.", ipa: "/B" },
+  ] });
+  assert.match(html, /n\., adj\..*\/A\/.*\|.*v\..*\/B\//);
+  assert.equal((html.match(/pronunciation-speaker/g) ?? []).length, 2);
+});
+
+test("Entry translation sense labels render as compact bilingual meanings", () => {
+  const html = renderStructuredDictionaryResult({}, {
+    displayMeanings: [{
+      pos: "n.", zh: "字典, 词典, 辞典, 辞林",
+      en: "publication that explains the meanings of an ordered list of words",
+    }],
+  });
+  assert.match(html, /字典, 词典, 辞典, 辞林.*\|.*publication that explains/);
+});
 
 test("Goals preserve an explicit zero-new-word target", () => {
   const normalized = normalizeForecastInput({ dailyNewWords: 0 });

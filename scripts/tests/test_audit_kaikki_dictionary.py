@@ -1,0 +1,197 @@
+import argparse
+import json
+import sqlite3
+import tempfile
+import unittest
+from argparse import Namespace
+from pathlib import Path
+
+from scripts.audit_kaikki_dictionary import audit_database, audit_shards, main
+from scripts.build_kaikki_dictionary import build_database
+from scripts.package_dictionary_shards import package
+
+
+class AuditKaikkiDictionaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.source = self.root / "source.jsonl"
+        self.database = self.root / "kaikki.sqlite"
+        self.build_report = self.root / "build.json"
+        rows = [
+            {
+                "word": "charge", "lang_code": "en", "pos": "noun",
+                "senses": [{"glosses": ["an amount paid"], "translations": [{"lang_code": "zh", "word": "费用"}]}],
+            },
+            {
+                "word": "run", "lang_code": "en", "pos": "verb",
+                "senses": [{"glosses": ["move quickly"]}],
+                "forms": [{"form": "running", "tags": ["present", "participle"]}, {"form": "ran", "tags": ["past"]}],
+            },
+        ]
+        self.source.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        build_database(argparse.Namespace(
+            source=self.source, output=self.database, report=self.build_report,
+            data_version="test.kaikki", batch_size=10, skip_fts=False,
+            tag_source=self.root / "missing.sqlite", tag_source_shards=self.root / "missing-shards",
+            full_translation_source_shards=None, slim_translation_source=None,
+            allow_missing_full_overlay=True,
+            max_compact_senses=12, max_detailed_senses_per_pos=20,
+            max_examples_per_sense=3, max_example_chars=240,
+        ))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def args(self, **overrides):
+        values = dict(
+            kaikki_db=self.database, current_slim_db=None, current_full_shards=None,
+            preview_package=None, report=self.root / "audit.json", strict=False,
+        )
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def test_healthy_database_passes_and_counts_coverage(self):
+        report, passed = audit_database(self.args())
+        self.assertTrue(passed)
+        self.assertEqual(report["health"]["quick_check"], "ok")
+        self.assertTrue(report["health"]["fts_matches_dictionary_rows"])
+        self.assertEqual(report["chinese_coverage"]["rows_with_translation"], 1)
+        self.assertEqual(report["chinese_coverage"]["rows_with_kaikki_sense_chinese"], 1)
+        self.assertTrue(report["inflections"]["running_alias"])
+        self.assertTrue(report["inflections"]["ran_alias"])
+        self.assertEqual(report["tag_rank_preservation"]["status"], "skipped")
+        self.assertEqual(report["full_shard_comparison"]["status"], "skipped")
+        self.assertEqual(report["stem_preservation"]["status"], "skipped-no-sample-terms")
+
+    def add_stem_samples(self):
+        with sqlite3.connect(self.database) as conn:
+            for term, tag in (("isosceles", "k12_math"), ("scalene", "k12_math"), ("rhombus", "k12_math"),
+                              ("derivative", "ap_calculus_ab"), ("momentum", "ap_physics"),
+                              ("eigenvalue", "linear_algebra_extension")):
+                conn.execute(
+                    "INSERT INTO dictionary_entries(word,normalized_word,definition_source,tag,is_toefl,source) VALUES (?,?,?,?,0,?)",
+                    (term, term, "WordFan_STEM_Supplement", tag, "WordFan_STEM_Supplement"),
+                )
+                rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                conn.execute("INSERT INTO dictionary_search_fts(rowid,word,normalized_word,definition,translation) VALUES (?,?,?,?,?)", (rowid, term, term, "", ""))
+            conn.commit()
+
+    def test_strict_mode_requires_stem_samples(self):
+        report, passed = audit_database(self.args(strict=True))
+        self.assertFalse(passed)
+        self.assertEqual(report["stem_preservation"]["status"], "problem")
+        self.assertTrue(any("Strict STEM samples missing" in item for item in report["failures"]))
+
+    def test_strict_mode_requires_representative_inflections_when_base_exists(self):
+        self.add_stem_samples()
+        with sqlite3.connect(self.database) as conn:
+            conn.execute("UPDATE dictionary_entries SET exchange=NULL WHERE normalized_word='run'")
+            conn.commit()
+        report, passed = audit_database(self.args(strict=True))
+        self.assertFalse(passed)
+        self.assertEqual(report["inflections"]["status"], "problem")
+        self.assertTrue(any("run must include running and ran" in item for item in report["failures"]))
+
+    def test_strict_cli_writes_problem_report(self):
+        report_path = self.root / "strict.json"
+        code = main(["--kaikki-db", str(self.database), "--strict", "--report", str(report_path)])
+        self.assertEqual(code, 1)
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertTrue(payload["strict"])
+        self.assertEqual(payload["status"], "fail")
+
+    def test_fts_mismatch_fails_and_writes_report(self):
+        with sqlite3.connect(self.database) as conn:
+            conn.execute("DROP TABLE dictionary_search_fts")
+            conn.execute("CREATE TABLE dictionary_search_fts(word TEXT)")
+            conn.execute("INSERT INTO dictionary_search_fts VALUES ('only-one')")
+            conn.commit()
+        report_path = self.root / "failed-audit.json"
+        code = main(["--kaikki-db", str(self.database), "--report", str(report_path)])
+        self.assertEqual(code, 1)
+        self.assertTrue(report_path.is_file())
+        self.assertFalse(json.loads(report_path.read_text(encoding="utf-8"))["health"]["fts_matches_dictionary_rows"])
+
+    def test_malformed_detail_fails(self):
+        with sqlite3.connect(self.database) as conn:
+            conn.execute("UPDATE dictionary_entries SET detail='{bad' WHERE normalized_word='charge'")
+            conn.commit()
+        report, passed = audit_database(self.args())
+        self.assertFalse(passed)
+        self.assertEqual(report["structured_detail"]["malformed_detail_rows"], 1)
+
+    def test_stem_samples_detected(self):
+        self.add_stem_samples()
+        report, passed = audit_database(self.args())
+        self.assertTrue(passed)
+        self.assertEqual(report["stem_preservation"]["status"], "checked")
+        self.assertTrue(report["stem_preservation"]["sample_stem_terms_present"])
+        self.assertEqual(report["stem_preservation"]["final_stem_rows"], 6)
+
+    def test_missing_required_input_returns_two_and_writes_report(self):
+        report = self.root / "missing.json"
+        code = main(["--kaikki-db", str(self.root / "missing.sqlite"), "--report", str(report)])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["status"], "invalid-input")
+
+    def test_preview_package_over_memory_target_fails(self):
+        preview = self.root / "preview"
+        (preview / "dictionary-full").mkdir(parents=True)
+        (preview / "dictionary-manifest.json").write_text(
+            json.dumps({"sqlite": {"bytes": 51 * 1024 * 1024}}), encoding="utf-8"
+        )
+        (preview / "dictionary-full/manifest.json").write_text("{}", encoding="utf-8")
+        report, passed = audit_database(self.args(preview_package=preview))
+        self.assertFalse(passed)
+        self.assertFalse(report["packaging_compatibility"]["core_within_memory_target"])
+
+    def make_shards(self) -> tuple[Path, dict]:
+        output = self.root / "full-shards"
+        manifest = package(Namespace(
+            input=self.database, output_dir=output, version="test", shard_count=2,
+            gzip_level=1, skip_validation=False, sources=["test"],
+        ))
+        return output, manifest
+
+    @staticmethod
+    def write_manifest(output: Path, manifest: dict) -> None:
+        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def test_valid_full_shard_package_passes(self):
+        output, manifest = self.make_shards()
+        result = audit_shards(output)
+        self.assertEqual(result["status"], "checked")
+        self.assertEqual(result["shards_checked"], manifest["shardCount"])
+        self.assertEqual(result["entries_counted"], manifest["rowCount"])
+        self.assertEqual(result["aliases_counted"], manifest["aliasCount"])
+        self.assertEqual(result["bytes_counted"], manifest["totalCompressedBytes"])
+
+    def test_full_shard_integrity_failures(self):
+        mutations = (
+            ("wrong size", lambda m: m["shards"][0].__setitem__("bytes", m["shards"][0]["bytes"] + 1), "size mismatch"),
+            ("wrong checksum", lambda m: m["shards"][0].__setitem__("sha256", "0" * 64), "checksum mismatch"),
+            ("row total", lambda m: m.__setitem__("rowCount", m["rowCount"] + 1), "row total mismatch"),
+            ("alias total", lambda m: m.__setitem__("aliasCount", m["aliasCount"] + 1), "alias total mismatch"),
+            ("byte total", lambda m: m.__setitem__("totalCompressedBytes", m["totalCompressedBytes"] + 1), "total compressed bytes mismatch"),
+            ("invalid path", lambda m: m["shards"][0].__setitem__("path", "../shard-00.json.gz"), "invalid shard path"),
+        )
+        for label, mutate, expected in mutations:
+            with self.subTest(label=label):
+                output, manifest = self.make_shards()
+                mutate(manifest)
+                self.write_manifest(output, manifest)
+                result = audit_shards(output)
+                self.assertEqual(result["status"], "failed")
+                self.assertIn(expected, result["reason"])
+
+    def test_missing_listed_full_shard_fails(self):
+        output, manifest = self.make_shards()
+        (output / manifest["shards"][0]["path"]).unlink()
+        result = audit_shards(output)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("missing", result["reason"])
+
+
+if __name__ == "__main__":
+    unittest.main()

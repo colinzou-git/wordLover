@@ -8,6 +8,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 
@@ -24,6 +25,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--version", default=DEFAULT_VERSION)
     parser.add_argument("--zstd-level", type=int, default=3)
+    parser.add_argument("--variant", default=None)
+    parser.add_argument("--source-label", action="append", dest="source_labels")
     parser.add_argument("--copy-sqlite", action="store_true", help="Also copy the SQLite file for the current sql.js fallback.")
     return parser.parse_args()
 
@@ -45,10 +48,14 @@ def compress_zstd(source: Path, target: Path, level: int) -> int:
     try:
         import zstandard as zstd
     except ImportError as exc:
-        raise SystemExit(
-            "Python module 'zstandard' is required for .zst packaging. "
-            "Install it with: python -m pip install zstandard"
-        ) from exc
+        executable = shutil.which("zstd")
+        if not executable:
+            raise SystemExit(
+                "Python module 'zstandard' or the zstd CLI is required for .zst packaging. "
+                "Install with: python -m pip install zstandard"
+            ) from exc
+        subprocess.run([executable, f"-{level}", "-q", "-f", str(source), "-o", str(target)], check=True)
+        return target.stat().st_size
 
     compressor = zstd.ZstdCompressor(level=level, threads=-1)
     with source.open("rb") as src, target.open("wb") as dst:
@@ -73,7 +80,7 @@ def main() -> None:
     if args.copy_sqlite:
         shutil.copy2(args.input, args.output_dir / "dictionary.sqlite")
 
-    variant = "slim" if "slim" in args.input.name.lower() else "full"
+    variant = args.variant or ("slim" if "slim" in args.input.name.lower() else "full")
     manifest = {
         "app": "wordlover",
         "dictionaryDataVersion": args.version,
@@ -91,7 +98,7 @@ def main() -> None:
             "sha256": zst_sha256,
             "level": args.zstd_level,
         },
-        "sources": ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913"],
+        "sources": args.source_labels or ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913"],
     }
     manifest_path = args.output_dir / "dictionary-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

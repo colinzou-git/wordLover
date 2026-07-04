@@ -202,7 +202,6 @@ jobs:
 
                   search = page.locator("#termInput")
                   search.fill("abandon")
-                  search.press("Enter")
                   page.wait_for_function(
                       """() => {
                           const text = document.querySelector("#result")?.textContent?.toLowerCase() ?? "";
@@ -212,7 +211,18 @@ jobs:
                   )
                   report["searchResult"] = page.locator("#result").inner_text()[:500]
 
-                  page.locator("#clearSearch").click()
+                  # Verify Return-to-save separately. The default action intentionally clears
+                  # the input/result after saving, so waiting for rendered text after pressing
+                  # Return races that clear (fast Chromium used to fail intermittently).
+                  search.press("Enter")
+                  page.wait_for_function(
+                      """() => window.WordLoverApp.getVocabulary()
+                          .some((item) => item.normalizedTerm === "abandon")""",
+                      timeout=15_000,
+                  )
+
+                  if search.input_value() != "":
+                      page.locator("#clearSearch").click()
                   if search.input_value() != "":
                       raise AssertionError("Clear search did not empty the search field.")
 
@@ -426,6 +436,26 @@ jobs:
           if git ls-tree -d --name-only origin/gh-pages dictionary-full | grep -q '^dictionary-full$'; then
             git archive origin/gh-pages dictionary-full | tar -x -C "$SITE"
             python scripts/validate_dictionary_shards.py "$SITE/dictionary-full"
+          fi
+
+          # Preserve the separately-published selectable Kaikki runtime package.
+          # It is generated outside normal CI and must survive orphan shell deploys.
+          if git ls-tree -d --name-only origin/gh-pages kaikki | grep -q '^kaikki$'; then
+            git archive origin/gh-pages kaikki | tar -x -C "$SITE"
+            test -f "$SITE/kaikki/dictionary-manifest.json"
+            test -f "$SITE/kaikki/dictionary.sqlite"
+            test -f "$SITE/kaikki/dictionary-full/manifest.json"
+            python scripts/validate_dictionary_shards.py "$SITE/kaikki/dictionary-full"
+            for key in sqlite zstd; do
+              file=$(jq -r ".$key.path // empty" "$SITE/kaikki/dictionary-manifest.json")
+              [ -z "$file" ] && continue
+              want=$(jq -r ".$key.sha256" "$SITE/kaikki/dictionary-manifest.json")
+              got=$(sha256sum "$SITE/kaikki/$file" | cut -d' ' -f1)
+              test "$want" = "$got"
+            done
+            echo "Preserved and validated existing /kaikki/ runtime package."
+          else
+            echo "No Kaikki package found on gh-pages; rollback-safe switching keeps ECDICT active."
           fi
 
           # GitHub Pages config.

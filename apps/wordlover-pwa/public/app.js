@@ -2,7 +2,20 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260624-4";
+} from "./fsrs-scheduler.js?v=20260704-2";
+
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260704-2";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260704-2";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260704-2";
+import {
+  formatDomainSuffix,
+  hasStructuredDictionaryDetail,
+  parseDictionaryDetail,
+  renderPronunciationLine,
+  renderStructuredDetailedDefinitions,
+  renderStructuredDictionaryResult,
+  renderStructuredDisplayMeanings,
+} from "./dictionary-rendering.js?v=20260704-2";
 
 import {
   isEncryptedRecord,
@@ -11,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260624-4";
+} from "./persistence.js?v=20260704-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260624-4";
+} from "./spelling.js?v=20260704-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -31,14 +44,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260624-4";
+} from "./ui-preferences.js?v=20260704-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260624-4";
+} from "./review-state.js?v=20260704-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -59,7 +72,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260624-4";
+} from "./study-one-more.js?v=20260704-2";
 
 import {
   studyEventTrack,
@@ -71,11 +84,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260624-4";
+} from "./sync.js?v=20260704-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260624-4";
+} from "./goal-forecast.js?v=20260704-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -87,11 +100,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260624-4";
+} from "./tracks.js?v=20260704-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260624-4";
+} from "./full-dictionary.js?v=20260704-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -157,10 +170,13 @@ const suggestions = document.querySelector("#suggestions");
 const installBanner = document.querySelector("#installBanner");
 const onReturnSelect = document.querySelector("#onReturnSelect");
 const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
+const dictionarySelect = document.querySelector("#dictionarySelect");
+const dictionarySelectionStatus = document.querySelector("#dictionarySelectionStatus");
 const fullDictionaryStatus = document.querySelector("#fullDictionaryStatus");
 const fullDictionaryProgress = document.querySelector("#fullDictionaryProgress");
 const fullDictionaryInstallButton = document.querySelector("#fullDictionaryInstall");
 const fullDictionaryRemoveButton = document.querySelector("#fullDictionaryRemove");
+const fullDictionaryHelp = document.querySelector("#fullDictionaryHelp");
 const vocabularySummary = document.querySelector("#vocabularySummary");
 const vocabularyList = document.querySelector("#vocabularyList");
 const studySummary = document.querySelector("#studySummary");
@@ -227,16 +243,13 @@ const TRACK_RECORD_STORES = [
   USER_DICTIONARY_STORE,
   KNOWN_STORE,
 ];
-const DICTIONARY_KEY = "dictionary.sqlite";
-const DICTIONARY_PROGRESS_KEY = "dictionary.sqlite.downloadProgress";
-const DICTIONARY_CHUNK_PREFIX = "dictionary.sqlite.chunk.";
 const DICTIONARY_CHUNK_SIZE = 4 * 1024 * 1024;
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260624-4-v139";
+const APP_VERSION = "0.6.2-product.20260704-2-v154";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -244,13 +257,20 @@ const APP_VERSION = "0.6.2-product.20260624-4-v139";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v139";
-const DICTIONARY_ENGINE = "100k ranked core + 770k sharded exact lookup; gzip shards cached on demand or for complete offline use";
-const MEMORY_TARGET_NOTE =
-  "The ranked 100k core remains in sql.js for suggestions and study selection. Exact English lookup can reach all 770k entries by opening one small gzip shard, avoiding a 270 MB in-memory SQLite database.";
+const SHELL_CACHE_VERSION = "wordlover-shell-v154";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
-const fullDictionary = createFullDictionaryClient({
-  baseUrl: "/dictionary-full",
+let selectedDictionaryId = readSelectedDictionaryId();
+let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
+  ...CONFIG,
+  savedDictionaryId: selectedDictionaryId,
+});
+let dictionaryStorage = dictionaryStorageKeys(dictionaryConfig.storageScope ?? dictionaryConfig.mode);
+let DICTIONARY_KEY = dictionaryStorage.dictionaryKey;
+let DICTIONARY_PROGRESS_KEY = dictionaryStorage.progressKey;
+let DICTIONARY_CHUNK_PREFIX = dictionaryStorage.chunkPrefix;
+let fullDictionary = createFullDictionaryClient({
+  baseUrl: dictionaryConfig.fullDictionaryBaseUrl,
+  storageScope: dictionaryConfig.storageScope ?? dictionaryConfig.mode,
   onStateChange: (state) => renderFullDictionarySettings(state),
 });
 const THEME_IDS = ["sunrise", "candy", "calm", "ink", "sky", "rose", "deepblue", "forest", "lavender", "graphite", "mint"];
@@ -260,8 +280,9 @@ const NORMAL_DAY_MS = 24 * 60 * 60 * 1000;
 const DEBUG_TIME_SCALE = NORMAL_DAY_MS / DEBUG_DAY_MS;
 const REVIEW_REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000;
 const DICTIONARY_ESTIMATED_BYTES = 40 * 1024 * 1024;
-const DICTIONARY_MANIFEST_URL = "/dictionary-manifest.json";
-const DICTIONARY_VERSION_KEY = "dictionaryDataVersion";
+let DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
+let DICTIONARY_VERSION_KEY = dictionaryStorage.versionKey;
+let DICTIONARY_INSTALLED_KEY = dictionaryStorage.installedKey;
 const MAX_CHECKPOINTS = 5;
 const MAX_USER_DATA_IMPORT_BYTES = 25 * 1024 * 1024;
 const PRODUCTION_GOOGLE_CLIENT_ID = "665953045468-gem626o90ch863ktk2686fb58qa9ql31.apps.googleusercontent.com";
@@ -308,6 +329,7 @@ const GEMINI_RESPONSE_SCHEMA = {
 let SQL = null;
 let dictionaryDb = null;
 let loaded = false;
+let currentDictionaryVersion = null;
 let historyItems = [];
 let lastMetrics = null;
 let debounceHandle = 0;
@@ -1136,7 +1158,7 @@ async function getDeviceId() {
 }
 
 async function hasInstalledDictionary() {
-  return Boolean(await loadValue("dictionaryInstalled", false));
+  return Boolean(await loadValue(DICTIONARY_INSTALLED_KEY, false));
 }
 
 async function saveFile(key, value) {
@@ -1235,7 +1257,177 @@ function renderFullDictionarySettings(state = fullDictionary.status()) {
     fullDictionaryRemoveButton.hidden = !state.offlineInstalled;
     fullDictionaryRemoveButton.disabled = Boolean(state.busy);
   }
+  if (fullDictionaryHelp) {
+    fullDictionaryHelp.textContent = dictionaryConfig.id === "kaikki"
+      ? "Online exact lookup downloads only one Kaikki shard. Optional offline download stores all Kaikki full-dictionary shards, not the 1.1 GB build SQLite."
+      : "Online exact lookup downloads only one ECDICT shard. Optional offline download stores all ECDICT full-dictionary shards.";
+  }
 }
+
+function activeDictionaryEngineText() {
+  if (dictionaryConfig.id === "kaikki") {
+    return "Kaikki slim core + sharded exact lookup; gzip shards cache on demand. The full Kaikki SQLite is never loaded in the browser.";
+  }
+  return "ECDICT ranked core + sharded exact lookup; gzip shards cache on demand.";
+}
+
+function activeMemoryTargetNote() {
+  if (dictionaryConfig.id === "kaikki") {
+    return "Kaikki uses a slim local SQLite core for common lookup and fetches full exact entries from small gzip shards, avoiding the 1.1 GB full build SQLite on iPhone.";
+  }
+  return "ECDICT uses a ranked local SQLite core for suggestions and study selection. Exact English lookup opens one small gzip shard instead of a large in-memory SQLite database.";
+}
+
+function fullDictionaryCoverageLabel() {
+  const rows = Number(fullDictionary.status().rowCount ?? 0);
+  return rows > 0
+    ? `Full ${rows.toLocaleString()}-entry ${dictionaryConfig.label} dictionary`
+    : `Full ${dictionaryConfig.label} dictionary`;
+}
+
+function createConfiguredFullDictionaryClient() {
+  return createFullDictionaryClient({
+    baseUrl: dictionaryConfig.fullDictionaryBaseUrl,
+    storageScope: dictionaryConfig.storageScope ?? dictionaryConfig.mode,
+    onStateChange: (state) => renderFullDictionarySettings(state),
+  });
+}
+
+function applyDictionaryConfig(nextConfig) {
+  dictionaryConfig = nextConfig;
+  dictionaryStorage = dictionaryStorageKeys(dictionaryConfig.storageScope ?? dictionaryConfig.mode);
+  DICTIONARY_KEY = dictionaryStorage.dictionaryKey;
+  DICTIONARY_PROGRESS_KEY = dictionaryStorage.progressKey;
+  DICTIONARY_CHUNK_PREFIX = dictionaryStorage.chunkPrefix;
+  DICTIONARY_MANIFEST_URL = dictionaryConfig.dictionaryManifestUrl;
+  DICTIONARY_VERSION_KEY = dictionaryStorage.versionKey;
+  DICTIONARY_INSTALLED_KEY = dictionaryStorage.installedKey;
+}
+
+function resetDictionaryRuntimeState() {
+  lookupRequestSequence += 1;
+  dictionaryDb?.close();
+  dictionaryDb = null;
+  loaded = false;
+  currentDictionaryVersion = null;
+  ftsSearchAvailable = null;
+  lastMetrics = null;
+  fullDictionary = createConfiguredFullDictionaryClient();
+  setSearchLoading(false);
+  loadButton.hidden = false;
+  loadButton.disabled = false;
+  loadButton.textContent = "Install/load dictionary";
+  dictionaryState.textContent = "Not loaded";
+  dictionarySource.textContent = dictionaryConfig.label;
+  renderFullDictionarySettings();
+}
+
+function renderDictionarySelectionSettings() {
+  if (!dictionarySelect) return;
+  const options = userSelectableDictionaries();
+  dictionarySelect.innerHTML = options
+    .map((entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.label)}</option>`)
+    .join("");
+  dictionarySelect.value = dictionaryConfig.isPreview ? selectedDictionaryId : dictionaryConfig.id;
+}
+
+async function switchDictionary(nextId, { persist = true } = {}) {
+  const previousSelectedId = selectedDictionaryId;
+  const previousConfig = dictionaryConfig;
+  const requestedConfig = resolveDictionaryConfig("", { dictionaryId: nextId });
+  if (requestedConfig.id === dictionaryConfig.id) {
+    renderDictionarySelectionSettings();
+    return true;
+  }
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = `Checking ${requestedConfig.label}…`;
+  }
+  const availability = await checkDictionaryPackageAvailable(requestedConfig);
+  if (!availability.ok) {
+    renderDictionarySelectionSettings();
+    if (dictionarySelectionStatus) dictionarySelectionStatus.textContent = availability.message;
+    return false;
+  }
+
+  selectedDictionaryId = requestedConfig.id;
+  applyDictionaryConfig(requestedConfig);
+  resetDictionaryRuntimeState();
+  renderDictionarySelectionSettings();
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = `Loading ${dictionaryConfig.label}… Saved words and review history are unchanged.`;
+  }
+  const ready = await ensureDictionaryLoaded();
+  if (!ready) {
+    selectedDictionaryId = previousSelectedId;
+    applyDictionaryConfig(previousConfig);
+    resetDictionaryRuntimeState();
+    renderDictionarySelectionSettings();
+    if (persist && !previousConfig.isPreview) saveSelectedDictionaryId(previousSelectedId);
+    if (dictionarySelectionStatus) {
+      dictionarySelectionStatus.textContent = `${requestedConfig.label} could not be loaded. Switched back to ${previousConfig.label}.`;
+    }
+    if (await hasInstalledDictionary()) void ensureDictionaryLoaded();
+    return false;
+  }
+  if (persist && !requestedConfig.isPreview) {
+    selectedDictionaryId = saveSelectedDictionaryId(requestedConfig.id);
+  }
+  if (termInput.value.trim()) await runLookup({ commit: false, allowFull: true });
+  if (dictionarySelectionStatus) {
+    dictionarySelectionStatus.textContent = ready
+      ? `${dictionaryConfig.label} is active. Saved words and review history remain shared.`
+      : `${dictionaryConfig.label} could not be loaded.`;
+  }
+  renderAppMenu();
+  return ready;
+}
+
+async function hasInstalledDictionaryForConfig(config) {
+  const keys = dictionaryStorageKeys(config.storageScope ?? config.mode);
+  return Boolean(await loadValue(keys.installedKey, false));
+}
+
+async function checkDictionaryPackageAvailable(config) {
+  if (await hasInstalledDictionaryForConfig(config)) return { ok: true, source: "local" };
+  if (!navigator.onLine) {
+    return {
+      ok: false,
+      message: `${config.label} is not installed on this device yet. Connect to the internet once to install it.`,
+    };
+  }
+  try {
+    const response = await fetchWithTimeout(config.dictionaryManifestUrl, { cache: "no-store" }, 6000);
+    if (!response.ok) {
+      return {
+        ok: false,
+        message: `${config.label} package is missing at ${config.dictionaryManifestUrl} (HTTP ${response.status}). Build/package it first.`,
+      };
+    }
+    const manifest = await response.json();
+    if (!manifest || typeof manifest.dictionaryDataVersion !== "string") {
+      return { ok: false, message: `${config.label} manifest is invalid or missing dictionaryDataVersion.` };
+    }
+    if (manifest.dictionaryId && manifest.dictionaryId !== config.id) {
+      return {
+        ok: false,
+        message: `${config.label} manifest dictionaryId is "${manifest.dictionaryId}", expected "${config.id}".`,
+      };
+    }
+    return { ok: true, source: "network", manifest };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `${config.label} package could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+dictionarySelect?.addEventListener("change", () => {
+  dictionarySelect.disabled = true;
+  void switchDictionary(dictionarySelect.value).finally(() => {
+    dictionarySelect.disabled = false;
+  });
+});
 
 async function refreshFullDictionaryStatus(force = false) {
   await fullDictionary.ensureManifest({ force });
@@ -1280,7 +1472,7 @@ fullDictionaryRemoveButton?.addEventListener("click", () => { void removeFullDic
 function renderAppMenu() {
   appVersion.textContent = BUILD_STAMP === "dev" ? APP_VERSION : `${APP_VERSION} · ${BUILD_STAMP}`;
   dataFormatVersion.textContent = USER_DATA_FORMAT_VERSION;
-  dictionaryEngine.textContent = DICTIONARY_ENGINE;
+  dictionaryEngine.textContent = activeDictionaryEngineText();
   const signedInOrGranted = Boolean(googleAuth.accessToken) || hasGoogleGrant();
   syncStatus.textContent = !signedInOrGranted
     ? "Local only"
@@ -1314,7 +1506,8 @@ function renderAppMenu() {
       syncDetails.textContent = syncEncryptionNotice();
     }
   }
-  memoryNote.textContent = MEMORY_TARGET_NOTE;
+  memoryNote.textContent = activeMemoryTargetNote();
+  renderDictionarySelectionSettings();
   renderFullDictionarySettings();
   googleStatus.textContent = `This device's web origin is ${window.location.origin} — it must be listed under "Authorized JavaScript origins" on your Google OAuth client for sign-in to work. Offline dictionary and study features stay local.`;
   googleAccount.textContent = googleAuth.profile?.email ?? "Not signed in";
@@ -1572,19 +1765,25 @@ function renderResult(data) {
   const isActiveSaved = Boolean(vocabularyItem && !vocabularyItem.archivedAt);
   const spellingItem = getSpellingItem(data.term);
   const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
+  const structuredDetail = parseDictionaryDetail(data.detail);
+  const pronunciationHtml = renderPronunciationLine(data.term, structuredDetail);
+  const structuredHtml = hasStructuredDictionaryDetail(structuredDetail)
+    ? renderStructuredDictionaryResult(data, structuredDetail)
+    : "";
   result.innerHTML = `
     <div class="result-head">
       <div class="result-title-row">
         <h2>${escapeHtml(data.term)}</h2>
-        ${data.phonetic ? `<span class="word-ipa">${escapeHtml(data.phonetic)}</span>` : ""}
-        ${renderSpeakerButton(data.term)}
+        ${pronunciationHtml ? "" : data.phonetic ? `<span class="word-ipa">${escapeHtml(data.phonetic)}</span>` : ""}
+        ${pronunciationHtml ? "" : renderSpeakerButton(data.term)}
         ${renderAiChatButton(data.term)}
       </div>
+      ${pronunciationHtml}
       <p class="result-entry-type">${escapeHtml(data.entryType)}</p>
-      ${data.dictionaryCoverage === "full" ? `<p class="small muted">Full 770,770-entry dictionary</p>` : ""}
+      ${data.dictionaryCoverage === "full" ? `<p class="small muted">${escapeHtml(fullDictionaryCoverageLabel())}</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
-    <div class="meaning-grid">
+    ${structuredHtml || `<div class="meaning-grid">
       <section>
         <h3>English <em>${escapeHtml(data.englishMeaningSource ?? "")}</em></h3>
         ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No English definition.</p>'}
@@ -1593,7 +1792,10 @@ function renderResult(data) {
         <h3>Chinese</h3>
         ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
       </section>
-    </div>
+    </div>`}
+    ${data.fullDictionaryUnavailable && (dictionaryConfig.mode !== "production" || debugMode.enabled)
+      ? `<p class="small muted full-dictionary-enrichment-note">Structured full-dictionary detail is temporarily unavailable: ${escapeHtml(data.fullDictionaryUnavailable)}</p>`
+      : ""}
     <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button">${isActiveSaved ? "Practice in Memorize list" : "Add to Memorize list"}</button>
@@ -1734,6 +1936,7 @@ async function loadDictionary() {
   const remoteManifest = await fetchRemoteDictionaryManifest();
   const localVersion = await loadValue(DICTIONARY_VERSION_KEY, null);
   const remoteVersion = remoteManifest?.dictionaryDataVersion ?? null;
+  currentDictionaryVersion = remoteVersion ?? localVersion;
   const versionChanged = Boolean(remoteVersion && localVersion && remoteVersion !== localVersion);
 
   let bytes = null;
@@ -1753,7 +1956,7 @@ async function loadDictionary() {
       } catch (error) {
         console.warn("Local dictionary is unreadable; re-downloading.", error);
         await invalidateLocalDictionaryCopy();
-        await saveValue("dictionaryInstalled", false);
+        await saveValue(DICTIONARY_INSTALLED_KEY, false);
       }
     }
   }
@@ -1763,11 +1966,12 @@ async function loadDictionary() {
     if (versionChanged) {
       result.innerHTML = `<p class="muted">Dictionary update detected (${escapeHtml(localVersion)} -> ${escapeHtml(remoteVersion)}). Replacing local copy.</p>`;
       await invalidateLocalDictionaryCopy();
-      await saveValue("dictionaryInstalled", false);
+      await saveValue(DICTIONARY_INSTALLED_KEY, false);
     }
     let downloaded = null;
     try {
-      downloaded = await downloadDictionaryFile("/dictionary.sqlite", remoteManifest?.sqlite ?? null);
+      const dictionaryUrl = resolveDictionaryAssetUrl(DICTIONARY_MANIFEST_URL, remoteManifest?.sqlite?.path);
+      downloaded = await downloadDictionaryFile(dictionaryUrl, remoteManifest?.sqlite ?? null);
     } catch (error) {
       // Network/integrity failure → fall back to any already-installed local copy.
       const local = await loadLocalDictionaryBytes();
@@ -1786,7 +1990,7 @@ async function loadDictionary() {
       } catch (error) {
         // Downloaded bytes are unreadable — do not keep a bad copy.
         await invalidateLocalDictionaryCopy();
-        await saveValue("dictionaryInstalled", false);
+        await saveValue(DICTIONARY_INSTALLED_KEY, false);
         throw new Error(`The dictionary could not be opened after download (it may be corrupt). Reload to retry. ${error instanceof Error ? error.message : String(error)}`);
       }
       // Persist only AFTER it opened cleanly.
@@ -1794,7 +1998,7 @@ async function loadDictionary() {
       source = "network";
       await saveFile(DICTIONARY_KEY, downloaded);
       await saveOpfsFile(DICTIONARY_KEY, downloaded);
-      await saveValue("dictionaryInstalled", true);
+      await saveValue(DICTIONARY_INSTALLED_KEY, true);
       if (remoteVersion) await saveValue(DICTIONARY_VERSION_KEY, remoteVersion);
     }
   }
@@ -1871,7 +2075,7 @@ function lookupTerm(input) {
 
   const start = performance.now();
   const statement = dictionaryDb.prepare(`
-    SELECT word, phonetic, definition, definition_source, translation, tag
+    SELECT word, phonetic, definition, definition_source, translation, tag, detail
     FROM dictionary_entries
     WHERE normalized_word = :term
     ORDER BY
@@ -1900,6 +2104,7 @@ function lookupTerm(input) {
       englishMeaningSource: row.definition_source ?? "unknown",
       chineseMeanings: topLines(row.translation),
       tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
+      detail: row.detail,
       queryMs: performance.now() - start,
     };
   } finally {
@@ -1910,6 +2115,16 @@ function lookupTerm(input) {
 
 async function lookupTermWithFullFallback(input) {
   const primary = lookupTerm(input);
+  if (primary.status === "found" && !primary.detail && !isChineseInput(input)) {
+    const enriched = await fullDictionary.lookup(input);
+    if (enriched?.status === "found" && enriched.detail) {
+      return { ...primary, detail: enriched.detail, dictionaryCoverage: enriched.dictionaryCoverage ?? primary.dictionaryCoverage };
+    }
+    if (enriched?.status === "unavailable") {
+      return { ...primary, fullDictionaryUnavailable: enriched.reason };
+    }
+    return primary;
+  }
   if (primary.status !== "not_found" || isChineseInput(input)) return primary;
   const full = await fullDictionary.lookup(input);
   if (full?.status === "found") return full;
@@ -1935,17 +2150,17 @@ function parseExchangeForms(exchange) {
 }
 
 function exchangeCodeLabel(code) {
+  if (code.includes("s")) return "plural";
+  if (code.includes("3")) return "third-person singular";
   if (code.includes("p")) return "past tense";
   if (code.includes("d")) return "past participle";
   if (code.includes("i")) return "present participle";
-  if (code.includes("3")) return "third-person singular";
-  if (code.includes("s")) return "plural";
   return "inflected form";
 }
 
 function lookupInflectedTerm(input, normalized, start) {
   const statement = dictionaryDb.prepare(`
-    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, exchange
+    SELECT word, normalized_word, phonetic, definition, definition_source, translation, tag, exchange, detail
     FROM dictionary_entries
     WHERE exchange LIKE :needle
     ORDER BY
@@ -1954,34 +2169,42 @@ function lookupInflectedTerm(input, normalized, start) {
       bnc IS NULL,
       bnc,
       length(word),
-      word
+      word,
+      id
     LIMIT 80
   `);
   try {
     statement.bind({ ":needle": `%${normalized}%` });
+    let selected = null;
+    const selectedCodes = [];
     while (statement.step()) {
       const row = statement.getAsObject();
-      const match = parseExchangeForms(row.exchange).find((item) => item.form === normalized);
-      if (!match) continue;
-      const baseTerm = row.word ?? row.normalized_word;
-      const inflectionLabel = exchangeCodeLabel(match.code);
-      return {
-        status: "found",
-        term: input.trim(),
-        entryType: `${inflectionLabel} of ${baseTerm}`,
-        phonetic: row.phonetic,
-        englishMeanings: topLines(row.definition),
-        englishMeaningSource: row.definition_source ?? "unknown",
-        chineseMeanings: topLines(row.translation),
-        tags: row.tag ? row.tag.split(/\s+/).filter(Boolean) : [],
-        queryMs: performance.now() - start,
-        baseTerm,
-        baseNormalizedTerm: row.normalized_word,
-        inflectionLabel,
-        source: "dictionary-inflection",
-      };
+      const matches = parseExchangeForms(row.exchange).filter((item) => item.form === normalized);
+      if (!matches.length) continue;
+      if (!selected) selected = row;
+      if (row.normalized_word === selected.normalized_word) {
+        selectedCodes.push(...matches.map((match) => match.code));
+      }
     }
-    return null;
+    if (!selected) return null;
+    const baseTerm = selected.word ?? selected.normalized_word;
+    const inflectionLabel = exchangeCodeLabel(selectedCodes.join(""));
+    return {
+      status: "found",
+      term: input.trim(),
+      entryType: `${inflectionLabel} of ${baseTerm}`,
+      phonetic: selected.phonetic,
+      englishMeanings: topLines(selected.definition),
+      englishMeaningSource: selected.definition_source ?? "unknown",
+      chineseMeanings: topLines(selected.translation),
+      tags: selected.tag ? selected.tag.split(/\s+/).filter(Boolean) : [],
+      detail: selected.detail,
+      queryMs: performance.now() - start,
+      baseTerm,
+      baseNormalizedTerm: selected.normalized_word,
+      inflectionLabel,
+      source: "dictionary-inflection",
+    };
   } finally {
     statement.free();
   }
@@ -2535,6 +2758,7 @@ function resultToVocabularyItem(data) {
     savedAt: now,
     updatedAt: now,
     archivedAt: null,
+    ...dictionaryRecordMetadata(dictionaryConfig, currentDictionaryVersion),
     original: {
       phonetic: data.phonetic ?? "",
       englishMeanings: data.englishMeanings ?? [],
@@ -5280,6 +5504,7 @@ async function addHistory(item) {
   const at = item.queriedAt ?? item.searchedAt ?? nowIso();
   const normalizedItem = markDebugRecord({
     ...item,
+    ...dictionaryRecordMetadata(dictionaryConfig, currentDictionaryVersion),
     searchedAt: item.searchedAt ?? at,
     queriedAt: item.queriedAt ?? at,
   });
@@ -7613,7 +7838,7 @@ async function runAutomatedSearchSmoke(term, shouldReport) {
   termInput.value = term;
   const ready = await ensureDictionaryLoaded();
   if (!ready) return;
-  const data = lookupTerm(term);
+  const data = await lookupTermWithFullFallback(term);
   renderResult(data);
   if (data.status === "found") {
     const at = nowIso();
@@ -9512,6 +9737,15 @@ for (const tab of goalsPeriodTabs) {
 }
 
 window.WordLoverApp = {
+  dictionaryRendering: {
+    parseDetail: parseDictionaryDetail,
+    hasStructuredDetail: hasStructuredDictionaryDetail,
+    formatDomainSuffix,
+    renderDisplayMeanings: renderStructuredDisplayMeanings,
+    renderDetailedDefinitions: renderStructuredDetailedDefinitions,
+    renderStructuredResult: renderStructuredDictionaryResult,
+    renderPronunciationLine,
+  },
   ensureDictionaryLoaded,
   // Offline-readiness probe for tests: asks the active worker which required shell
   // assets are cached. Resolves null when no worker controls the page.
@@ -9531,6 +9765,19 @@ window.WordLoverApp = {
     lookup: (term) => fullDictionary.lookup(term),
     install: () => installFullDictionaryOffline(),
     remove: () => removeFullDictionaryOffline(),
+  },
+  dictionaries: {
+    active: () => ({ ...dictionaryConfig }),
+    selected: () => selectedDictionaryId,
+    available: () => userSelectableDictionaries().map((entry) => ({ ...entry })),
+    switch: (id) => switchDictionary(id),
+    learningCounts: () => ({
+      vocabulary: vocabularyItems.length,
+      known: knownWords.length,
+      studyEvents: studyEvents.length,
+      spelling: spellingItems.length,
+      history: historyItems.length,
+    }),
   },
   saveVocabularyItem,
   saveManualVocabularyItem,

@@ -57,6 +57,43 @@ COLUMNS = [
 
 FIXTURE_ROWS = [
     {
+        "word": "structuredword",
+        "phonetic": "/ˈstrʌktʃərd/",
+        "definition": "n. a structured dictionary fixture",
+        "translation": "结构化词条",
+        "pos": "n",
+        "bnc": 5000,
+        "frq": 5000,
+        "exchange": "s:structuredwords",
+        "detail": json.dumps({
+            "displayMeanings": [{
+                "rank": 1, "pos": "n.", "zh": "结构化词条", "zhSource": "kaikki-sense",
+                "en": "a structured dictionary fixture", "domain": "Computing", "source": "Kaikki/Wiktextract",
+            }, {
+                "rank": 2, "pos": "n.", "zh": None, "zhSource": "none",
+                "en": "a second structured meaning", "domain": None, "source": "Kaikki/Wiktextract",
+            }],
+            "detailedDefinitions": [{
+                "pos": "Noun", "senses": [{
+                    "definition": "an entry used to verify structured rendering",
+                    "domain": None, "examples": ["This structured example wraps safely."],
+                    "source": "Kaikki/Wiktextract",
+                }],
+            }],
+            "translationFallback": {"zh": "通用译文", "zhSource": "wordfan-full-overlay"},
+        }, ensure_ascii=False, separators=(",", ":")),
+    },
+    {
+        "word": "oldrow",
+        "phonetic": "/oʊld/",
+        "definition": "a legacy dictionary fixture without structured detail",
+        "translation": "旧词条",
+        "pos": "n",
+        "bnc": 5100,
+        "frq": 5100,
+        "detail": None,
+    },
+    {
         "word": "abandon",
         "phonetic": "/əˈbændən/",
         "definition": "to leave a place, thing, or person permanently",
@@ -97,6 +134,17 @@ FIXTURE_ROWS = [
         "frq": 3609,
         "exchange": "p:hurried/i:hurrying/d:hurried/3:hurries",
         "detail": "We need to hurry to catch the train.",
+    },
+    {
+        "word": "apple",
+        "phonetic": "/ˈæpəl/",
+        "definition": "a round fruit; to bear apples",
+        "translation": "苹果；结苹果",
+        "pos": "n v",
+        "bnc": 2400,
+        "frq": 2400,
+        "exchange": "3:apples/s:apples",
+        "detail": "The aggregated entry supports noun and verb forms.",
     },
     {
         "word": "in terms of",
@@ -358,6 +406,13 @@ def build_full_fixture_sqlite(source: Path, target: Path) -> None:
         conn.commit()
 
 
+def strip_full_only_detail_from_slim_fixture(path: Path) -> None:
+    """Make browser CI prove that structured detail is enriched from full shards."""
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE dictionary_entries SET detail=NULL WHERE normalized_word='structuredword'")
+        conn.commit()
+
+
 def write_manifest(output_dir: Path, sqlite_path: Path, zst_path: Path, row_count: int, version: str) -> None:
     manifest = {
         "app": "wordlover",
@@ -392,6 +447,7 @@ def main() -> None:
     row_count = build_fixture_sqlite(work_sqlite, args.version)
     full_work_sqlite = args.work_dir / "dictionary-full-ci-fixture.sqlite"
     build_full_fixture_sqlite(work_sqlite, full_work_sqlite)
+    strip_full_only_detail_from_slim_fixture(work_sqlite)
     package_full_dictionary_shards(argparse.Namespace(
         input=full_work_sqlite,
         output_dir=args.output_dir / "dictionary-full",

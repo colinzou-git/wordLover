@@ -117,6 +117,8 @@ def parse_args() -> argparse.Namespace:
                         help="Approximate target row count (default 100000).")
     parser.add_argument("--data-version", default=None,
                         help="Slim dictionary data version string (default: today as YYYY.MM.DD.slim).")
+    parser.add_argument("--detail-policy", choices=("full", "none"), default="full",
+                        help="Keep structured detail (default) or omit it for a layered shard-backed core.")
     return parser.parse_args()
 
 
@@ -228,7 +230,7 @@ def chunked(iterable: Iterable[int], size: int) -> Iterable[list[int]]:
         yield chunk
 
 
-def copy_rows(src: sqlite3.Connection, dst: sqlite3.Connection, ids: set[int]) -> int:
+def copy_rows(src: sqlite3.Connection, dst: sqlite3.Connection, ids: set[int], detail_policy: str = "full") -> int:
     if not ids:
         return 0
     columns = [
@@ -242,6 +244,9 @@ def copy_rows(src: sqlite3.Connection, dst: sqlite3.Connection, ids: set[int]) -
     total = 0
     for batch in chunked(sorted(ids), 800):
         rows = src.execute(select_sql.format(",".join(str(i) for i in batch))).fetchall()
+        if detail_policy == "none":
+            detail_index = columns.index("detail")
+            rows = [tuple(None if index == detail_index else value for index, value in enumerate(row)) for row in rows]
         dst.executemany(insert_sql, rows)
         total += len(rows)
     return total
@@ -318,7 +323,7 @@ def main() -> int:
             remaining = args.target_rows - len(chosen_ids)
             chosen_ids.update(select_fallback_phrases(src, chosen_ids, remaining))
 
-        inserted = copy_rows(src, dst, chosen_ids)
+        inserted = copy_rows(src, dst, chosen_ids, args.detail_policy)
         populate_fts(dst)
 
         dst.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("data_version", data_version))
@@ -326,6 +331,7 @@ def main() -> int:
         dst.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("variant", "slim"))
         dst.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("generated_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
         dst.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("target_rows", str(args.target_rows)))
+        dst.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("detail_policy", args.detail_policy))
         dst.commit()
         dst.execute("VACUUM")
         dst.execute("ANALYZE")

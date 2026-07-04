@@ -52,7 +52,12 @@ What the job does:
 3. Verifies the carried dictionary's sha256 matches `dictionary-manifest.json` on
    `main`. If they differ, the deploy **fails loudly** rather than shipping a broken
    manifest/binary pair.
-4. Force-pushes a single orphan commit to `gh-pages` (keeps the branch from
+4. If `/kaikki/` was published separately on `gh-pages`, carries that complete
+   generated package forward, requires its slim manifest/SQLite/full-shard
+   manifest, validates all full shards, and verifies slim SQLite/zstd hashes.
+   If no package exists, deployment continues because dictionary switching is
+   rollback-safe and keeps ECDICT active.
+5. Force-pushes a single orphan commit to `gh-pages` (keeps the branch from
    accumulating 32 MB blobs in history).
 
 Re-deploy without a new commit: GitHub → Actions → CI → **Run workflow** on `main`
@@ -87,3 +92,25 @@ gh api repos/colinzou-git/wordLover/pages/builds --jq ".[0] | {status: .status, 
 
 GitHub repo → Settings → Pages → Source = **Deploy from a branch**, branch =
 `gh-pages` / `(root)`, custom domain = `wordfan.app`, **Enforce HTTPS** on.
+
+## Kaikki preview deployment
+
+Kaikki work remains on `feature/kaikki-dictionary-preview`. Its manual
+`.github/workflows/kaikki-preview.yml` workflow uploads an artifact and never
+writes to `gh-pages`; production deployment and root dictionary URLs remain
+unchanged. See `docs/kaikki-dictionary-design.md` for local and Actions preview
+instructions and the post-audit promotion gate.
+
+The selectable production package under `/kaikki/` is also generated and
+published separately; it is never committed to `main`. Once present on
+`gh-pages`, every normal shell deploy preserves and validates it before the
+orphan branch is force-pushed. The browser package contains only slim
+`kaikki/dictionary.sqlite` plus gzip JSON shards under
+`kaikki/dictionary-full/`; the full build SQLite remains under `data/` only.
+
+The release order is mandatory: generate and audit the non-MT package, run
+`scripts/publish_kaikki_to_gh_pages.sh --dry-run`, publish it with the same
+script without `--dry-run`, verify the live `/kaikki/` URLs, and only then merge
+the feature branch. The publisher stages and pushes only `kaikki/`; root ECDICT
+and shell files on `gh-pages` are preserved. Normal deployment subsequently
+carries `/kaikki/` forward rather than regenerating it.

@@ -14,7 +14,10 @@ import path from "node:path";
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dir, "../public");
 
-const REQUIRED = ["app.js", "sw.js", "automated-tests.js", "wordlover-config.js", "tracks.js"];
+const REQUIRED = [
+  "app.js", "sw.js", "automated-tests.js", "wordlover-config.js", "dictionary-config.js",
+  "dictionary-registry.js", "dictionary-selection.js", "tracks.js",
+];
 const OPTIONAL = ["wa-sqlite-opfs-worker.js"];
 
 let failed = false;

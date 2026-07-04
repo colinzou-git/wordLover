@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordlover-shell-v139";
+const CACHE_NAME = "wordlover-shell-v154";
 // Staging cache for atomic installs: required assets are written here first and the
 // live cache is only updated once every one of them succeeds, so an interrupted or
 // partly-failed install can never leave a half-populated shell that the app trusts.
@@ -7,19 +7,23 @@ const SHELL_CACHE_PREFIX = "wordlover-shell-";
 
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260624-4",
-  "/full-dictionary.js?v=20260624-4",
-  "/persistence.js?v=20260624-4",
-  "/spelling.js?v=20260624-4",
-  "/ui-preferences.js?v=20260624-4",
-  "/review-state.js?v=20260624-4",
-  "/study-one-more.js?v=20260624-4",
-  "/sync.js?v=20260624-4",
-  "/fsrs-scheduler.js?v=20260624-4",
-  "/goal-forecast.js?v=20260624-4",
-  "/tracks.js?v=20260624-4",
-  "/styles.css?v=20260624-4",
-  "/wordlover-config.js?v=20260624-4",
+  "/app.js?v=20260704-2",
+  "/dictionary-config.js?v=20260704-2",
+  "/dictionary-registry.js?v=20260704-2",
+  "/dictionary-selection.js?v=20260704-2",
+  "/dictionary-rendering.js?v=20260704-2",
+  "/full-dictionary.js?v=20260704-2",
+  "/persistence.js?v=20260704-2",
+  "/spelling.js?v=20260704-2",
+  "/ui-preferences.js?v=20260704-2",
+  "/review-state.js?v=20260704-2",
+  "/study-one-more.js?v=20260704-2",
+  "/sync.js?v=20260704-2",
+  "/fsrs-scheduler.js?v=20260704-2",
+  "/goal-forecast.js?v=20260704-2",
+  "/tracks.js?v=20260704-2",
+  "/styles.css?v=20260704-2",
+  "/wordlover-config.js?v=20260704-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -38,7 +42,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260624-4",
+  "/automated-tests.js?v=20260704-2",
 ];
 
 // Bounded timeouts. The root cause of the offline hang is that an unbounded
@@ -49,6 +53,16 @@ const OPTIONAL_SHELL_ASSETS = [
 const NAV_TIMEOUT_MS = 2500;      // navigation / document / script / style network-first
 const RUNTIME_TIMEOUT_MS = 5000;  // non-critical uncached runtime requests + update checks
 const INSTALL_TIMEOUT_MS = 15000; // required asset downloads during install
+
+function isDictionaryAssetPath(pathname) {
+  const path = String(pathname || "");
+  return path === "/dictionary-manifest.json"
+    || path === "/dictionary.sqlite"
+    || path === "/dictionary.sqlite.zst"
+    || path.startsWith("/dictionary-full/")
+    || path.startsWith("/kaikki/")
+    || path.startsWith("/kaikki-preview/");
+}
 
 async function fetchWithTimeout(input, init = {}, timeoutMs = NAV_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -184,11 +198,7 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   // The installed dictionary loads from IndexedDB/OPFS, never Cache Storage.
-  if (url.pathname.endsWith("dictionary.sqlite")) return;
-  if (url.pathname.endsWith("dictionary.sqlite.zst")) return;
-  if (url.pathname.endsWith("dictionary-manifest.json")) return;
-  // Full dictionary shards are integrity-checked and versioned by the app.
-  if (url.pathname.includes("/dictionary-full/")) return;
+  if (isDictionaryAssetPath(url.pathname)) return;
 
   // Update checks stay network-only and bounded; never satisfied by stale cache.
   if (url.searchParams.has("update-check")) {

@@ -14,7 +14,9 @@ import io
 import json
 import sqlite3
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 DEFAULT_INPUT = Path("data/dictionary.sqlite")
 DEFAULT_OUTPUT_DIR = Path("apps/wordlover-pwa/public/dictionary-full")
@@ -22,7 +24,7 @@ DEFAULT_SHARD_COUNT = 128
 DEFAULT_VERSION = f"{time.strftime('%Y.%m.%d')}.full-shards"
 APOSTROPHE_TRANSLATION = str.maketrans({"‘": "'", "’": "'", "ʼ": "'", "`": "'", "＇": "'"})
 
-ENTRY_FIELDS = ["word", "phonetic", "definition", "definitionSource", "translation", "tag"]
+ENTRY_FIELDS = ["word", "phonetic", "definition", "definitionSource", "translation", "tag", "detail"]
 ALIAS_FIELDS = [
     "phonetic",
     "definition",
@@ -32,7 +34,31 @@ ALIAS_FIELDS = [
     "baseWord",
     "inflectionLabel",
     "baseNormalizedWord",
+    "detail",
 ]
+INFLECTION_LABEL_PRIORITY = {
+    "plural": 0,
+    "third-person singular": 1,
+    "past tense": 2,
+    "past participle": 3,
+    "present participle": 4,
+    "inflected form": 9,
+}
+
+
+@dataclass
+class AliasCandidate:
+    alias: str
+    phonetic: str | None
+    definition: str | None
+    definition_source: str | None
+    translation: str | None
+    tag: str | None
+    base_word: str
+    base_normalized: str
+    detail: str | None
+    labels: set[str]
+    sort_key: tuple
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shard-count", type=int, default=DEFAULT_SHARD_COUNT)
     parser.add_argument("--gzip-level", type=int, default=9)
     parser.add_argument("--skip-validation", action="store_true")
+    parser.add_argument("--source-label", action="append", dest="sources")
     return parser.parse_args()
 
 
@@ -63,17 +90,25 @@ def shard_index(value: str, shard_count: int) -> int:
 
 
 def exchange_code_label(code: str) -> str:
+    if "s" in code:
+        return "plural"
+    if "3" in code:
+        return "third-person singular"
     if "p" in code:
         return "past tense"
     if "d" in code:
         return "past participle"
     if "i" in code:
         return "present participle"
-    if "3" in code:
-        return "third-person singular"
-    if "s" in code:
-        return "plural"
     return "inflected form"
+
+
+def merge_inflection_labels(labels: Iterable[str]) -> str:
+    ordered = sorted(
+        {label for label in labels if label},
+        key=lambda label: (INFLECTION_LABEL_PRIORITY.get(label, 9), label),
+    )
+    return ordered[0] if ordered else "inflected form"
 
 
 def parse_exchange_forms(exchange: str | None) -> list[tuple[str, str]]:
@@ -156,13 +191,15 @@ def package(args: argparse.Namespace) -> dict:
             for writer in writers:
                 writer.write('{"v":1,"e":{')
 
-            entry_sql = """
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(dictionary_entries)")}
+            detail_select = "detail" if "detail" in columns else "NULL AS detail"
+            entry_sql = f"""
                 SELECT normalized_word, word, phonetic, definition,
-                       definition_source, translation, tag
+                       definition_source, translation, tag, {detail_select}
                 FROM dictionary_entries
                 ORDER BY id
             """
-            for normalized, word, phonetic, definition, definition_source, translation, tag in conn.execute(entry_sql):
+            for normalized, word, phonetic, definition, definition_source, translation, tag, detail in conn.execute(entry_sql):
                 index = shard_index(normalized, args.shard_count)
                 if not entry_first[index]:
                     writers[index].write(",")
@@ -176,42 +213,71 @@ def package(args: argparse.Namespace) -> dict:
                     definition_source,
                     translation,
                     tag,
+                    detail,
                 ]))
                 entry_counts[index] += 1
 
             for writer in writers:
                 writer.write('},"a":{')
 
-            alias_seen: set[str] = set()
-            alias_sql = """
-                SELECT normalized_word, word, phonetic, definition,
-                       definition_source, translation, tag, exchange
+            alias_candidates: dict[str, AliasCandidate] = {}
+            alias_sql = f"""
+                SELECT id, normalized_word, word, phonetic, definition,
+                       definition_source, translation, tag, exchange, frq, bnc, {detail_select}
                 FROM dictionary_entries
                 WHERE exchange IS NOT NULL AND trim(exchange) <> ''
-                ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, length(word), word
+                ORDER BY frq IS NULL, frq, bnc IS NULL, bnc, length(word), word, id
             """
-            for base_normalized, base_word, phonetic, definition, definition_source, translation, tag, exchange in conn.execute(alias_sql):
+            for (row_id, base_normalized, base_word, phonetic, definition, definition_source,
+                 translation, tag, exchange, frq, bnc, detail) in conn.execute(alias_sql):
+                sort_key = (
+                    frq is None, frq if frq is not None else 2**63 - 1,
+                    bnc is None, bnc if bnc is not None else 2**63 - 1,
+                    len(base_word), base_word.casefold(), row_id,
+                )
                 for alias, label in parse_exchange_forms(exchange):
-                    if alias in existing or alias in alias_seen:
+                    if alias in existing:
                         continue
-                    alias_seen.add(alias)
-                    index = shard_index(alias, args.shard_count)
-                    if not alias_first[index]:
-                        writers[index].write(",")
-                    alias_first[index] = False
-                    writers[index].write(json_compact(alias))
-                    writers[index].write(":")
-                    writers[index].write(json_compact([
-                        phonetic,
-                        definition,
-                        definition_source,
-                        translation,
-                        tag,
-                        base_word,
-                        label,
-                        base_normalized,
-                    ]))
-                    alias_counts[index] += 1
+                    candidate = AliasCandidate(
+                        alias=alias, phonetic=phonetic, definition=definition,
+                        definition_source=definition_source, translation=translation, tag=tag,
+                        base_word=base_word, base_normalized=base_normalized, detail=detail,
+                        labels={label}, sort_key=sort_key,
+                    )
+                    current = alias_candidates.get(alias)
+                    if current is None:
+                        alias_candidates[alias] = candidate
+                    elif current.base_normalized == base_normalized:
+                        labels = current.labels | candidate.labels
+                        if candidate.sort_key < current.sort_key:
+                            candidate.labels = labels
+                            alias_candidates[alias] = candidate
+                        else:
+                            current.labels = labels
+                    elif candidate.sort_key < current.sort_key:
+                        alias_candidates[alias] = candidate
+
+            for alias in sorted(alias_candidates):
+                candidate = alias_candidates[alias]
+                label = merge_inflection_labels(candidate.labels)
+                index = shard_index(alias, args.shard_count)
+                if not alias_first[index]:
+                    writers[index].write(",")
+                alias_first[index] = False
+                writers[index].write(json_compact(alias))
+                writers[index].write(":")
+                writers[index].write(json_compact([
+                    candidate.phonetic,
+                    candidate.definition,
+                    candidate.definition_source,
+                    candidate.translation,
+                    candidate.tag,
+                    candidate.base_word,
+                    label,
+                    candidate.base_normalized,
+                    candidate.detail,
+                ]))
+                alias_counts[index] += 1
     finally:
         for writer in writers:
             writer.write("}}")
@@ -242,7 +308,7 @@ def package(args: argparse.Namespace) -> dict:
         "entryFields": ENTRY_FIELDS,
         "aliasFields": ALIAS_FIELDS,
         "totalCompressedBytes": sum(item["bytes"] for item in shards),
-        "sources": ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913", "WordFan K-12/AP STEM"],
+        "sources": getattr(args, "sources", None) or ["ECDICT", "WordNet 3.0", "OPTED/Webster 1913", "WordFan K-12/AP STEM"],
         "shards": shards,
         "elapsedSeconds": round(time.time() - started, 3),
     }

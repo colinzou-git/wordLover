@@ -6,6 +6,9 @@ import { gzipSync } from "node:zlib";
 import {
   createFullDictionaryClient,
   fnv1a32,
+  fullDictionaryStorageConfig,
+  fullDictionaryAliasToResult,
+  fullDictionaryEntryToResult,
   fullDictionaryShardIndex,
   validateFullDictionaryManifest,
 } from "../public/full-dictionary.js";
@@ -15,6 +18,7 @@ class MemoryStorage {
   getItem(key) { return this.#values.has(key) ? this.#values.get(key) : null; }
   setItem(key, value) { this.#values.set(key, String(value)); }
   removeItem(key) { this.#values.delete(key); }
+  keys() { return [...this.#values.keys()]; }
 }
 
 class MemoryCache {
@@ -46,6 +50,26 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 function gzipPayload(payload) { return gzipSync(Buffer.from(JSON.stringify(payload)), { level: 9, mtime: 0 }); }
 
 assert.equal(fnv1a32("abandon"), 3402497766);
+assert.deepEqual(fullDictionaryStorageConfig("production"), {
+  manifestKey: "wordfan.fullDictionary.manifest.v1",
+  installedVersionKey: "wordfan.fullDictionary.installedVersion.v1",
+  cachePrefix: "wordfan-full-dictionary-v1-",
+});
+assert.deepEqual(fullDictionaryStorageConfig("kaikki"), {
+  manifestKey: "wordfan.fullDictionary.kaikki.manifest.v1",
+  installedVersionKey: "wordfan.fullDictionary.kaikki.installedVersion.v1",
+  cachePrefix: "wordfan-full-dictionary-kaikki-v1-",
+});
+assert.deepEqual(fullDictionaryStorageConfig("kaikki-preview"), {
+  manifestKey: "wordfan.fullDictionary.kaikki-preview.manifest.v1",
+  installedVersionKey: "wordfan.fullDictionary.kaikki-preview.installedVersion.v1",
+  cachePrefix: "wordfan-full-dictionary-kaikki-preview-v1-",
+});
+assert.deepEqual(fullDictionaryStorageConfig("kaikki-preview-local"), {
+  manifestKey: "wordfan.fullDictionary.kaikki-preview-local.manifest.v1",
+  installedVersionKey: "wordfan.fullDictionary.kaikki-preview-local.installedVersion.v1",
+  cachePrefix: "wordfan-full-dictionary-kaikki-preview-local-v1-",
+});
 assert.equal(fullDictionaryShardIndex("abandon", 128), 102);
 for (const value of ["they‘re", "they’re", "theyʼre", "they`re", "they＇re"]) {
   assert.equal(fullDictionaryShardIndex(value, 128), fullDictionaryShardIndex("they're", 128));
@@ -60,6 +84,14 @@ const payload = {
     fullsizeonlywords: ["/fʊl/", "a term present only in the full dictionary fixture", "CI full fixture", "仅存在于完整词典中的词", "rare", "fullsizeonlyword", "plural", "fullsizeonlyword"],
   },
 };
+const detail = JSON.stringify({ displayMeanings: [{ rank: 1, pos: "n.", en: "structured" }] });
+assert.equal(fullDictionaryEntryToResult("word", ["word", null, "old", "source", null, null]).detail, undefined);
+assert.equal(fullDictionaryEntryToResult("word", ["word", null, "new", "source", null, null, detail]).detail, detail);
+assert.equal(fullDictionaryAliasToResult("words", [null, "new", "source", null, null, "word", "plural", "word", detail]).detail, detail);
+assert.equal(
+  fullDictionaryAliasToResult("apples", [null, "fruit", "source", "苹果", null, "apple", "plural", "apple", null]).entryType,
+  "plural of apple",
+);
 const compressed = gzipPayload(payload);
 const manifest = {
   app: "wordlover",
@@ -110,6 +142,28 @@ const options = {
 };
 const client = createFullDictionaryClient({ ...options, maxParsedShards: Number.NaN });
 assert.equal(client.maxParsedShards, 4);
+
+const scopedStorage = new MemoryStorage();
+const scopedCaches = new MemoryCaches();
+const productionClient = createFullDictionaryClient({
+  ...options, storage: scopedStorage, cachesApi: scopedCaches, storageScope: "production",
+});
+const previewClient = createFullDictionaryClient({
+  ...options, storage: scopedStorage, cachesApi: scopedCaches, storageScope: "kaikki-preview",
+});
+await productionClient.ensureManifest();
+await previewClient.ensureManifest();
+assert(scopedStorage.keys().includes("wordfan.fullDictionary.manifest.v1"));
+assert(scopedStorage.keys().includes("wordfan.fullDictionary.kaikki-preview.manifest.v1"));
+assert.equal(
+  JSON.parse(scopedStorage.getItem("wordfan.fullDictionary.manifest.v1")).dictionaryDataVersion,
+  manifest.dictionaryDataVersion,
+);
+await scopedCaches.open("wordfan-full-dictionary-v1-production-old");
+await scopedCaches.open("wordfan-full-dictionary-kaikki-preview-v1-preview-old");
+await previewClient.cleanupOldCaches({ includeCurrent: true });
+assert((await scopedCaches.keys()).includes("wordfan-full-dictionary-v1-production-old"));
+assert(!(await scopedCaches.keys()).includes("wordfan-full-dictionary-kaikki-preview-v1-preview-old"));
 
 const exact = await client.lookup("FullSizeOnlyWord");
 assert.equal(exact.status, "found");
