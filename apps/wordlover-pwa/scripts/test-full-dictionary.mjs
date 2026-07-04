@@ -88,6 +88,10 @@ const detail = JSON.stringify({ displayMeanings: [{ rank: 1, pos: "n.", en: "str
 assert.equal(fullDictionaryEntryToResult("word", ["word", null, "old", "source", null, null]).detail, undefined);
 assert.equal(fullDictionaryEntryToResult("word", ["word", null, "new", "source", null, null, detail]).detail, detail);
 assert.equal(fullDictionaryAliasToResult("words", [null, "new", "source", null, null, "word", "plural", "word", detail]).detail, detail);
+assert.equal(
+  fullDictionaryAliasToResult("apples", [null, "fruit", "source", "苹果", null, "apple", "plural", "apple", null]).entryType,
+  "plural of apple",
+);
 const compressed = gzipPayload(payload);
 const manifest = {
   app: "wordlover",

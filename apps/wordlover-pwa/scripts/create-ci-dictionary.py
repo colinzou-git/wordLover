@@ -136,6 +136,17 @@ FIXTURE_ROWS = [
         "detail": "We need to hurry to catch the train.",
     },
     {
+        "word": "apple",
+        "phonetic": "/ˈæpəl/",
+        "definition": "a round fruit; to bear apples",
+        "translation": "苹果；结苹果",
+        "pos": "n v",
+        "bnc": 2400,
+        "frq": 2400,
+        "exchange": "3:apples/s:apples",
+        "detail": "The aggregated entry supports noun and verb forms.",
+    },
+    {
         "word": "in terms of",
         "phonetic": "/ɪn tɜːrmz əv/",
         "definition": "used to describe which particular area of a subject is being discussed",

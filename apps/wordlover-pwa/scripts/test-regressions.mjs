@@ -258,6 +258,15 @@ test("Kaikki runtime text does not hardcode ECDICT full row count", async () => 
   );
 });
 
+test("Local SQLite inflection labels prefer plural for ambiguous s forms", async () => {
+  const appSource = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const labelFunction = appSource.slice(
+    appSource.indexOf("function exchangeCodeLabel"),
+    appSource.indexOf("function lookupInflectedTerm"),
+  );
+  assert.ok(labelFunction.indexOf('code.includes("s")') < labelFunction.indexOf('code.includes("3")'));
+});
+
 test("Structured dictionary detail renders bilingual lines, fallback, definitions, and safe HTML", () => {
   const detail = parseDictionaryDetail(JSON.stringify({
     displayMeanings: [

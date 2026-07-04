@@ -63,3 +63,16 @@
 - GitHub Actions: run `28697410436` passed static and Chromium/WebKit browser jobs
 - Remaining work: none for #69-#73; all blockers closed with validation evidence
 - Exact resume step: wait for new issues; preserve user-owned untracked rerank scripts and do not commit generated dictionary assets
+
+# Ambiguous inflection aliases (2026-07-04)
+
+- Current issue: #74
+- Current branch: `feature/kaikki-dictionary-preview`
+- Starting commit: `dc3aa25`
+- User-owned untracked files: seven root rerank/Google helper scripts; preserve and exclude
+- Files changed: shard packager/tests; local SQLite lookup; full-dictionary/JS/browser regressions; CI fixture; shell version assets
+- Tests added: combined same-base labels, exact-entry precedence, deterministic different-base ranking, browser alias decoding, real `apples → plural of apple` app lookup
+- Tests run: full Python discovery (82); PWA build/unit/shell validation (36 JS regressions); Playwright browser CI
+- Result: all local gates passed
+- Remaining work: regenerate/check code map, production diff, commit/push, verify GitHub Actions, close #74
+- Exact resume step: final checks and commit tracked issue files without rebuilding generated dictionaries

@@ -8,7 +8,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.package_dictionary_shards import fnv1a32, normalize_word, package, shard_index
+from scripts.package_dictionary_shards import (
+    exchange_code_label,
+    fnv1a32,
+    merge_inflection_labels,
+    normalize_word,
+    package,
+    shard_index,
+)
 
 
 SCHEMA = """
@@ -30,6 +37,31 @@ CREATE TABLE dictionary_entries (
 
 
 class PackageDictionaryShardsTests(unittest.TestCase):
+    def package_rows(self, root: Path, rows: list[tuple]) -> tuple[dict, Path]:
+        database = root / "dictionary.sqlite"
+        output = root / "shards"
+        with sqlite3.connect(database) as conn:
+            conn.executescript(SCHEMA)
+            conn.executemany(
+                """
+                INSERT INTO dictionary_entries(
+                    word, normalized_word, phonetic, definition,
+                    definition_source, translation, tag, frq, bnc, exchange, detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+        manifest = package(argparse.Namespace(
+            input=database, output_dir=output, version="test.aliases",
+            shard_count=4, gzip_level=9, skip_validation=False,
+        ))
+        return manifest, output
+
+    def alias_payload(self, manifest: dict, output: Path, alias: str):
+        shard = manifest["shards"][shard_index(alias, manifest["shardCount"])]
+        with gzip.open(output / shard["path"], "rt", encoding="utf-8") as handle:
+            return json.load(handle)["a"].get(alias)
+
     def build_database(self, path: Path) -> None:
         with sqlite3.connect(path) as conn:
             conn.executescript(SCHEMA)
@@ -52,6 +84,47 @@ class PackageDictionaryShardsTests(unittest.TestCase):
         self.assertEqual(fnv1a32("abandon"), 3402497766)
         self.assertEqual(shard_index("abandon", 128), 102)
         self.assertEqual(shard_index("they're", 128), 113)
+
+    def test_plural_label_priority(self) -> None:
+        self.assertEqual(exchange_code_label("3s"), "plural")
+        self.assertEqual(
+            merge_inflection_labels(["third-person singular", "plural"]),
+            "plural",
+        )
+
+    def test_same_base_ambiguous_s_alias_prefers_plural(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, output = self.package_rows(Path(tmp), [
+                ("apple", "apple", None, "a fruit or bear fruit", "Kaikki", "苹果", None, 1, 5,
+                 "3:apples/s:apples", None),
+            ])
+            alias = self.alias_payload(manifest, output, "apples")
+            self.assertIsNotNone(alias)
+            self.assertEqual(alias[5], "apple")
+            self.assertEqual(alias[6], "plural")
+
+    def test_exact_entry_still_wins_over_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, output = self.package_rows(Path(tmp), [
+                ("apple", "apple", None, "a fruit", "Kaikki", "苹果", None, 10, 20, "s:apples", None),
+                ("apples", "apples", None, "plural fruit entry", "Kaikki", "苹果", None, 20, 30, None, None),
+            ])
+            self.assertIsNone(self.alias_payload(manifest, output, "apples"))
+
+    def test_different_base_alias_conflict_uses_best_rank_deterministically(self) -> None:
+        rows = [
+            ("axe", "axe", None, "cutting tool", "Kaikki", "斧", None, 50, 20, "s:axes", None),
+            ("axis", "axis", None, "reference line", "Kaikki", "轴", None, 10, 40, "s:axes", None),
+        ]
+        selected = []
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, ordered in enumerate((rows, list(reversed(rows)))):
+                case = root / str(index)
+                case.mkdir()
+                manifest, output = self.package_rows(case, ordered)
+                selected.append(self.alias_payload(manifest, output, "axes")[5])
+        self.assertEqual(selected, ["axis", "axis"])
 
     def test_packages_entries_and_only_missing_inflection_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,4 +1,4 @@
-const CACHE_NAME = "wordlover-shell-v153";
+const CACHE_NAME = "wordlover-shell-v154";
 // Staging cache for atomic installs: required assets are written here first and the
 // live cache is only updated once every one of them succeeds, so an interrupted or
 // partly-failed install can never leave a half-populated shell that the app trusts.
@@ -7,23 +7,23 @@ const SHELL_CACHE_PREFIX = "wordlover-shell-";
 
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260704-1",
-  "/dictionary-config.js?v=20260704-1",
-  "/dictionary-registry.js?v=20260704-1",
-  "/dictionary-selection.js?v=20260704-1",
-  "/dictionary-rendering.js?v=20260704-1",
-  "/full-dictionary.js?v=20260704-1",
-  "/persistence.js?v=20260704-1",
-  "/spelling.js?v=20260704-1",
-  "/ui-preferences.js?v=20260704-1",
-  "/review-state.js?v=20260704-1",
-  "/study-one-more.js?v=20260704-1",
-  "/sync.js?v=20260704-1",
-  "/fsrs-scheduler.js?v=20260704-1",
-  "/goal-forecast.js?v=20260704-1",
-  "/tracks.js?v=20260704-1",
-  "/styles.css?v=20260704-1",
-  "/wordlover-config.js?v=20260704-1",
+  "/app.js?v=20260704-2",
+  "/dictionary-config.js?v=20260704-2",
+  "/dictionary-registry.js?v=20260704-2",
+  "/dictionary-selection.js?v=20260704-2",
+  "/dictionary-rendering.js?v=20260704-2",
+  "/full-dictionary.js?v=20260704-2",
+  "/persistence.js?v=20260704-2",
+  "/spelling.js?v=20260704-2",
+  "/ui-preferences.js?v=20260704-2",
+  "/review-state.js?v=20260704-2",
+  "/study-one-more.js?v=20260704-2",
+  "/sync.js?v=20260704-2",
+  "/fsrs-scheduler.js?v=20260704-2",
+  "/goal-forecast.js?v=20260704-2",
+  "/tracks.js?v=20260704-2",
+  "/styles.css?v=20260704-2",
+  "/wordlover-config.js?v=20260704-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -42,7 +42,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260704-1",
+  "/automated-tests.js?v=20260704-2",
 ];
 
 // Bounded timeouts. The root cause of the offline hang is that an unbounded
