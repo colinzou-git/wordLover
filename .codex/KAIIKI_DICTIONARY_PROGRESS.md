@@ -74,5 +74,7 @@
 - Tests added: combined same-base labels, exact-entry precedence, deterministic different-base ranking, browser alias decoding, real `apples → plural of apple` app lookup
 - Tests run: full Python discovery (82); PWA build/unit/shell validation (36 JS regressions); Playwright browser CI
 - Result: all local gates passed
-- Remaining work: regenerate/check code map, production diff, commit/push, verify GitHub Actions, close #74
-- Exact resume step: final checks and commit tracked issue files without rebuilding generated dictionaries
+- Latest implementation commit: `19389ad`
+- GitHub Actions: run `28697958673` passed static and Chromium/WebKit browser jobs
+- Remaining work: none for #74; issue closed with validation evidence
+- Exact resume step: wait for new issues; rebuild generated shards only when explicitly requested
