@@ -1,5 +1,18 @@
 # Kaikki Dictionary Progress
 
+# Pre-merge runtime publication (2026-07-04)
+
+- Current issue: #75
+- Current branch: `feature/kaikki-dictionary-preview`
+- Starting commit: `2bea180`
+- User-owned untracked files: seven root rerank/Google helper scripts; preserve and exclude
+- Files changed: scoped gh-pages publisher, deployment static test, generated-output ignore, deployment/design docs, generated symbol map
+- Tests added: publication SQLite/hash/shard/path/branch-scope safety gates
+- Tests run: 82 Python tests; 37 JS regressions plus PWA unit/build/shell/version checks; strict real-data audit; publisher dry run; gh-pages diff audit; live HTTP and manifest hash verification
+- Result: PASS. Clean non-MT build has 824,747 full rows and matching FTS, 55,642 slim rows (39,915,520 bytes), all STEM/inflection strict gates, and no malformed detail. Published only `/kaikki/` at gh-pages `fd1aeb9`; Pages run `28712121300` passed on retry and all live URLs/hashes pass.
+- Remaining work: commit/push the feature-branch publisher/docs/tests and close #75; do not merge to main
+- Exact resume step: commit and push the scoped publisher changes, confirm branch CI, then close #75 with evidence
+
 - Current issue: #52 — implementation in progress
 - Current branch: `feature/kaikki-dictionary-preview`
 - Latest implementation commit: `2c1b0b7 Add MT-assisted overlay reranking`

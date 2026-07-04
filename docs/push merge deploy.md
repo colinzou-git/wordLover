@@ -107,3 +107,10 @@ published separately; it is never committed to `main`. Once present on
 orphan branch is force-pushed. The browser package contains only slim
 `kaikki/dictionary.sqlite` plus gzip JSON shards under
 `kaikki/dictionary-full/`; the full build SQLite remains under `data/` only.
+
+The release order is mandatory: generate and audit the non-MT package, run
+`scripts/publish_kaikki_to_gh_pages.sh --dry-run`, publish it with the same
+script without `--dry-run`, verify the live `/kaikki/` URLs, and only then merge
+the feature branch. The publisher stages and pushes only `kaikki/`; root ECDICT
+and shell files on `gh-pages` are preserved. Normal deployment subsequently
+carries `/kaikki/` forward rather than regenerating it.

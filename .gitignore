@@ -6,6 +6,7 @@ data/dictionary-kaikki*.sqlite
 data/kaikki-dictionary-report.json
 data/kaikki-dictionary-audit.json
 data/kaikki-build/
+data/kaikki-release-clean/
 data/wordnet-augmentation-report.json
 data/opted-augmentation-report.json
 #data/sources/

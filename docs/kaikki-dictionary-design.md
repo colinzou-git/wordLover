@@ -339,6 +339,21 @@ This writes only `public/kaikki/`; root ECDICT assets remain unchanged. The
 generated release package is gitignored and must be produced by the reviewed
 deployment process rather than committed.
 
+Publish `/kaikki/` before merging the feature branch. The publisher validates
+the slim manifest hashes, the full shards, and the 200 MiB SQLite ceiling; then
+it updates only `kaikki/` in a temporary `gh-pages` worktree:
+
+```bash
+scripts/publish_kaikki_to_gh_pages.sh --dry-run
+scripts/publish_kaikki_to_gh_pages.sh
+```
+
+The source package must be generated separately from reviewed Kaikki JSONL and
+WordFan overlays, without Google/MT rerank output. The full build SQLite stays
+under `data/` and is never copied to GitHub Pages. Verify the three live URLs
+printed by the script before merging. A later normal shell deployment preserves
+the independently published directory.
+
 After that package is published separately to `gh-pages`, normal shell deploys
 carry the complete `/kaikki/` directory forward and validate its required slim
 files, manifest hashes, and full shards. If `/kaikki/` has not been published,

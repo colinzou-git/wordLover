@@ -201,6 +201,21 @@ test("Deploy workflow preserves root ECDICT and optional Kaikki runtime packages
   assert.match(ignore, /^apps\/wordlover-pwa\/public\/kaikki-preview\/$/m);
 });
 
+test("Kaikki publisher validates and stages only its gh-pages subdirectory", async () => {
+  const publisher = await readFile(
+    new URL("../../../scripts/publish_kaikki_to_gh_pages.sh", import.meta.url), "utf8",
+  );
+  assert.match(publisher, /validate_public_sqlite_assets/);
+  assert.match(publisher, /validate_dictionary_shards\.py/);
+  assert.match(publisher, /SHA-256 mismatch/);
+  assert.match(publisher, /git worktree add --detach/);
+  assert.match(publisher, /git add -A -- kaikki/);
+  assert.match(publisher, /grep -Ev '\^kaikki\/'/);
+  assert.match(publisher, /git push "\$REMOTE" "HEAD:\$PAGES_BRANCH"/);
+  assert.doesNotMatch(publisher, /git add -A\s*$/m);
+  assert.doesNotMatch(publisher, /git push[^\n]*--force/);
+});
+
 test("Full dictionary shard storage follows dictionary mode", () => {
   assert.equal(fullDictionaryStorageConfig("production").manifestKey, "wordfan.fullDictionary.manifest.v1");
   assert.equal(fullDictionaryStorageConfig("production").cachePrefix, "wordfan-full-dictionary-v1-");
