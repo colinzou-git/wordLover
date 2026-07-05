@@ -1744,6 +1744,28 @@ li button {
   margin: 4px 0 8px;
 }
 
+.review-dictionary-toggle {
+  align-self: center;
+}
+
+.review-dictionary-definition {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 0 0 10px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.review-dictionary-definition[hidden] {
+  display: none;
+}
+
+.review-dictionary-definition .meaning-grid {
+  margin-top: 0;
+}
+
 .quiz-english {
   background: var(--panel-soft);
   border: 1px solid var(--line);
