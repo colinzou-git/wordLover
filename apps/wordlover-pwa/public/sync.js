@@ -1,15 +1,15 @@
 // Pure snapshot merge helpers for Google Drive sync.
 // No globals, no DOM, no IndexedDB. All time-sensitive helpers accept nowMs.
 
-import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260704-2";
-import { normalizeTrack } from "./ui-preferences.js?v=20260704-2";
+import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260705-1";
+import { normalizeTrack } from "./ui-preferences.js?v=20260705-1";
 import {
   BACKUP_SCHEMA_VERSION,
   BACKUP_APP,
   DEFAULT_TRACK_ID,
   serializeTrack,
   trackRecords,
-} from "./tracks.js?v=20260704-2";
+} from "./tracks.js?v=20260705-1";
 
 function normalizeTerm(term) {
   return String(term ?? "")

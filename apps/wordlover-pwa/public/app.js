@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260704-2";
+} from "./fsrs-scheduler.js?v=20260705-1";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260704-2";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260704-2";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260704-2";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260705-1";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260705-1";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260705-1";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260704-2";
+} from "./dictionary-rendering.js?v=20260705-1";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260704-2";
+} from "./persistence.js?v=20260705-1";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260704-2";
+} from "./spelling.js?v=20260705-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -44,14 +44,14 @@ import {
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260704-2";
+} from "./ui-preferences.js?v=20260705-1";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260704-2";
+} from "./review-state.js?v=20260705-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -72,7 +72,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260704-2";
+} from "./study-one-more.js?v=20260705-1";
 
 import {
   studyEventTrack,
@@ -84,11 +84,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260704-2";
+} from "./sync.js?v=20260705-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260704-2";
+} from "./goal-forecast.js?v=20260705-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -100,11 +100,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260704-2";
+} from "./tracks.js?v=20260705-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260704-2";
+} from "./full-dictionary.js?v=20260705-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -249,7 +249,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260704-2-v154";
+const APP_VERSION = "0.6.2-product.20260705-1-v155";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -257,7 +257,7 @@ const APP_VERSION = "0.6.2-product.20260704-2-v154";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v154";
+const SHELL_CACHE_VERSION = "wordlover-shell-v155";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -1726,6 +1726,33 @@ function hideRecentSearchPopover() {
   recentSearchPopover.hidden = true;
 }
 
+function renderDictionaryDefinitionContent(data, { includeEntryContext = false } = {}) {
+  const structuredDetail = parseDictionaryDetail(data.detail);
+  const pronunciationHtml = includeEntryContext ? renderPronunciationLine(data.term, structuredDetail) : "";
+  const structuredHtml = hasStructuredDictionaryDetail(structuredDetail)
+    ? renderStructuredDictionaryResult(data, structuredDetail)
+    : "";
+  return `
+    ${pronunciationHtml}
+    ${structuredHtml || `<div class="meaning-grid">
+      <section>
+        <h3>English <em>${escapeHtml(data.englishMeaningSource ?? "")}</em></h3>
+        ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No English definition.</p>'}
+      </section>
+      <section>
+        <h3>Chinese</h3>
+        ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
+      </section>
+    </div>`}
+    ${includeEntryContext && data.dictionaryCoverage === "full" ? `<p class="small muted">${escapeHtml(fullDictionaryCoverageLabel())}</p>` : ""}
+    ${includeEntryContext && data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
+    ${data.fullDictionaryUnavailable && (dictionaryConfig.mode !== "production" || debugMode.enabled)
+      ? `<p class="small muted full-dictionary-enrichment-note">Structured full-dictionary detail is temporarily unavailable: ${escapeHtml(data.fullDictionaryUnavailable)}</p>`
+      : ""}
+    <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
+  `;
+}
+
 function renderResult(data) {
   if (data.status === "invalid_input") {
     currentResult = null;
@@ -1767,9 +1794,6 @@ function renderResult(data) {
   const isInSpelling = Boolean(spellingItem && !spellingItem.archivedAt);
   const structuredDetail = parseDictionaryDetail(data.detail);
   const pronunciationHtml = renderPronunciationLine(data.term, structuredDetail);
-  const structuredHtml = hasStructuredDictionaryDetail(structuredDetail)
-    ? renderStructuredDictionaryResult(data, structuredDetail)
-    : "";
   result.innerHTML = `
     <div class="result-head">
       <div class="result-title-row">
@@ -1783,20 +1807,7 @@ function renderResult(data) {
       ${data.dictionaryCoverage === "full" ? `<p class="small muted">${escapeHtml(fullDictionaryCoverageLabel())}</p>` : ""}
       ${data.baseTerm ? `<p class="small muted">Resolved through base word <strong>${escapeHtml(data.baseTerm)}</strong>.</p>` : ""}
     </div>
-    ${structuredHtml || `<div class="meaning-grid">
-      <section>
-        <h3>English <em>${escapeHtml(data.englishMeaningSource ?? "")}</em></h3>
-        ${data.englishMeanings?.length ? data.englishMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No English definition.</p>'}
-      </section>
-      <section>
-        <h3>Chinese</h3>
-        ${data.chineseMeanings?.length ? data.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : '<p class="muted">No Chinese translation.</p>'}
-      </section>
-    </div>`}
-    ${data.fullDictionaryUnavailable && (dictionaryConfig.mode !== "production" || debugMode.enabled)
-      ? `<p class="small muted full-dictionary-enrichment-note">Structured full-dictionary detail is temporarily unavailable: ${escapeHtml(data.fullDictionaryUnavailable)}</p>`
-      : ""}
-    <p class="small">${data.tags?.length ? `Tags: ${escapeHtml(data.tags.join(", "))}` : "No tags"}</p>
+    ${renderDictionaryDefinitionContent(data)}
     <div class="result-actions">
       <button id="saveCurrentTerm" type="button">${isActiveSaved ? "Practice in Memorize list" : "Add to Memorize list"}</button>
       <button id="addToSpelling" class="secondary-button" type="button">${isInSpelling ? "Practice in Spelling list" : "Add to Spelling list"}</button>
@@ -3108,6 +3119,16 @@ function renderSpeakerButton(term) {
 
 function renderAiChatButton(term) {
   return `<button type="button" class="ai-chat-button" data-ai-chat-term="${escapeHtml(term)}" aria-label="AI Chat about ${escapeHtml(term)}" title="AI Chat">AI Chat</button>`;
+}
+
+function isMemorizeReviewMode(mode) {
+  return mode === "review" || mode === "practice";
+}
+
+function renderReviewDictionaryButton(mode) {
+  if (!isMemorizeReviewMode(mode)) return "";
+  const visible = Boolean(activeQuiz?.reviewDictionaryVisible);
+  return `<button type="button" class="secondary-button review-dictionary-toggle" data-review-dictionary-toggle="1" aria-expanded="${visible}" aria-controls="reviewDictionaryDefinition">${visible ? "Hide" : "Show"}</button>`;
 }
 
 function renderIpaWithSpeaker(term, phonetic) {
@@ -4897,6 +4918,8 @@ function renderQuizEnglishMeaning(entry) {
 }
 
 function renderQuizQuestionMarkup(entry, mode, optionsRevealed) {
+  const reviewDictionaryVisible = isMemorizeReviewMode(mode) && Boolean(activeQuiz?.reviewDictionaryVisible);
+  const localDefinition = reviewDictionaryVisible ? lookupTerm(entry.term) : null;
   return `
     <div class="quiz-question">
       <span>${mode === "review" ? "Review" : mode === "practice" ? "Practice" : mode === "study-one-more" ? "Study one more" : "First check"}</span>
@@ -4905,7 +4928,9 @@ function renderQuizQuestionMarkup(entry, mode, optionsRevealed) {
         ${renderIpa(entry.phonetic)}
         ${renderSpeakerButton(entry.term)}
         ${renderAiChatButton(entry.term)}
+        ${renderReviewDictionaryButton(mode)}
       </div>
+      ${isMemorizeReviewMode(mode) ? `<div id="reviewDictionaryDefinition" class="review-dictionary-definition" ${reviewDictionaryVisible ? "" : "hidden"}>${localDefinition?.status === "found" ? renderDictionaryDefinitionContent(localDefinition, { includeEntryContext: true }) : '<p class="muted">No dictionary definition available.</p>'}</div>` : ""}
       ${optionsRevealed && mode !== "study-one-more" ? renderQuizEnglishMeaning(entry) : ""}
       <p class="muted">${mode === "study-one-more" ? "Choose the closest meaning before viewing the definition." : optionsRevealed ? "Choose the closest meaning." : "Try to recall the meaning. Tap when ready."}</p>
     </div>
@@ -4962,6 +4987,7 @@ function renderQuiz(entry, mode) {
     options: buildQuizOptions(entry),
     stepwise,
     optionsRevealed: !stepwise,
+    reviewDictionaryVisible: false,
   };
   recordReviewDebug("render-quiz", { term: entry.term, mode, stepwise });
   quizPanel.hidden = false;
@@ -8818,6 +8844,25 @@ quizPanel.addEventListener("click", (event) => {
   }
   if (target.closest("[data-quiz-reveal]")) {
     revealQuizOptions();
+    return;
+  }
+  const reviewDictionaryToggle = target.closest("[data-review-dictionary-toggle]");
+  if (reviewDictionaryToggle instanceof HTMLButtonElement && activeQuiz && isMemorizeReviewMode(activeQuiz.mode)) {
+    activeQuiz.reviewDictionaryVisible = !activeQuiz.reviewDictionaryVisible;
+    const panel = quizPanel.querySelector("#reviewDictionaryDefinition");
+    reviewDictionaryToggle.textContent = activeQuiz.reviewDictionaryVisible ? "Hide" : "Show";
+    reviewDictionaryToggle.setAttribute("aria-expanded", String(activeQuiz.reviewDictionaryVisible));
+    if (panel instanceof HTMLElement) {
+      panel.hidden = !activeQuiz.reviewDictionaryVisible;
+      if (activeQuiz.reviewDictionaryVisible) {
+        const localDefinition = lookupTerm(activeQuiz.entry.term);
+        panel.innerHTML = localDefinition.status === "found"
+          ? renderDictionaryDefinitionContent(localDefinition, { includeEntryContext: true })
+          : '<p class="muted">No dictionary definition available.</p>';
+      } else {
+        panel.innerHTML = "";
+      }
+    }
     return;
   }
   const optionButton = target.closest("[data-quiz-option]");

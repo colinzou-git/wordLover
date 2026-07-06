@@ -216,6 +216,19 @@ test("Kaikki publisher validates and stages only its gh-pages subdirectory", asy
   assert.doesNotMatch(publisher, /git push[^\n]*--force/);
 });
 
+test("Memorize review dictionary toggle is local-only and review-scoped", async () => {
+  const appSource = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /mode === "review" \|\| mode === "practice"/);
+  assert.match(appSource, /data-review-dictionary-toggle/);
+  assert.match(appSource, /const localDefinition = lookupTerm\(activeQuiz\.entry\.term\)/);
+  assert.match(appSource, /No dictionary definition available\./);
+  const handlerStart = appSource.indexOf('const reviewDictionaryToggle = target.closest("[data-review-dictionary-toggle]")');
+  const handlerEnd = appSource.indexOf('const optionButton = target.closest("[data-quiz-option]")', handlerStart);
+  const toggleHandler = appSource.slice(handlerStart, handlerEnd);
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
+  assert.doesNotMatch(toggleHandler, /fetch\(|lookupTermWithFullFallback|openAiChatPanel/);
+});
+
 test("Full dictionary shard storage follows dictionary mode", () => {
   assert.equal(fullDictionaryStorageConfig("production").manifestKey, "wordfan.fullDictionary.manifest.v1");
   assert.equal(fullDictionaryStorageConfig("production").cachePrefix, "wordfan-full-dictionary-v1-");
