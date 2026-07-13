@@ -22,6 +22,10 @@ jobs:
         working-directory: apps/wordlover-pwa
         run: node scripts/check-js-syntax.mjs
 
+      - name: Run deterministic JavaScript unit tests
+        working-directory: apps/wordlover-pwa
+        run: npm run test:unit
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -47,6 +51,21 @@ jobs:
       - name: Validate public shell assets
         working-directory: apps/wordlover-pwa
         run: npm run validate:shell-assets
+
+  youdao-live-smoke:
+    name: Youdao public entry smoke (non-blocking)
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    timeout-minutes: 3
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check two fixed public entries with strict timeouts
+        working-directory: apps/wordlover-pwa
+        run: npm run test:youdao:live
 
   smoke:
     name: Browser and app-shell smoke tests
@@ -210,6 +229,53 @@ jobs:
                       timeout=15_000,
                   )
                   report["searchResult"] = page.locator("#result").inner_text()[:500]
+
+                  # Phase 1 Youdao is a real, source-labelled, same-page link and must not
+                  # mutate local learning data merely by rendering.
+                  youdao_link = page.locator('#result .online-dictionary-link')
+                  youdao_link.wait_for(state="visible", timeout=5_000)
+                  href = youdao_link.get_attribute("href") or ""
+                  if "m.youdao.com/dict" not in href or "q=abandon" not in href:
+                      raise AssertionError(f"Unexpected Youdao URL: {href}")
+                  if youdao_link.get_attribute("target") is not None:
+                      raise AssertionError("Youdao Phase 1 link must use normal same-page navigation.")
+                  if "Source: Youdao" not in page.locator('#result .online-dictionary-actions').inner_text():
+                      raise AssertionError("Youdao action is missing visible source attribution.")
+                  before_youdao = page.evaluate(
+                      """() => ({
+                          vocabulary: window.WordLoverApp.getVocabulary().length,
+                          events: window.WordLoverApp.getStudyEvents().length,
+                      })"""
+                  )
+
+                  page.locator("#appMenuButton").click()
+                  page.locator("#appMenu").wait_for(state="visible", timeout=5_000)
+                  page.locator("#onlineDictionaryMode").select_option("off")
+                  page.locator("#appMenuBack").click()
+                  page.locator("#appMenu").wait_for(state="hidden", timeout=5_000)
+                  if page.locator('#result .online-dictionary-actions').count():
+                      raise AssertionError("Off mode should hide the Youdao action.")
+                  after_youdao = page.evaluate(
+                      """() => ({
+                          vocabulary: window.WordLoverApp.getVocabulary().length,
+                          events: window.WordLoverApp.getStudyEvents().length,
+                      })"""
+                  )
+                  if after_youdao != before_youdao:
+                      raise AssertionError(f"Rendering/toggling Youdao mutated study data: {before_youdao} -> {after_youdao}")
+                  report["youdaoPhase1"] = {
+                      "href": href,
+                      "samePage": True,
+                      "offModeHidden": True,
+                      "studyDataUnchanged": True,
+                  }
+
+                  # Restore the default experimental mode before continuing the shared flow.
+                  page.locator("#appMenuButton").click()
+                  page.locator("#appMenu").wait_for(state="visible", timeout=5_000)
+                  page.locator("#onlineDictionaryMode").select_option("manual")
+                  page.locator("#appMenuBack").click()
+                  page.locator("#appMenu").wait_for(state="hidden", timeout=5_000)
 
                   # Verify Return-to-save separately. The default action intentionally clears
                   # the input/result after saving, so waiting for rendered text after pressing

@@ -164,6 +164,56 @@ def run_rating_button_pointer_check(page: Page) -> dict:
     return {"passed": len(results) == len(RATING_BUTTONS), "ratings": results}
 
 
+def run_youdao_phase1_check(page: Page) -> dict:
+    """Verify the external action in the rendered app without following the third-party link."""
+    dismiss_optional_modal(page)
+    ensure_dictionary_loaded_with_reload_retry(page)
+    page.evaluate(
+        """async () => {
+            await window.WordLoverApp.setOnReturnAction('none');
+            await window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'manual' });
+        }"""
+    )
+    before = page.evaluate(
+        """() => ({
+            vocabulary: window.WordLoverApp.getVocabulary().length,
+            events: window.WordLoverApp.getStudyEvents().length,
+        })"""
+    )
+    page.locator("#termInput").fill("abandon")
+    page.wait_for_function(
+        "document.querySelector('#result .online-dictionary-link') != null",
+        timeout=10_000,
+    )
+    action = page.locator("#result .online-dictionary-actions")
+    link = action.locator(".online-dictionary-link")
+    href = link.get_attribute("href") or ""
+    same_page = link.get_attribute("target") is None
+    manual_visible = (
+        "Source: Youdao" in action.inner_text()
+        and "m.youdao.com/dict" in href
+        and "q=abandon" in href
+        and same_page
+    )
+    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'off' })")
+    off_hidden = page.locator("#result .online-dictionary-actions").count() == 0
+    after = page.evaluate(
+        """() => ({
+            vocabulary: window.WordLoverApp.getVocabulary().length,
+            events: window.WordLoverApp.getStudyEvents().length,
+        })"""
+    )
+    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'manual' })")
+    return {
+        "passed": manual_visible and off_hidden and before == after,
+        "manualVisible": manual_visible,
+        "offHidden": off_hidden,
+        "samePage": same_page,
+        "href": href,
+        "studyDataUnchanged": before == after,
+    }
+
+
 def write_report(path: str | None, report: dict) -> None:
     if not path:
         return
@@ -285,6 +335,8 @@ def main() -> int:
         # Verify vocabulary search input renders once at least one item exists in the all view.
         # (Skip — depends on having items in memory; covered manually.)
 
+        youdao_phase1_check = run_youdao_phase1_check(page)
+        update_report_context(youdao_phase1_check=youdao_phase1_check)
         rating_button_pointer_check = run_rating_button_pointer_check(page)
         update_report_context(rating_button_pointer_check=rating_button_pointer_check)
         state = page.evaluate("() => window.WordLoverApp.getState()")
@@ -299,6 +351,7 @@ def main() -> int:
         "ui_elements": ui_elements,
         "not_found_check": not_found_check,
         "dialog_check": dialog_check,
+        "youdao_phase1_check": youdao_phase1_check,
         "rating_button_pointer_check": rating_button_pointer_check,
         "state_summary": {
             "appVersion": state.get("appVersion"),
@@ -330,6 +383,8 @@ def main() -> int:
         failures.append("unknown-term dialog did not render a textarea field (modal textarea support missing)")
     if not rating_button_pointer_check.get("passed"):
         failures.append("FSRS rating buttons did not pass real pointer-click checks")
+    if not youdao_phase1_check.get("passed"):
+        failures.append("Youdao Phase 1 rendered-browser checks failed")
 
     if failures:
         print("\nFAILED:")
@@ -364,6 +419,7 @@ if __name__ == "__main__":
             "ui_elements": SMOKE_REPORT_CONTEXT.get("ui_elements", {}),
             "not_found_check": SMOKE_REPORT_CONTEXT.get("not_found_check", {}),
             "dialog_check": SMOKE_REPORT_CONTEXT.get("dialog_check", {}),
+            "youdao_phase1_check": SMOKE_REPORT_CONTEXT.get("youdao_phase1_check", {}),
             "rating_button_pointer_check": SMOKE_REPORT_CONTEXT.get("rating_button_pointer_check", {}),
             "state_summary": {
                 "appVersion": (SMOKE_REPORT_CONTEXT.get("state") or {}).get("appVersion"),

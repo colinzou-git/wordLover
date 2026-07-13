@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260705-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260713-1" />
     <title>WordFan</title>
   </head>
   <body>
@@ -90,6 +90,20 @@
                 </select>
               </label>
               <p id="dictionarySelectionStatus" class="small" aria-live="polite">Switching reloads dictionary assets. Saved words and review history remain available.</p>
+            </section>
+
+            <section class="settings-card">
+              <h3><span class="settings-card-icon" aria-hidden="true">↗</span>Experimental online dictionary</h3>
+              <label>
+                <span>Youdao lookup</span>
+                <select id="onlineDictionaryMode">
+                  <option value="off">Off</option>
+                  <option value="manual">Manual lookup only</option>
+                  <option value="automatic" disabled>Automatically check every word (planned)</option>
+                </select>
+              </label>
+              <p class="small muted">When used, the searched word or phrase is sent to Youdao. Saved WordFan data is not sent.</p>
+              <p class="small muted">Phase 1 opens the public Youdao entry in this same browser window. WordFan does not fetch or scrape Youdao in the background.</p>
             </section>
 
             <section class="settings-card">
@@ -415,7 +429,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260705-1"></script>
-    <script type="module" src="/app.js?v=20260705-1"></script>
+    <script src="/wordlover-config.js?v=20260713-1"></script>
+    <script type="module" src="/app.js?v=20260713-1"></script>
   </body>
 </html>
