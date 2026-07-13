@@ -1766,6 +1766,36 @@ li button {
   margin-top: 0;
 }
 
+.online-dictionary-actions {
+  align-items: center;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 10px 12px;
+}
+
+.online-dictionary-source {
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.online-dictionary-link {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .online-dictionary-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .quiz-english {
   background: var(--panel-soft);
   border: 1px solid var(--line);

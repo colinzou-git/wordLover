@@ -17,6 +17,7 @@ const publicDir = path.resolve(__dir, "../public");
 const REQUIRED = [
   "app.js", "sw.js", "automated-tests.js", "wordlover-config.js", "dictionary-config.js",
   "dictionary-registry.js", "dictionary-selection.js", "tracks.js",
+  "online-dictionary-actions.js", "online-dictionary-provider.js", "youdao-provider.js",
 ];
 const OPTIONAL = ["wa-sqlite-opfs-worker.js"];
 

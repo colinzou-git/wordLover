@@ -42,6 +42,8 @@ export const DEFAULT_FONT_SCALE = 1;
 export const FONT_SCALE_MIN = 0.9;
 export const FONT_SCALE_MAX = 2;
 export const FONT_SCALE_STEP = 0.1;
+export const DEFAULT_ONLINE_DICTIONARY_MODE = "manual";
+export const ONLINE_DICTIONARY_MODES = ["off", "manual", "automatic"];
 
 export function normalizeTrack(value) {
   return value === "spelling" ? "spelling" : "vocabulary";
@@ -65,6 +67,10 @@ export function normalizeFontScale(nextScale) {
   return Math.round(Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, numeric)) * 10) / 10;
 }
 
+export function normalizeOnlineDictionaryMode(value) {
+  return ONLINE_DICTIONARY_MODES.includes(value) ? value : DEFAULT_ONLINE_DICTIONARY_MODE;
+}
+
 export function normalizeUiPreferences(preferences = {}, fallback = {}) {
   return {
     todayTrack: normalizeTrack(preferences.todayTrack ?? fallback.todayTrack),
@@ -73,6 +79,9 @@ export function normalizeUiPreferences(preferences = {}, fallback = {}) {
     historyGranularity: normalizeHistoryGranularity(preferences.historyGranularity ?? fallback.historyGranularity),
     fontScale: normalizeFontScale(preferences.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE),
     goalsPeriod: normalizeGoalsPeriod(preferences.goalsPeriod ?? fallback.goalsPeriod ?? "day"),
+    onlineDictionaryMode: normalizeOnlineDictionaryMode(
+      preferences.onlineDictionaryMode ?? fallback.onlineDictionaryMode ?? DEFAULT_ONLINE_DICTIONARY_MODE,
+    ),
     studyOneMoreFilter: normalizeStudyOneMoreFilter(preferences.studyOneMoreFilter ?? fallback.studyOneMoreFilter ?? {}),
   };
 }
