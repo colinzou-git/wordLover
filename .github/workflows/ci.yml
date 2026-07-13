@@ -22,9 +22,9 @@ jobs:
         working-directory: apps/wordlover-pwa
         run: node scripts/check-js-syntax.mjs
 
-      - name: Run deterministic JavaScript unit tests
+      - name: Run deterministic Youdao provider tests
         working-directory: apps/wordlover-pwa
-        run: npm run test:unit
+        run: node scripts/test-youdao-provider.mjs
 
       - uses: actions/setup-python@v5
         with:
