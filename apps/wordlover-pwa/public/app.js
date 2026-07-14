@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260714-6";
+} from "./fsrs-scheduler.js?v=20260714-7";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-6";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-6";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-6";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-7";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-7";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-7";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260714-6";
+} from "./dictionary-rendering.js?v=20260714-7";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260714-6";
+} from "./persistence.js?v=20260714-7";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260714-6";
+} from "./spelling.js?v=20260714-7";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -46,19 +46,21 @@ import {
   normalizeFontScale,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260714-6";
+} from "./ui-preferences.js?v=20260714-7";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-6";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-6";
-import { createDictionarySupplementStore, normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-6";
-import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260714-6";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-7";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-7";
+import { createDictionarySupplementStore, normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-7";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260714-7";
+import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260714-7";
+import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260714-7";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260714-6";
+} from "./review-state.js?v=20260714-7";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -79,7 +81,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260714-6";
+} from "./study-one-more.js?v=20260714-7";
 
 import {
   studyEventTrack,
@@ -91,11 +93,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-6";
+} from "./sync.js?v=20260714-7";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260714-6";
+} from "./goal-forecast.js?v=20260714-7";
 
 import {
   DEFAULT_TRACK_ID,
@@ -107,11 +109,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-6";
+} from "./tracks.js?v=20260714-7";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260714-6";
+} from "./full-dictionary.js?v=20260714-7";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -259,7 +261,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260714-6-v162";
+const APP_VERSION = "0.6.2-product.20260714-7-v163";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -267,7 +269,7 @@ const APP_VERSION = "0.6.2-product.20260714-6-v162";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v162";
+const SHELL_CACHE_VERSION = "wordlover-shell-v163";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -356,6 +358,7 @@ let spellingItems = [];
 let spellingEvents = [];
 let userDictionaryEntries = [];
 let knownWords = [];
+const savedStudySupplements = new Map();
 // Learning-track registry ({ schemaVersion, activeTrackId, tracks }) and the id whose
 // records currently populate the in-memory arrays above. All per-record writes target it.
 let userDataRoot = null;
@@ -1092,6 +1095,38 @@ const dictionarySupplements = createDictionarySupplementStore({
   canPersistProvider: (providerId) => providerId === "youdao" && CONFIG.youdaoPersistenceAllowed === true,
 });
 
+async function ensureStudySupplementCached(term) {
+  const normalizedTerm = normalizeSupplementTerm(term);
+  if (savedStudySupplements.has(normalizedTerm)) return savedStudySupplements.get(normalizedTerm);
+  const record = await dictionarySupplements.get(normalizedTerm, "youdao");
+  if (record) savedStudySupplements.set(normalizedTerm, record);
+  return record;
+}
+
+async function ensureStudySupplementsCached(items) {
+  await Promise.all((items ?? []).map((item) => ensureStudySupplementCached(item?.term ?? item)));
+}
+
+function studySupplementSnapshot(term, localMeanings = []) {
+  const normalizedTerm = normalizeSupplementTerm(term);
+  return savedSupplementToStudySnapshot(savedStudySupplements.get(normalizedTerm), { localMeanings, targetTerm: normalizedTerm });
+}
+
+function withStableStudySupplement(entry) {
+  if (!entry || "studySupplementSnapshot" in entry) return entry;
+  const localMeanings = [entry.correct, ...(entry.chineseMeanings ?? []), ...(entry.englishMeanings ?? [])].filter(Boolean);
+  const snapshot = studySupplementSnapshot(entry.term, localMeanings);
+  return { ...entry, studySupplementSnapshot: snapshot, correct: quizMeaningWithSupplement(entry.correct, snapshot) };
+}
+
+function renderStudySupplementSnapshot(entry) {
+  const snapshot = entry?.studySupplementSnapshot;
+  if (!snapshot) return "";
+  const definitions = snapshot.meanings.map((item) => ({ text: item.text, ...(item.partOfSpeech ? { partOfSpeech: item.partOfSpeech } : {}), ...(item.domain ? { domain: item.domain } : {}) }));
+  const displayEntry = { headword: entry.term, phonetics: {}, chineseDefinitions: snapshot.language === "zh" ? definitions : [], englishDefinitions: snapshot.language === "en" ? definitions : [], wordForms: [], phrases: [], examples: [], synonyms: [], antonyms: [], domains: [] };
+  return `<aside class="study-supplement-snapshot">${renderYoudaoState(entry.term, { status: "saved", entry: displayEntry, showLifecycleControls: false })}</aside>`;
+}
+
 function announceDictionarySupplementChange(action, recordOrTerm, providerId = "youdao") {
   const normalizedTerm = typeof recordOrTerm === "string" ? normalizeSupplementTerm(recordOrTerm) : recordOrTerm?.normalizedTerm;
   window.dispatchEvent(new CustomEvent("wordlover:supplement-changed", { detail: { action, normalizedTerm, providerId } }));
@@ -1099,8 +1134,8 @@ function announceDictionarySupplementChange(action, recordOrTerm, providerId = "
 
 window.WordLoverDictionarySupplements = Object.freeze({
   get: (term, providerId = "youdao") => dictionarySupplements.get(term, providerId),
-  save: async (entry) => { const record = await dictionarySupplements.save(entry); announceDictionarySupplementChange("saved", record, record.providerId); return record; },
-  remove: async (term, providerId = "youdao") => { await dictionarySupplements.remove(term, providerId); announceDictionarySupplementChange("removed", term, providerId); },
+  save: async (entry) => { const record = await dictionarySupplements.save(entry); savedStudySupplements.set(record.normalizedTerm, record); announceDictionarySupplementChange("saved", record, record.providerId); return record; },
+  remove: async (term, providerId = "youdao") => { await dictionarySupplements.remove(term, providerId); savedStudySupplements.delete(normalizeSupplementTerm(term)); announceDictionarySupplementChange("removed", term, providerId); },
   list: () => dictionarySupplements.list(),
   canPersist: (providerId = "youdao") => dictionarySupplements.canPersist(providerId),
 });
@@ -4399,9 +4434,12 @@ function spellingThreshold() {
 }
 
 function spellingMeaningHint(item) {
+  const snapshot = item.studySupplementSnapshot ?? null;
+  const english = summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings);
+  const chinese = summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings);
   return {
-    en: summarizeLines(item.user?.englishMeanings ?? item.original?.englishMeanings),
-    zh: summarizeLines(item.user?.chineseMeanings ?? item.original?.chineseMeanings),
+    en: snapshot?.language === "en" ? appendSupplementHint(english, snapshot) : english,
+    zh: snapshot?.language === "zh" ? appendSupplementHint(chinese, snapshot) : chinese,
   };
 }
 
@@ -4428,7 +4466,7 @@ function startSpellingSessionWith(queue, emptyMessage, mode = "review", options 
     return;
   }
   activeSpellingSession = {
-    queue,
+    queue: queue.map((item) => ({ ...item, studySupplementSnapshot: studySupplementSnapshot(item.term, [...(item.user?.chineseMeanings ?? item.original?.chineseMeanings ?? []), ...(item.user?.englishMeanings ?? item.original?.englishMeanings ?? [])]) })),
     index: 0,
     retries: 0,
     consecutive: 0,
@@ -4442,19 +4480,24 @@ function startSpellingSessionWith(queue, emptyMessage, mode = "review", options 
   renderSpellingPrompt();
 }
 
-function startSpellingReview() {
-  startSpellingSessionWith(getDueSpellingItems(), "No spelling words are due today.", "review");
+async function startSpellingReview() {
+  const queue = getDueSpellingItems();
+  await ensureStudySupplementsCached(queue);
+  startSpellingSessionWith(queue, "No spelling words are due today.", "review");
 }
 
 // Practice mode: drill every active spelling word (least-recently-practiced first),
 // regardless of whether it is due.
-function startSpellingPractice() {
-  startSpellingSessionWith(getPracticeSpellingItems(), "Add words to the spelling list to practice.", "practice");
+async function startSpellingPractice() {
+  const queue = getPracticeSpellingItems();
+  await ensureStudySupplementsCached(queue);
+  startSpellingSessionWith(queue, "Add words to the spelling list to practice.", "practice");
 }
 
-function practiceSpellingTerm(term, options = {}) {
+async function practiceSpellingTerm(term, options = {}) {
   const item = getSpellingItem(term);
   if (!item || item.archivedAt) return false;
+  await ensureStudySupplementCached(item.term);
   todayTrack = "spelling";
   activeVocabularyReviewSession = null;
   renderStudyStats();
@@ -4486,6 +4529,7 @@ function renderSpellingPrompt() {
       <p class="spelling-progress">${escapeHtml(spellingProgressText())}</p>
       <p class="spelling-hint-zh">${escapeHtml(hint.zh)}</p>
       <p class="spelling-hint-en">${escapeHtml(hint.en)}</p>
+      ${item.studySupplementSnapshot ? '<p class="small muted">Additional saved meaning · Source: Youdao</p>' : ""}
       ${renderExperimentalOnlineDictionaryActions(item.term, "spelling-hint")}
       <div class="spelling-controls">
         ${renderSpeakerButton(item.term)}
@@ -4797,7 +4841,7 @@ function renderStudyOneMoreMeaning(entry) {
         ${entry.chineseMeanings.length ? entry.chineseMeanings.map((line) => `<p>${escapeHtml(line)}</p>`).join("") : "<p>No Chinese meaning.</p>"}
       </div>
       ${entry.exampleSentence ? `<div class="quiz-english"><span class="quiz-english-label">Example</span><p>${escapeHtml(entry.exampleSentence)}</p></div>` : ""}
-      ${renderExperimentalOnlineDictionaryActions(entry.term, "study-one-more-reveal")}
+      ${entry.studySupplementSnapshot ? renderStudySupplementSnapshot(entry) : renderExperimentalOnlineDictionaryActions(entry.term, "study-one-more-reveal")}
     </div>
   `;
 }
@@ -4824,6 +4868,7 @@ function renderStudyOneMoreActions(passed) {
 }
 
 function renderStudyOneMoreEntry(entry) {
+  entry = withStableStudySupplement(entry);
   activeStudyOneMoreEntry = entry;
   activeQuiz = {
     id: crypto.randomUUID ? crypto.randomUUID() : `quiz-${Date.now()}`,
@@ -4920,14 +4965,14 @@ function quizEntryFromVocabulary(item) {
   const englishMeanings = item.user?.englishMeanings?.length
     ? item.user.englishMeanings
     : item.original?.englishMeanings ?? [];
-  return {
+  return withStableStudySupplement({
     term: item.term,
     normalizedTerm: item.normalizedTerm,
     phonetic: getVocabularyPhonetic(item),
     correct: summarizeLines(item.user?.chineseMeanings?.length ? item.user.chineseMeanings : item.original?.chineseMeanings),
     englishMeanings,
     sourceItem: item,
-  };
+  });
 }
 
 function randomize(items) {
@@ -4961,7 +5006,12 @@ function getQuizDistractors(correctTerm, limit = 3) {
 
 function buildQuizOptions(entry) {
   const correct = { text: entry.correct, correct: true, term: entry.term };
-  const distractors = getQuizDistractors(entry.term, 3).map((item) => ({ ...item, correct: false }));
+  const optionKey = (value) => String(value ?? "").toLocaleLowerCase().replace(/[\s\p{P}]+/gu, "");
+  const correctKey = optionKey(correct.text);
+  const distractors = getQuizDistractors(entry.term, 6)
+    .filter((item) => optionKey(item.text) !== correctKey)
+    .slice(0, 3)
+    .map((item) => ({ ...item, correct: false }));
   return randomize([correct, ...distractors]).slice(0, 4);
 }
 
@@ -5046,6 +5096,7 @@ function focusRecommendedRatingButton(rating) {
 }
 
 function renderQuiz(entry, mode) {
+  entry = withStableStudySupplement(entry);
   const stepwise = mode === "review" || mode === "practice";
   activeQuiz = {
     id: crypto.randomUUID ? crypto.randomUUID() : `quiz-${Date.now()}`,
@@ -5108,6 +5159,7 @@ async function practiceVocabularyTerm(term) {
   const item = getVocabularyItem(term);
   if (!item || item.archivedAt) return false;
   if (!(await ensureDictionaryLoaded())) return false;
+  await ensureStudySupplementCached(item.term);
   todayTrack = "vocabulary";
   hideSpellingReview();
   activeVocabularyReviewSession = { queue: [item], index: 0, mode: reviewModeForItem(item) };
@@ -5137,6 +5189,7 @@ async function startDueReview(options = {}) {
     quizPanel.innerHTML = `<p class="muted">No saved words are available for review yet.</p>`;
     return;
   }
+  await ensureStudySupplementCached(reviewItem.term);
   renderQuiz(quizEntryFromVocabulary(reviewItem), session.mode);
 }
 
@@ -5180,6 +5233,7 @@ async function startNewWordStudy() {
       quizPanel.innerHTML = `<p class="muted">No candidate found matching the current filter.</p>`;
       return;
     }
+    await ensureStudySupplementCached(entry.term);
     renderStudyOneMoreEntry(entry);
     void recordStudyOneMoreEvent(entry, "study-one-more-introduced").catch((error) => {
       console.error("Could not record Study One More introduction", error);
@@ -5286,7 +5340,7 @@ async function startNewSpellingWordStudy(options = {}) {
     renderSpellingViews();
     // Immediately drop into a one-word spelling practice session for the newly added word, marked to
     // auto-advance into the next new word on completion so the user never re-clicks Study one more.
-    practiceSpellingTerm(entry.term, {
+    await practiceSpellingTerm(entry.term, {
       source: "spelling-study-one-more",
       mode: "practice",
       autoNext: true,
@@ -5480,6 +5534,8 @@ async function handleQuizAnswer(index) {
   const passed = Boolean(selected.correct);
   const responseMs = performance.now() - activeQuiz.startedAt;
   const rating = inferFsrsRating(passed, responseMs);
+  const supplementMarkup = renderStudySupplementSnapshot(activeQuiz.entry);
+  if (supplementMarkup && activeQuiz.mode !== "study-one-more") quizPanel.insertAdjacentHTML("beforeend", supplementMarkup);
   recordReviewDebug("answer", { selectedIndex: index, passed, responseMs, inferredRating: rating });
   if (activeQuiz.mode === "new") {
     await handleNewWordQuizResult(passed, rating, responseMs);
@@ -8719,11 +8775,11 @@ document.querySelector("#filterReset")?.addEventListener("click", () => {
 });
 
 startSpellingReviewButton?.addEventListener("click", () => {
-  startSpellingReview();
+  void startSpellingReview();
 });
 
 startSpellingPracticeMoreButton?.addEventListener("click", () => {
-  startSpellingPractice();
+  void startSpellingPractice();
 });
 
 for (const tab of todayTrackTabs) {
@@ -9907,6 +9963,11 @@ window.WordLoverApp = {
       return studyOneMoreFilter;
     },
     getFilter: () => ({ ...studyOneMoreFilter }),
+  },
+  studySupplements: {
+    snapshot: (term, localMeanings = []) => studySupplementSnapshot(term, localMeanings),
+    quizMeaning: quizMeaningWithSupplement,
+    cachedCount: () => savedStudySupplements.size,
   },
   recordReviewRating,
   persistVocabularyItemForTest: (item) => persistVocabularyItem(item),

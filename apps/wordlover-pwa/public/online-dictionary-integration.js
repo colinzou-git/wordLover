@@ -1,12 +1,13 @@
-import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260714-6";
-import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260714-6";
-import { youdaoProvider } from "./youdao-provider.js?v=20260714-6";
-import { createOnlineDictionarySupplementLifecycle } from "./online-dictionary-supplement-lifecycle.js?v=20260714-6";
-import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-6";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260714-7";
+import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260714-7";
+import { youdaoProvider } from "./youdao-provider.js?v=20260714-7";
+import { createOnlineDictionarySupplementLifecycle } from "./online-dictionary-supplement-lifecycle.js?v=20260714-7";
+import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-7";
 
 const controllers = new WeakMap();
 function hydrate(element) {
   if (controllers.has(element)) return;
+  if (element.dataset.onlineDictionaryContext === "spelling-hint") return;
   const supplements = {
     get: (...args) => globalThis.WordLoverDictionarySupplements?.get(...args) ?? null,
     save: (...args) => globalThis.WordLoverDictionarySupplements?.save(...args) ?? Promise.reject(new Error("Supplement storage is unavailable.")),

@@ -1,4 +1,4 @@
-import { buildYoudaoLookupUrl } from "./youdao-provider.js?v=20260714-6";
+import { buildYoudaoLookupUrl } from "./youdao-provider.js?v=20260714-7";
 
 function escapeHtml(value) { return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 const list = (items, render) => items?.length ? `<ul>${items.map(render).join("")}</ul>` : "";
@@ -13,7 +13,7 @@ export function renderYoudaoState(term, state) {
     const entry = state.entry, phonetics = [entry.phonetics?.us ? `US /${entry.phonetics.us}/` : "", entry.phonetics?.uk ? `UK /${entry.phonetics.uk}/` : ""].filter(Boolean).join(" · ");
     const definitions = [...(entry.chineseDefinitions ?? []), ...(entry.englishDefinitions ?? [])];
     const lifecycleError = state.refreshError ?? state.saveError ?? state.removeError;
-    const controls = status === "saved"
+    const controls = status === "saved" && state.showLifecycleControls !== false
       ? `<span class="youdao-lifecycle-actions">${state.canRefresh ? `<button type="button" class="secondary-button" data-youdao-refresh>Refresh saved entry</button>` : ""}<button type="button" class="secondary-button" data-youdao-remove>Remove saved definition</button></span>`
       : state.canSave ? `<button type="button" class="secondary-button" data-youdao-save>Add as additional definition</button>` : "";
     return `${source}<strong class="youdao-headword">${escapeHtml(entry.headword)}</strong>${phonetics ? `<span>${escapeHtml(phonetics)}</span>` : ""}${list(definitions, (item) => `<li>${item.partOfSpeech ? `<span class="youdao-pos">${escapeHtml(item.partOfSpeech)}</span> ` : ""}${escapeHtml(item.text)}${item.domain ? ` <span class="youdao-domain">${escapeHtml(item.domain)}</span>` : ""}</li>`)}${entry.domains?.length ? `<p>Domains: ${escapeHtml(entry.domains.join(", "))}</p>` : ""}${list(entry.wordForms, (item) => `<li>${escapeHtml(item.name)}: ${escapeHtml(item.value)}</li>`)}${list(entry.phrases, (item) => `<li>${escapeHtml(item.phrase)} — ${escapeHtml(item.meanings.join("; "))}</li>`)}${list(entry.examples, (item) => `<li>${escapeHtml(item.sentence)}${item.translation ? ` — ${escapeHtml(item.translation)}` : ""}</li>`)}${entry.synonyms?.length ? `<p>Synonyms: ${escapeHtml(entry.synonyms.join(", "))}</p>` : ""}${entry.antonyms?.length ? `<p>Antonyms: ${escapeHtml(entry.antonyms.join(", "))}</p>` : ""}<span class="small muted">${state.refreshing ? "Refreshing saved entry…" : status === "saved" ? "Saved for offline use" : "Online result"}</span>${lifecycleError ? `<span class="small error-text" role="status">${escapeHtml(lifecycleError.message ?? "The saved entry was kept.")}</span>` : ""}${controls}${link}`;
