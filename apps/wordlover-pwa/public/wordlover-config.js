@@ -8,8 +8,10 @@ window.WORDLOVER_CONFIG = {
   geminiApiKey: "",
   geminiModel: "gemini-2.5-flash",
   localDevelopmentPassphrase: "",
+  // Disabled by default. Set only after deploying the approved server-side gateway.
+  youdaoGatewayUrl: "",
 };
 
 // The fallback waits for WordFan's local and full dictionary lookups to finish,
 // then reuses the existing Gemini settings dialog and native Add-to-dictionary flow.
-void import("/online-dictionary-bridge.js?v=20260714-2");
+void import("/online-dictionary-bridge.js?v=20260714-3");

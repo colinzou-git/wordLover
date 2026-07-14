@@ -1,0 +1,23 @@
+name = "wordfan-youdao-gateway"
+main = "src/worker.js"
+compatibility_date = "2026-07-14"
+
+[vars]
+YOUDAO_ENABLED = "false"
+ALLOWED_ORIGINS = "https://wordfan.app,http://127.0.0.1:4173,http://localhost:4173"
+YOUDAO_DAILY_LIMIT = "0"
+YOUDAO_MONTHLY_LIMIT = "0"
+UPSTREAM_TIMEOUT_MS = "5000"
+
+[[durable_objects.bindings]]
+name = "USAGE_LIMITER"
+class_name = "UsageLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UsageLimiter"]
+
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }

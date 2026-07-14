@@ -1,3 +1,3 @@
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-2";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-3";
 
 window.WordFanTieredLookupForTest = (term) => resolveOnlineDictionaryEntry({ term, apiKey: "", model: "gemini-2.5-flash" });
