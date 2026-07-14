@@ -875,8 +875,7 @@ async function runMainAppDictionarySmoke() {
         }
         result.missingKaikkiRollbackSafe = true;
         const supplements = frame.contentWindow.WordLoverDictionarySupplements;
-        if (!supplements || supplements.canPersist("youdao")) throw new Error("Youdao supplement persistence must be present and policy-disabled by default.");
-        frame.contentWindow.WORDLOVER_CONFIG.youdaoPersistenceAllowed = true;
+        if (!supplements || !supplements.canPersist("youdao")) throw new Error("Youdao supplement persistence must be enabled for the authorized deployment.");
         const fixtureEntry = {
           schemaVersion: 1,
           provider: { id: "youdao", label: "Youdao" },
@@ -926,7 +925,6 @@ async function runMainAppDictionarySmoke() {
         await supplements.remove("abandon", "youdao");
         await waitForViews(false);
         duplicateView.remove();
-        frame.contentWindow.WORDLOVER_CONFIG.youdaoPersistenceAllowed = false;
         const learningAfter = app.dictionaries.learningCounts();
         if (!saved || !raw?.__encrypted || JSON.stringify(raw).includes("他们是") || loaded?.entry?.chineseDefinitions?.[0]?.text !== "他们是"
             || !malformedRejected || retained?.entry?.chineseDefinitions?.[0]?.text !== "他们是" || removed !== null || !multiViewSaved || !studySnapshotStable
