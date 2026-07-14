@@ -28,3 +28,18 @@ available so disabling a provider never traps user data.
 
 Transient lookup results, session caches, packaged dictionaries, learning records, and
 user-authored definitions are never written to this store automatically.
+
+## Lifecycle
+
+A transient integrated result exposes `Add as additional definition` only when provider
+persistence is permitted. Saved entries expose removal and, when live lookup is available,
+explicit refresh. Actions are single-flight so rapid repeated taps cannot create duplicate
+writes. Save/remove events re-render every open supplement section for the same normalized
+term; this keeps search, vocabulary, revealed review, Study One More, and spelling views in
+sync without changing an active unrevealed question.
+
+Refresh bypasses transient caching and keeps the prior saved value visible while the request
+is running. The new validated entry is written with one IndexedDB `put`; no success state is
+reported until that write completes. A timeout, malformed response, no-result, cancellation,
+or storage error leaves the previous encrypted record unchanged. Removing a record requires
+confirmation and deletes only its provider/term key.

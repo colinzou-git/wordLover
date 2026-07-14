@@ -1819,6 +1819,18 @@ li button {
   font-weight: 700;
 }
 
+.youdao-lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.youdao-lifecycle-actions button {
+  min-height: 44px;
+  white-space: normal;
+}
+
 .online-dictionary-actions button:focus-visible,
 .online-dictionary-actions a:focus-visible {
   outline: 3px solid var(--focus-ring, var(--accent));

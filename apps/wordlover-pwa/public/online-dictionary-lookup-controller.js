@@ -50,12 +50,12 @@ export function createOnlineDictionaryLookupController(options) {
     if (mode === "off") return emit({ status: "hidden" });
     const saved = await getSaved(normalized, provider.id).catch(() => null);
     if (id !== requestId || closed) return { status: "cancelled" };
-    if (saved) return emit({ status: "saved", entry: saved });
+    if (saved && !forceRefresh) return emit({ status: "saved", entry: saved });
     if (!online()) return emit({ status: "offline" });
     if (!provider.canLookupInApp) return emit({ status: "disabled" });
     const hit = !forceRefresh && cached(normalized);
     if (hit) return emit(hit);
-    emit({ status: "checking" });
+    emit(saved && forceRefresh ? { status: "saved", entry: saved, refreshing: true } : { status: "checking" });
     const timer = setTimeout(() => controller.abort(new DOMException("Timed out", "AbortError")), timeoutMs);
     let shared = null;
     try {
