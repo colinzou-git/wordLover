@@ -168,3 +168,12 @@ is sent to the WordFan gateway and Youdao when integrated lookup is enabled.
 The server-side kill switch stops all upstream calls and returns a stable disabled
 error. The client then retains local definitions and shows the external Youdao
 link. Rollback never removes local WordFan dictionaries or user learning data.
+
+## Implementation status
+
+The repository now contains the fail-closed Worker boundary, normalized schema,
+abortable client provider, reusable lookup controller, and shared attributed
+renderer. The PWA endpoint is empty by default, the Worker kill switch is false,
+all cost ceilings are zero, and transient session caching is disabled under this
+ADR. These controls permit deterministic development without making an
+unlicensed provider request or persisting provider data.
