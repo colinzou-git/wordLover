@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260714-4";
+} from "./fsrs-scheduler.js?v=20260714-5";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-4";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-4";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-4";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-5";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-5";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-5";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260714-4";
+} from "./dictionary-rendering.js?v=20260714-5";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260714-4";
+} from "./persistence.js?v=20260714-5";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260714-4";
+} from "./spelling.js?v=20260714-5";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -46,17 +46,19 @@ import {
   normalizeFontScale,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260714-4";
+} from "./ui-preferences.js?v=20260714-5";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-4";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-4";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-5";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-5";
+import { createDictionarySupplementStore } from "./dictionary-supplements.js?v=20260714-5";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260714-5";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260714-4";
+} from "./review-state.js?v=20260714-5";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -77,7 +79,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260714-4";
+} from "./study-one-more.js?v=20260714-5";
 
 import {
   studyEventTrack,
@@ -89,11 +91,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-4";
+} from "./sync.js?v=20260714-5";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260714-4";
+} from "./goal-forecast.js?v=20260714-5";
 
 import {
   DEFAULT_TRACK_ID,
@@ -105,11 +107,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-4";
+} from "./tracks.js?v=20260714-5";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260714-4";
+} from "./full-dictionary.js?v=20260714-5";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -236,6 +238,7 @@ const STUDY_EVENT_STORE = "studyEventRecords";
 const SPELLING_STORE = "spellingRecords";
 const SPELLING_EVENT_STORE = "spellingEventRecords";
 const USER_DICTIONARY_STORE = "userDictionary";
+const DICTIONARY_SUPPLEMENT_STORE = "dictionarySupplements";
 const KNOWN_STORE = "knownRecords";
 const CHECKPOINT_STORE = "checkpoints";
 // Learning tracks tag every per-record row with `learningTrackId` and prefix its IndexedDB
@@ -256,7 +259,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260714-4-v160";
+const APP_VERSION = "0.6.2-product.20260714-5-v161";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -264,7 +267,7 @@ const APP_VERSION = "0.6.2-product.20260714-4-v160";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v160";
+const SHELL_CACHE_VERSION = "wordlover-shell-v161";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -721,7 +724,7 @@ function showModal({ title, body = "", fields = [], submitText = "OK", cancelTex
 
 function openUserDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 7);
+    const request = indexedDB.open(DB_NAME, 8);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
@@ -732,6 +735,7 @@ function openUserDb() {
       if (!db.objectStoreNames.contains(SPELLING_STORE)) db.createObjectStore(SPELLING_STORE);
       if (!db.objectStoreNames.contains(SPELLING_EVENT_STORE)) db.createObjectStore(SPELLING_EVENT_STORE);
       if (!db.objectStoreNames.contains(USER_DICTIONARY_STORE)) db.createObjectStore(USER_DICTIONARY_STORE);
+      if (!db.objectStoreNames.contains(DICTIONARY_SUPPLEMENT_STORE)) db.createObjectStore(DICTIONARY_SUPPLEMENT_STORE);
       if (!db.objectStoreNames.contains(KNOWN_STORE)) db.createObjectStore(KNOWN_STORE);
       if (!db.objectStoreNames.contains(CHECKPOINT_STORE)) db.createObjectStore(CHECKPOINT_STORE);
     };
@@ -1057,6 +1061,44 @@ async function loadTrackRecordValues(storeName, trackId = activeLearningTrackId)
   const all = await loadAllRecordValues(storeName);
   return all.filter((value) => recordTrackId(value) === trackId);
 }
+
+async function loadEncryptedStoreValue(storeName, key) {
+  const value = await loadRawValue(storeName, key);
+  if (value === null || value === undefined) return null;
+  if (!isEncryptedRecord(value)) return value;
+  try { return await decryptValue(value); }
+  catch (error) {
+    blockUserDataAfterDecryptFailure({ storeName, key }, error);
+    return null;
+  }
+}
+
+async function saveEncryptedStoreValue(storeName, key, value) {
+  assertUserDataWritable(`Saving "${key}"`);
+  await saveRawValue(storeName, key, await encryptValue(value));
+}
+
+async function deleteEncryptedStoreValue(storeName, key) {
+  assertUserDataWritable(`Deleting "${key}"`);
+  await deleteRawValue(storeName, key);
+}
+
+const dictionarySupplements = createDictionarySupplementStore({
+  read: (key) => loadEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key),
+  write: (key, value) => saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key, value),
+  remove: (key) => deleteEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key),
+  list: () => loadAllRecordValues(DICTIONARY_SUPPLEMENT_STORE),
+  validateEntry: validateYoudaoEntry,
+  canPersistProvider: (providerId) => providerId === "youdao" && CONFIG.youdaoPersistenceAllowed === true,
+});
+
+window.WordLoverDictionarySupplements = Object.freeze({
+  get: (term, providerId = "youdao") => dictionarySupplements.get(term, providerId),
+  save: (entry) => dictionarySupplements.save(entry),
+  remove: (term, providerId = "youdao") => dictionarySupplements.remove(term, providerId),
+  list: () => dictionarySupplements.list(),
+  canPersist: (providerId = "youdao") => dictionarySupplements.canPersist(providerId),
+});
 
 // Write a set of records into a specific track's prefixed keys (used by import). Each record
 // is re-tagged with the destination trackId so it groups correctly on the next load.

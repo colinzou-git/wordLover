@@ -6,7 +6,7 @@
     "build": "node scripts/check-js-syntax.mjs && npm run test:unit && npm run validate:shell-assets && python scripts/check_versions.py && npm run validate:release",
     "preview": "python -m http.server 4173 --directory public",
     "test": "npm run build",
-    "test:unit": "node scripts/test-regressions.mjs && node scripts/test-spelling-input.mjs && node scripts/test-online-dictionary.mjs && node scripts/test-youdao-provider.mjs && node scripts/test-online-dictionary-controller.mjs",
+    "test:unit": "node scripts/test-regressions.mjs && node scripts/test-spelling-input.mjs && node scripts/test-online-dictionary.mjs && node scripts/test-youdao-provider.mjs && node scripts/test-online-dictionary-controller.mjs && node scripts/test-dictionary-supplements.mjs",
     "test:youdao:live": "node scripts/smoke-youdao-live.mjs",
     "test:browser": "python scripts/run-browser-tests.py",
     "ci:dictionary": "python scripts/create-ci-dictionary.py",

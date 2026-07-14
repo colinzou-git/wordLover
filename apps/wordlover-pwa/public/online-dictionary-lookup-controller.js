@@ -1,5 +1,6 @@
 const DEFAULT_TIMEOUT_MS = 8000;
-const sharedRequests = new Map();
+const providerRequestMaps = new WeakMap();
+const requestMapsForTest = new Set();
 
 function errorState(error) {
   if (error?.name === "AbortError") return { status: "cancelled", error: null };
@@ -9,15 +10,17 @@ function errorState(error) {
 }
 
 function acquireShared(provider, term) {
-  const key = `${provider.id}:${term}`;
-  let record = sharedRequests.get(key);
+  let requests = providerRequestMaps.get(provider);
+  if (!requests) { requests = new Map(); providerRequestMaps.set(provider, requests); requestMapsForTest.add(requests); }
+  const key = term;
+  let record = requests.get(key);
   if (!record) {
     const controller = new AbortController();
-    record = { controller, refs: 0, promise: provider.lookup({ term, signal: controller.signal }).finally(() => sharedRequests.delete(key)) };
-    sharedRequests.set(key, record);
+    record = { controller, refs: 0, promise: provider.lookup({ term, signal: controller.signal }).finally(() => requests.delete(key)) };
+    requests.set(key, record);
   }
   record.refs += 1;
-  return { promise: record.promise, release: () => { record.refs -= 1; if (record.refs <= 0 && sharedRequests.get(key) === record) record.controller.abort("No active lookup consumers."); } };
+  return { promise: record.promise, release: () => { record.refs -= 1; if (record.refs <= 0 && requests.get(key) === record) { requests.delete(key); record.controller.abort("No active lookup consumers."); } } };
 }
 
 export function createOnlineDictionaryLookupController(options) {
@@ -83,4 +86,4 @@ export function createOnlineDictionaryLookupController(options) {
   return { display, lookup, refresh: (term) => lookup(term, { forceRefresh: true }), cancel: stop, close: () => { closed = true; stop(); }, cacheSize: () => cache.size };
 }
 
-export function clearOnlineDictionaryRequestsForTest() { for (const record of sharedRequests.values()) record.controller.abort(); sharedRequests.clear(); }
+export function clearOnlineDictionaryRequestsForTest() { for (const requests of requestMapsForTest) { for (const record of requests.values()) record.controller.abort(); requests.clear(); } requestMapsForTest.clear(); }

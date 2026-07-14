@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260714-4";
+} from "./fsrs-scheduler.js?v=20260714-5";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260714-4";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260714-4";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260714-5";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260714-5";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260714-4";
+} from "./ui-preferences.js?v=20260714-5";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-4";
+} from "./sync.js?v=20260714-5";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260714-4";
+} from "./study-one-more.js?v=20260714-5";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260714-4";
+} from "./goal-forecast.js?v=20260714-5";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,9 +48,9 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-4";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-4";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260714-4";
+} from "./tracks.js?v=20260714-5";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-5";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260714-5";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -64,9 +64,9 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v160";
+const SHELL_CACHE_NAME = "wordlover-shell-v161";
 const APP_DB = "wordlover-user";
-const APP_DB_VERSION = 7;
+const APP_DB_VERSION = 8;
 const APP_KV_STORE = "kv";
 const APP_VOCABULARY_STORE = "vocabularyRecords";
 const APP_STUDY_EVENT_STORE = "studyEventRecords";
@@ -76,35 +76,37 @@ const APP_KEY_STORE = "keys";
 const APP_SPELLING_STORE = "spellingRecords";
 const APP_SPELLING_EVENT_STORE = "spellingEventRecords";
 const APP_USER_DICTIONARY_STORE = "userDictionary";
+const APP_DICTIONARY_SUPPLEMENT_STORE = "dictionarySupplements";
 const APP_CHECKPOINT_STORE = "checkpoints";
 const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260714-4",
-  "/dictionary-config.js?v=20260714-4",
-  "/dictionary-registry.js?v=20260714-4",
-  "/dictionary-selection.js?v=20260714-4",
-  "/dictionary-rendering.js?v=20260714-4",
-  "/full-dictionary.js?v=20260714-4",
-  "/online-dictionary-actions.js?v=20260714-4",
-  "/online-dictionary-provider.js?v=20260714-4",
-  "/online-dictionary-lookup-controller.js?v=20260714-4",
-  "/online-dictionary-result-renderer.js?v=20260714-4",
-  "/online-dictionary-integration.js?v=20260714-4",
-  "/youdao-provider.js?v=20260714-4",
-  "/youdao-entry-schema.js?v=20260714-4",
-  "/persistence.js?v=20260714-4",
-  "/spelling.js?v=20260714-4",
-  "/ui-preferences.js?v=20260714-4",
-  "/review-state.js?v=20260714-4",
-  "/study-one-more.js?v=20260714-4",
-  "/sync.js?v=20260714-4",
-  "/fsrs-scheduler.js?v=20260714-4",
-  "/goal-forecast.js?v=20260714-4",
-  "/tracks.js?v=20260714-4",
-  "/styles.css?v=20260714-4",
-  "/wordlover-config.js?v=20260714-4",
+  "/app.js?v=20260714-5",
+  "/dictionary-config.js?v=20260714-5",
+  "/dictionary-registry.js?v=20260714-5",
+  "/dictionary-selection.js?v=20260714-5",
+  "/dictionary-rendering.js?v=20260714-5",
+  "/full-dictionary.js?v=20260714-5",
+  "/online-dictionary-actions.js?v=20260714-5",
+  "/online-dictionary-provider.js?v=20260714-5",
+  "/online-dictionary-lookup-controller.js?v=20260714-5",
+  "/online-dictionary-result-renderer.js?v=20260714-5",
+  "/online-dictionary-integration.js?v=20260714-5",
+  "/dictionary-supplements.js?v=20260714-5",
+  "/youdao-provider.js?v=20260714-5",
+  "/youdao-entry-schema.js?v=20260714-5",
+  "/persistence.js?v=20260714-5",
+  "/spelling.js?v=20260714-5",
+  "/ui-preferences.js?v=20260714-5",
+  "/review-state.js?v=20260714-5",
+  "/study-one-more.js?v=20260714-5",
+  "/sync.js?v=20260714-5",
+  "/fsrs-scheduler.js?v=20260714-5",
+  "/goal-forecast.js?v=20260714-5",
+  "/tracks.js?v=20260714-5",
+  "/styles.css?v=20260714-5",
+  "/wordlover-config.js?v=20260714-5",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -120,7 +122,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260714-4",
+  "/automated-tests.js?v=20260714-5",
 ];
 
 let lastResults = null;
@@ -206,6 +208,7 @@ function openAppDb() {
       if (!db.objectStoreNames.contains(APP_SPELLING_STORE)) db.createObjectStore(APP_SPELLING_STORE);
       if (!db.objectStoreNames.contains(APP_SPELLING_EVENT_STORE)) db.createObjectStore(APP_SPELLING_EVENT_STORE);
       if (!db.objectStoreNames.contains(APP_USER_DICTIONARY_STORE)) db.createObjectStore(APP_USER_DICTIONARY_STORE);
+      if (!db.objectStoreNames.contains(APP_DICTIONARY_SUPPLEMENT_STORE)) db.createObjectStore(APP_DICTIONARY_SUPPLEMENT_STORE);
       if (!db.objectStoreNames.contains(APP_KNOWN_STORE)) db.createObjectStore(APP_KNOWN_STORE);
       if (!db.objectStoreNames.contains(APP_CHECKPOINT_STORE)) db.createObjectStore(APP_CHECKPOINT_STORE);
     };
@@ -219,7 +222,7 @@ async function runAppDbSchemaTest() {
     APP_KV_STORE, APP_FILE_STORE, APP_KEY_STORE,
     APP_VOCABULARY_STORE, APP_STUDY_EVENT_STORE,
     APP_SPELLING_STORE, APP_SPELLING_EVENT_STORE,
-    APP_USER_DICTIONARY_STORE, APP_KNOWN_STORE, APP_CHECKPOINT_STORE,
+    APP_USER_DICTIONARY_STORE, APP_DICTIONARY_SUPPLEMENT_STORE, APP_KNOWN_STORE, APP_CHECKPOINT_STORE,
   ];
   try {
     const db = await openAppDb();
@@ -869,6 +872,37 @@ async function runMainAppDictionarySmoke() {
           throw new Error(`Missing Kaikki package did not roll back safely: ${JSON.stringify({ switched, active, before, after })}`);
         }
         result.missingKaikkiRollbackSafe = true;
+        const supplements = frame.contentWindow.WordLoverDictionarySupplements;
+        if (!supplements || supplements.canPersist("youdao")) throw new Error("Youdao supplement persistence must be present and policy-disabled by default.");
+        frame.contentWindow.WORDLOVER_CONFIG.youdaoPersistenceAllowed = true;
+        const fixtureEntry = {
+          schemaVersion: 1,
+          provider: { id: "youdao", label: "Youdao" },
+          normalizedTerm: "they're",
+          headword: "they're",
+          sourceUrl: "https://dict.youdao.com/result?word=they%27re&lang=en",
+          retrievedAt: "2026-07-14T00:00:00.000Z",
+          parserVersion: "browser-fixture-1",
+          chineseDefinitions: [{ text: "他们是" }],
+          englishDefinitions: [],
+        };
+        const learningBefore = app.dictionaries.learningCounts();
+        const saved = await supplements.save(fixtureEntry);
+        const raw = await getAppStoreValue(APP_DICTIONARY_SUPPLEMENT_STORE, "youdao:they're");
+        const loaded = await supplements.get("They’re", "youdao");
+        let malformedRejected = false;
+        try { await supplements.save({ ...fixtureEntry, chineseDefinitions: [], englishDefinitions: [] }); } catch { malformedRejected = true; }
+        const retained = await supplements.get("they're", "youdao");
+        await supplements.remove("they're", "youdao");
+        const removed = await supplements.get("they're", "youdao");
+        frame.contentWindow.WORDLOVER_CONFIG.youdaoPersistenceAllowed = false;
+        const learningAfter = app.dictionaries.learningCounts();
+        if (!saved || !raw?.__encrypted || JSON.stringify(raw).includes("他们是") || loaded?.entry?.chineseDefinitions?.[0]?.text !== "他们是"
+            || !malformedRejected || retained?.entry?.chineseDefinitions?.[0]?.text !== "他们是" || removed !== null
+            || JSON.stringify(learningBefore) !== JSON.stringify(learningAfter)) {
+          throw new Error(`Encrypted supplement lifecycle failed: ${JSON.stringify({ encrypted: raw?.__encrypted, loaded: loaded?.entry?.chineseDefinitions?.[0]?.text, malformedRejected, retained: retained?.entry?.chineseDefinitions?.[0]?.text, removed, learningBefore, learningAfter })}`);
+        }
+        result.encryptedSupplementLifecycle = true;
       }
       results.push(result);
     } finally {

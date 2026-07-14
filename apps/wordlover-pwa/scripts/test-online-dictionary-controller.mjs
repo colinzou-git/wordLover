@@ -37,6 +37,27 @@ await refresh.lookup("charge"); await refresh.lookup("charge"); assert.equal(ref
 
 const timeout = createOnlineDictionaryLookupController({ provider: makeProvider((_args) => new Promise(() => {})), mode: "automatic", online: () => true, timeoutMs: 5 });
 assert.equal((await timeout.display("charge")).status, "timed-out");
+
+let closeAborted = false;
+const closing = createOnlineDictionaryLookupController({ provider: makeProvider(({ signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => { closeAborted = true; reject(signal.reason); }, { once: true }))), mode: "automatic", online: () => true });
+const closingResult = closing.display("charge");
+await new Promise((resolve) => setTimeout(resolve));
+closing.close();
+assert.equal((await closingResult).status, "cancelled", "closing a view cancels its lookup");
+await new Promise((resolve) => setTimeout(resolve));
+assert.equal(closeAborted, true, "closing the last consumer aborts the provider request");
+
+let transientCalls = 0;
+const transient = createOnlineDictionaryLookupController({ provider: makeProvider(async () => { transientCalls += 1; const error = new Error("temporary"); error.category = "provider_unavailable"; error.retryable = true; throw error; }), mode: "manual", online: () => true, allowSessionCache: true });
+assert.equal((await transient.lookup("charge")).status, "provider-unavailable");
+assert.equal((await transient.lookup("charge")).status, "provider-unavailable");
+assert.equal(transientCalls, 2, "transient failures are never session-cached");
+
+let noResultCalls = 0;
+const noResult = createOnlineDictionaryLookupController({ provider: makeProvider(async () => { noResultCalls += 1; const error = new Error("none"); error.category = "no_result"; throw error; }), mode: "manual", online: () => true, allowSessionCache: true, cacheMaxEntries: 2 });
+assert.equal((await noResult.lookup("missing")).status, "no-result");
+assert.equal((await noResult.lookup("missing")).status, "no-result");
+assert.equal(noResultCalls, 1, "stable no-result responses may be cached when policy permits");
 clearOnlineDictionaryRequestsForTest();
 
 for (const status of ["manual-ready", "checking", "offline", "no-result", "timed-out", "rate-limited", "provider-unavailable", "disabled", "malformed", "error"]) {
