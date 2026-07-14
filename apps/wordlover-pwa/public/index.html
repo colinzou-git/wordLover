@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260713-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260714-2" />
     <title>WordFan</title>
   </head>
   <body>
@@ -146,11 +146,12 @@
               <div class="menu-actions diagnostics-actions">
                 <button id="checkForUpdate" type="button">Check update</button>
                 <button id="applyUpdate" class="secondary-button" type="button" disabled>Apply update</button>
+                <button id="repairAppShell" class="secondary-button" type="button">Repair app shell</button>
                 <button id="exportStateMenu" class="secondary-button" type="button">Export state</button>
                 <button id="createCheckpoint" class="secondary-button" type="button">Checkpoint</button>
                 <button id="rollbackCheckpoint" class="secondary-button" type="button">Rollback latest</button>
               </div>
-              <p id="updateStatus" class="small" aria-live="polite"></p>
+              <pre id="updateStatus" class="small update-diagnostics" aria-live="polite"></pre>
               <p id="checkpointStatus" class="small" aria-live="polite"></p>
             </section>
           </div>
@@ -429,7 +430,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260713-1"></script>
-    <script type="module" src="/app.js?v=20260713-1"></script>
+    <script src="/wordlover-config.js?v=20260714-2"></script>
+    <script type="module" src="/app.js?v=20260714-2"></script>
   </body>
 </html>

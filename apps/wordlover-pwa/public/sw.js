@@ -1,4 +1,6 @@
-const CACHE_NAME = "wordlover-shell-v156";
+const CACHE_NAME = "wordlover-shell-v158";
+const APP_VERSION = "0.6.2-product.20260714-2-v158";
+const BUILD_STAMP = "dev";
 // Staging cache for atomic installs: required assets are written here first and the
 // live cache is only updated once every one of them succeeds, so an interrupted or
 // partly-failed install can never leave a half-populated shell that the app trusts.
@@ -7,26 +9,27 @@ const SHELL_CACHE_PREFIX = "wordlover-shell-";
 
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260713-1",
-  "/dictionary-config.js?v=20260713-1",
-  "/dictionary-registry.js?v=20260713-1",
-  "/dictionary-selection.js?v=20260713-1",
-  "/dictionary-rendering.js?v=20260713-1",
-  "/full-dictionary.js?v=20260713-1",
-  "/online-dictionary-actions.js?v=20260713-1",
-  "/online-dictionary-provider.js?v=20260713-1",
-  "/youdao-provider.js?v=20260713-1",
-  "/persistence.js?v=20260713-1",
-  "/spelling.js?v=20260713-1",
-  "/ui-preferences.js?v=20260713-1",
-  "/review-state.js?v=20260713-1",
-  "/study-one-more.js?v=20260713-1",
-  "/sync.js?v=20260713-1",
-  "/fsrs-scheduler.js?v=20260713-1",
-  "/goal-forecast.js?v=20260713-1",
-  "/tracks.js?v=20260713-1",
-  "/styles.css?v=20260713-1",
-  "/wordlover-config.js?v=20260713-1",
+  "/app.js?v=20260714-2",
+  "/update-manager.js?v=20260714-2",
+  "/dictionary-config.js?v=20260714-2",
+  "/dictionary-registry.js?v=20260714-2",
+  "/dictionary-selection.js?v=20260714-2",
+  "/dictionary-rendering.js?v=20260714-2",
+  "/full-dictionary.js?v=20260714-2",
+  "/online-dictionary-actions.js?v=20260714-2",
+  "/online-dictionary-provider.js?v=20260714-2",
+  "/youdao-provider.js?v=20260714-2",
+  "/persistence.js?v=20260714-2",
+  "/spelling.js?v=20260714-2",
+  "/ui-preferences.js?v=20260714-2",
+  "/review-state.js?v=20260714-2",
+  "/study-one-more.js?v=20260714-2",
+  "/sync.js?v=20260714-2",
+  "/fsrs-scheduler.js?v=20260714-2",
+  "/goal-forecast.js?v=20260714-2",
+  "/tracks.js?v=20260714-2",
+  "/styles.css?v=20260714-2",
+  "/wordlover-config.js?v=20260714-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -45,7 +48,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260713-1",
+  "/automated-tests.js?v=20260714-2",
 ];
 
 // Bounded timeouts. The root cause of the offline hang is that an unbounded
@@ -167,8 +170,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (data && data.type === "SKIP_WAITING") {
-    // Product requirement: only ever skip waiting on explicit user action.
-    self.skipWaiting();
+    if (data.explicit === true || data.nextLaunch === true) self.skipWaiting();
+    return;
+  }
+  if (data && data.type === "GET_RELEASE_INFO") {
+    const payload = { schemaVersion: 1, appVersion: APP_VERSION, buildId: BUILD_STAMP, cacheName: CACHE_NAME };
+    const port = event.ports && event.ports[0];
+    if (port) port.postMessage(payload);
+    else if (event.source) event.source.postMessage(payload);
     return;
   }
   if (data && data.type === "CHECK_OFFLINE_READY") {
@@ -180,7 +189,7 @@ async function reportOfflineReady(event) {
   const live = await caches.open(CACHE_NAME);
   const missing = [];
   for (const asset of REQUIRED_SHELL_ASSETS) {
-    const hit = (await live.match(asset)) || (await live.match(asset, { ignoreSearch: true }));
+    const hit = await live.match(asset);
     if (!hit) missing.push(asset);
   }
   const payload = { type: "OFFLINE_READY", ready: missing.length === 0, cacheName: CACHE_NAME, missing };
@@ -203,8 +212,8 @@ self.addEventListener("fetch", (event) => {
   // The installed dictionary loads from IndexedDB/OPFS, never Cache Storage.
   if (isDictionaryAssetPath(url.pathname)) return;
 
-  // Update checks stay network-only and bounded; never satisfied by stale cache.
-  if (url.searchParams.has("update-check")) {
+  // Release identity stays network-only and bounded; never satisfied by stale cache.
+  if (url.pathname === "/release.json") {
     event.respondWith(fetchWithTimeout(request, {}, RUNTIME_TIMEOUT_MS));
     return;
   }
@@ -222,6 +231,13 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleNavigation(request, url) {
+  if (url.searchParams.has("fresh")) {
+    try {
+      const response = await fetchWithTimeout(request, { cache: "no-store" }, NAV_TIMEOUT_MS);
+      if (isUsableResponse(response)) return response;
+    } catch { /* return the explicit recovery response below */ }
+    return recoveryUnavailableResponse();
+  }
   try {
     const response = await fetchWithTimeout(request, {}, NAV_TIMEOUT_MS);
     if (isUsableResponse(response)) {
@@ -263,10 +279,6 @@ async function handleScriptOrStyle(request, url) {
   const live = await caches.open(CACHE_NAME);
   const exact = await live.match(request);
   if (exact) return exact;
-  // Safe pathname match (ignores the ?v= cache-buster) — same asset, any version.
-  const byPath = await live.match(request, { ignoreSearch: true });
-  if (byPath) return byPath;
-
   // Never return "/" or index.html for a script/style: HTML served as JS causes a
   // MIME/syntax error that breaks the whole app. Fail cleanly instead.
   return Response.error();
@@ -315,6 +327,13 @@ function offlineInstallResponse() {
   return new Response(html, {
     status: 503,
     statusText: "Offline — installation incomplete",
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+function recoveryUnavailableResponse() {
+  return new Response("<!doctype html><title>WordFan recovery unavailable</title><main><h1>Could not reach the live WordFan server</h1><p>Your local data was not changed. Reconnect and try the recovery link again.</p></main>", {
+    status: 503,
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
   });
 }

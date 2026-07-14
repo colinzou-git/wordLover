@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260713-1";
+} from "./fsrs-scheduler.js?v=20260714-2";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260713-1";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260713-1";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260714-2";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260714-2";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260713-1";
+} from "./ui-preferences.js?v=20260714-2";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260713-1";
+} from "./sync.js?v=20260714-2";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260713-1";
+} from "./study-one-more.js?v=20260714-2";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260713-1";
+} from "./goal-forecast.js?v=20260714-2";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,9 +48,9 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260713-1";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260713-1";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260713-1";
+} from "./tracks.js?v=20260714-2";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-2";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260714-2";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -64,7 +64,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v156";
+const SHELL_CACHE_NAME = "wordlover-shell-v158";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 7;
 const APP_KV_STORE = "kv";
@@ -81,26 +81,26 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260713-1",
-  "/dictionary-config.js?v=20260713-1",
-  "/dictionary-registry.js?v=20260713-1",
-  "/dictionary-selection.js?v=20260713-1",
-  "/dictionary-rendering.js?v=20260713-1",
-  "/full-dictionary.js?v=20260713-1",
-  "/online-dictionary-actions.js?v=20260713-1",
-  "/online-dictionary-provider.js?v=20260713-1",
-  "/youdao-provider.js?v=20260713-1",
-  "/persistence.js?v=20260713-1",
-  "/spelling.js?v=20260713-1",
-  "/ui-preferences.js?v=20260713-1",
-  "/review-state.js?v=20260713-1",
-  "/study-one-more.js?v=20260713-1",
-  "/sync.js?v=20260713-1",
-  "/fsrs-scheduler.js?v=20260713-1",
-  "/goal-forecast.js?v=20260713-1",
-  "/tracks.js?v=20260713-1",
-  "/styles.css?v=20260713-1",
-  "/wordlover-config.js?v=20260713-1",
+  "/app.js?v=20260714-2",
+  "/dictionary-config.js?v=20260714-2",
+  "/dictionary-registry.js?v=20260714-2",
+  "/dictionary-selection.js?v=20260714-2",
+  "/dictionary-rendering.js?v=20260714-2",
+  "/full-dictionary.js?v=20260714-2",
+  "/online-dictionary-actions.js?v=20260714-2",
+  "/online-dictionary-provider.js?v=20260714-2",
+  "/youdao-provider.js?v=20260714-2",
+  "/persistence.js?v=20260714-2",
+  "/spelling.js?v=20260714-2",
+  "/ui-preferences.js?v=20260714-2",
+  "/review-state.js?v=20260714-2",
+  "/study-one-more.js?v=20260714-2",
+  "/sync.js?v=20260714-2",
+  "/fsrs-scheduler.js?v=20260714-2",
+  "/goal-forecast.js?v=20260714-2",
+  "/tracks.js?v=20260714-2",
+  "/styles.css?v=20260714-2",
+  "/wordlover-config.js?v=20260714-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -116,7 +116,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260713-1",
+  "/automated-tests.js?v=20260714-2",
 ];
 
 let lastResults = null;
@@ -2412,8 +2412,8 @@ async function runMainAppStudySmoke() {
     if (!refreshedReviewText) throw new Error("Review schedule refresh did not leave a valid review button state.");
     const applyBeforeCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
     const applyBeforeCheckStatusText = frameDocument.querySelector("#updateStatus")?.textContent ?? "";
-    if (applyBeforeCheck?.status !== "no-update" || !/Check update first/i.test(applyBeforeCheckStatusText)) {
-      throw new Error(`Apply before Check update should show the no-update guidance: ${JSON.stringify({ applyBeforeCheck, applyBeforeCheckStatusText })}`);
+    if (applyBeforeCheck?.waitingWorker) {
+      throw new Error(`Apply before Check update should not invent a waiting worker: ${JSON.stringify({ applyBeforeCheck, applyBeforeCheckStatusText })}`);
     }
     const updateCheckResult = await frameWindow.WordLoverApp.checkForAppUpdate();
     const updateStatusText = frameDocument.querySelector("#updateStatus")?.textContent ?? "";
@@ -2425,8 +2425,8 @@ async function runMainAppStudySmoke() {
       throw new Error(`App update check did not expose the current shell version: ${JSON.stringify({ expectedAppVersion, updateCheckResult, updateStatusText })}`);
     }
     const applyAfterCheck = await frameWindow.WordLoverApp.applyAppUpdate({ reload: false });
-    if (!["reload", "skip-waiting"].includes(applyAfterCheck?.status)) {
-      throw new Error(`Apply after Check update should be actionable, not stuck: ${JSON.stringify({ applyAfterCheck, updateStatusText })}`);
+    if (updateCheckResult?.outcome === "up-to-date" && applyAfterCheck?.waitingWorker) {
+      throw new Error(`An up-to-date release must not expose a fake apply action: ${JSON.stringify({ applyAfterCheck, updateStatusText })}`);
     }
 
     return {

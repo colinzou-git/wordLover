@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260713-1";
+} from "./fsrs-scheduler.js?v=20260714-2";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260713-1";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260713-1";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260713-1";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-2";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-2";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-2";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260713-1";
+} from "./dictionary-rendering.js?v=20260714-2";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260713-1";
+} from "./persistence.js?v=20260714-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260713-1";
+} from "./spelling.js?v=20260714-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -46,16 +46,17 @@ import {
   normalizeFontScale,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260713-1";
+} from "./ui-preferences.js?v=20260714-2";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260713-1";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-2";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260713-1";
+} from "./review-state.js?v=20260714-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -76,7 +77,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260713-1";
+} from "./study-one-more.js?v=20260714-2";
 
 import {
   studyEventTrack,
@@ -88,11 +89,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260713-1";
+} from "./sync.js?v=20260714-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260713-1";
+} from "./goal-forecast.js?v=20260714-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -104,11 +105,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260713-1";
+} from "./tracks.js?v=20260714-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260713-1";
+} from "./full-dictionary.js?v=20260714-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -139,6 +140,7 @@ const fontZoomInButton = document.querySelector("#fontZoomIn");
 const fontZoomValue = document.querySelector("#fontZoomValue");
 const checkForUpdateButton = document.querySelector("#checkForUpdate");
 const applyUpdateButton = document.querySelector("#applyUpdate");
+const repairAppShellButton = document.querySelector("#repairAppShell");
 const exportStateMenuButton = document.querySelector("#exportStateMenu");
 const createCheckpointButton = document.querySelector("#createCheckpoint");
 const rollbackCheckpointButton = document.querySelector("#rollbackCheckpoint");
@@ -254,7 +256,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260713-1-v156";
+const APP_VERSION = "0.6.2-product.20260714-2-v158";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -262,7 +264,7 @@ const APP_VERSION = "0.6.2-product.20260713-1-v156";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v156";
+const SHELL_CACHE_VERSION = "wordlover-shell-v158";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -417,7 +419,7 @@ let lastSyncInfo = null;
 let driveSyncState = "idle";
 // Persisted summary of the last successful sync, shown in the Settings Sync block.
 let lastSyncSummary = null;
-let pendingAppReloadUrl = null;
+let updateManager = null;
 let googleClientIdOverride = "";
 let dataDecryptBlock = null;
 let dataDecryptWarningOpen = false;
@@ -7921,98 +7923,12 @@ function exportState() {
   URL.revokeObjectURL(url);
 }
 
-async function waitForRegistrationWaiting(registration, timeoutMs = 4000) {
-  if (registration.waiting) return registration.waiting;
-  const installing = registration.installing;
-  if (!installing) return null;
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      installing.removeEventListener("statechange", onChange);
-      resolve(registration.waiting ?? null);
-    }, timeoutMs);
-    const onChange = () => {
-      if (installing.state === "installed" || installing.state === "redundant") {
-        clearTimeout(timer);
-        installing.removeEventListener("statechange", onChange);
-        resolve(registration.waiting ?? null);
-      }
-    };
-    installing.addEventListener("statechange", onChange);
-  });
-}
-
 async function checkForAppUpdate() {
-  applyUpdateButton.disabled = true;
-  pendingAppReloadUrl = null;
-  if (!("serviceWorker" in navigator)) {
-    updateStatus.textContent = "Service worker is unavailable on this device.";
-    return { status: "unsupported", deviceVersion: APP_VERSION, serverVersion: null };
-  }
-  updateStatus.textContent = "Checking for an app update...";
-  let latestVersion = null;
-  let latestBuild = null;
-  let versionCheckError = null;
-  try {
-    const response = await fetch(`/app.js?update-check=${Date.now()}`, { cache: "reload" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const scriptText = await response.text();
-    latestVersion = scriptText.match(/const APP_VERSION = "([^"]+)"/)?.[1] ?? null;
-    latestBuild = scriptText.match(/const BUILD_STAMP = "([^"]+)"/)?.[1] ?? null;
-  } catch (error) {
-    versionCheckError = error instanceof Error ? error.message : String(error);
-  }
-  const registration = await navigator.serviceWorker.getRegistration() ?? await navigator.serviceWorker.register("/sw.js");
-  if (!registration) {
-    updateStatus.textContent = "Offline shell is not registered yet. Reopen the app and try again.";
-    return { status: "no-registration", deviceVersion: APP_VERSION, serverVersion: latestVersion };
-  }
-  try {
-    await registration.update();
-  } catch (error) {
-    const updateError = error instanceof Error ? error.message : String(error);
-    updateStatus.textContent = `Could not reach the app server for updates (${versionCheckError ?? updateError}). Keep the Windows server running, then open /?fresh=latest.`;
-    return { status: "network-error", deviceVersion: APP_VERSION, serverVersion: latestVersion, error: updateError };
-  }
-  const waitingWorker = await waitForRegistrationWaiting(registration);
-  const buildSuffix = (stamp) => (stamp && stamp !== "dev" ? ` build ${stamp}` : "");
-  const deviceLabel = `Device: ${APP_VERSION}${buildSuffix(BUILD_STAMP)}`;
-  const serverLabel = latestVersion ? `Server: ${latestVersion}${buildSuffix(latestBuild)}` : "Server: (unknown)";
-  if (waitingWorker) {
-    applyUpdateButton.disabled = false;
-    updateStatus.textContent = `${deviceLabel}. ${serverLabel}. Update is ready — tap Apply update.`;
-    return { status: "update-waiting", deviceVersion: APP_VERSION, serverVersion: latestVersion };
-  }
-  if (latestVersion && latestVersion !== APP_VERSION) {
-    pendingAppReloadUrl = `/?fresh=${encodeURIComponent(latestVersion)}-${Date.now()}`;
-    applyUpdateButton.disabled = false;
-    updateStatus.textContent = `${deviceLabel}. ${serverLabel}. Update available — tap Apply update.`;
-    return { status: "update-available", deviceVersion: APP_VERSION, serverVersion: latestVersion };
-  }
-  if (versionCheckError) {
-    updateStatus.textContent = `${deviceLabel}. Could not check server (${versionCheckError}). Keep the Windows server running, then open /?fresh=latest.`;
-    return { status: "check-error", deviceVersion: APP_VERSION, serverVersion: null, error: versionCheckError };
-  }
-  pendingAppReloadUrl = `/?fresh=${encodeURIComponent(latestVersion ?? APP_VERSION)}-${Date.now()}`;
-  applyUpdateButton.disabled = false;
-  updateStatus.textContent = `${deviceLabel}. ${serverLabel}. Up to date — tap Apply update to force-reload from server.`;
-  return { status: "up-to-date", deviceVersion: APP_VERSION, serverVersion: latestVersion };
+  return updateManager.check();
 }
 
 async function applyAppUpdate({ reload = true } = {}) {
-  const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
-  if (registration?.waiting) {
-    updateStatus.textContent = "Applying update...";
-    registration.waiting.postMessage({ type: "SKIP_WAITING" });
-    return { status: "skip-waiting" };
-  }
-  if (pendingAppReloadUrl) {
-    updateStatus.textContent = "Reloading the latest app shell. Local vocabulary and study data stay on this device.";
-    const reloadUrl = pendingAppReloadUrl;
-    if (reload) window.location.href = reloadUrl;
-    return { status: "reload", url: reloadUrl };
-  }
-  updateStatus.textContent = "No waiting update is available yet. Check update first.";
-  return { status: "no-update" };
+  return updateManager.apply({ reload });
 }
 
 async function runReviewAutomation() {
@@ -8145,7 +8061,17 @@ async function registerServiceWorker() {
     window.location.reload();
   });
   try {
-    const registration = await navigator.serviceWorker.register("/sw.js");
+    const registration = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+    let coldLaunch = true;
+    try {
+      coldLaunch = sessionStorage.getItem("wordfan-session-started") !== "1";
+      sessionStorage.setItem("wordfan-session-started", "1");
+    } catch { /* treat storage-restricted startup as a cold launch */ }
+    if (coldLaunch && registration.waiting) {
+      // A fully installed worker left waiting by the previous session is safe to
+      // activate before the user starts new study input on this cold launch.
+      registration.waiting.postMessage({ type: "SKIP_WAITING", nextLaunch: true });
+    }
     reflectRegistrationState(registration);
     registration.addEventListener("updatefound", () => {
       const incoming = registration.installing;
@@ -8342,6 +8268,7 @@ async function init() {
     .some((key) => params.has(key));
   if (!isAutomatedContext) {
     void showLoginGateIfNeeded();
+    window.setTimeout(() => void updateManager.check(), 3000);
   }
   const smokeTerm = params.get("q");
   if (canAutoLoad && !smokeTerm) {
@@ -8966,6 +8893,19 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+updateManager = createUpdateManager({
+  pageRelease: { appVersion: APP_VERSION, buildId: BUILD_STAMP, shellCache: SHELL_CACHE_VERSION },
+  persist: async () => {
+    await Promise.all([persistVocabulary(), persistStudyEvents(), persistSpelling(), persistSpellingEvents(), persistUiPreferences()]);
+  },
+  confirmRepair: () => Promise.resolve(window.confirm("Repair the WordFan app shell? This removes only WordFan service-worker caches. Vocabulary, study history, dictionaries, tracks, and preferences are preserved.")),
+  onState: (state) => {
+    updateStatus.textContent = formatUpdateStatus(state);
+    applyUpdateButton.disabled = !state.waitingWorker || state.phase === "activating";
+    repairAppShellButton.disabled = state.phase === "checking" || state.phase === "activating";
+  },
+});
+
 checkForUpdateButton.addEventListener("click", () => {
   void checkForAppUpdate();
 });
@@ -8973,6 +8913,20 @@ checkForUpdateButton.addEventListener("click", () => {
 applyUpdateButton.addEventListener("click", () => {
   void applyAppUpdate();
 });
+
+repairAppShellButton.addEventListener("click", () => {
+  void updateManager.repair();
+});
+
+window.addEventListener("online", () => void updateManager.check());
+let updateVisibilityCheckedAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - updateVisibilityCheckedAt > 30 * 60 * 1000) {
+    updateVisibilityCheckedAt = Date.now();
+    void updateManager.check();
+  }
+});
+window.setInterval(() => void updateManager.check(), 5 * 60 * 60 * 1000);
 
 exportStateMenuButton.addEventListener("click", () => {
   exportState();

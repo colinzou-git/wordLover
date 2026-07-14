@@ -55,11 +55,35 @@ const {
   renderPronunciationLine,
   renderStructuredDictionaryResult,
 } = await import("../public/dictionary-rendering.js");
+const {
+  compareReleaseState,
+  formatUpdateStatus,
+  shellCacheNamesToDelete,
+  validateReleaseManifest,
+} = await import("../public/update-manager.js");
 
 const tests = [];
 function test(name, fn) {
   tests.push({ name, fn });
 }
+
+const release = { schemaVersion: 1, appVersion: "v2", buildId: "build-2", commit: "dev", shellCache: "wordlover-shell-v2", userDataFormatVersion: "0.3", publishedAt: "dev" };
+test("release manifest validates required schema", () => {
+  assert.equal(validateReleaseManifest(release).appVersion, "v2");
+  assert.throws(() => validateReleaseManifest({ ...release, schemaVersion: 2 }), /Unsupported release schema/);
+  assert.throws(() => validateReleaseManifest({ ...release, appVersion: "" }), /appVersion is required/);
+});
+
+test("update comparison never claims current without live metadata", () => {
+  const state = { page: { appVersion: "v1", buildId: "b1", shellCache: "wordlover-shell-v1" }, server: null, network: { errorKind: "server-unreachable" } };
+  assert.equal(compareReleaseState(state), "server-unreachable");
+  assert.doesNotMatch(formatUpdateStatus(state), /up to date/i);
+  assert.doesNotMatch(formatUpdateStatus(state), /Windows server/i);
+});
+
+test("safe repair selects only WordFan shell caches", () => {
+  assert.deepEqual(shellCacheNamesToDelete(["wordlover-shell-v1", "unrelated", "wordlover-data"]), ["wordlover-shell-v1"]);
+});
 
 test("Dictionary configuration keeps production URLs by default", () => {
   const config = resolveDictionaryConfig("?fresh=test");

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/check-js-syntax.mjs && npm run test:unit && npm run validate:shell-assets && python scripts/check_versions.py",
+    "build": "node scripts/check-js-syntax.mjs && npm run test:unit && npm run validate:shell-assets && python scripts/check_versions.py && npm run validate:release",
     "preview": "python -m http.server 4173 --directory public",
     "test": "npm run build",
     "test:unit": "node scripts/test-regressions.mjs && node scripts/test-spelling-input.mjs && node scripts/test-online-dictionary.mjs && node scripts/test-youdao-provider.mjs",
@@ -11,7 +11,9 @@
     "test:browser": "python scripts/run-browser-tests.py",
     "ci:dictionary": "python scripts/create-ci-dictionary.py",
     "test:browser:ci": "python scripts/run-browser-tests-ci.py",
+    "test:upgrade": "python scripts/smoke-pwa-upgrade.py",
     "validate:shell-assets": "node scripts/validate-shell-assets.mjs",
+    "validate:release": "node scripts/validate-release-artifact.mjs public",
     "bump": "python scripts/bump-shell-version.py",
     "bump:sync": "python scripts/bump-shell-version.py --sync"
   },
