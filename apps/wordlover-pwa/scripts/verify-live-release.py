@@ -50,6 +50,9 @@ try:
         if status != 200: report["failureKind"] = "missing asset"; raise RuntimeError(path)
         if kind != "text/html" and html: report["failureKind"] = "HTML returned for executable asset"; raise RuntimeError(path)
         if kind not in mime.lower(): report["failureKind"] = "wrong MIME type"; raise RuntimeError(f"{path}: {mime}")
+        text = body.decode("utf-8", errors="ignore")
+        if path.startswith("/app.js") and (args.app_version not in text or args.build_id not in text): report["failureKind"] = "wrong app version or build stamp"; raise RuntimeError(path)
+        if path == "/sw.js" and (args.shell_cache not in text or args.build_id not in text): report["failureKind"] = "wrong service-worker cache or build stamp"; raise RuntimeError(path)
     report["success"] = True; report["failureKind"] = None
 except Exception as error:
     report["failureKind"] = report["failureKind"] or str(error)

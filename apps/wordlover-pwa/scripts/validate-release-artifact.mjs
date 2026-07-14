@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const site = resolve(process.argv[2] || "public");
@@ -48,10 +48,21 @@ for (const asset of assets) {
   assert.ok(existsSync(join(site, file)), `required shell asset missing: ${asset}`);
 }
 const versions = new Set();
-for (const name of ["index.html", "automated-tests.html", "app.js", "sw.js"]) {
+const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);
+const versionedSources = walk(site).filter((path) => [".js", ".html"].some((suffix) => path.endsWith(suffix)));
+for (const path of versionedSources) {
+  const name = path.slice(site.length + 1);
   for (const match of read(name).matchAll(/\?v=([0-9]{8}-[0-9]+)/g)) versions.add(match[1]);
 }
 assert.equal(versions.size, 1, `shell asset versions disagree: ${[...versions].join(", ")}`);
+const requiredPaths = new Set(assets.map((asset) => asset.split("?")[0]));
+for (const path of versionedSources.filter((candidate) => requiredPaths.has(`/${candidate.slice(site.length + 1)}`))) {
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/(?:from\s*|import\s*\()?['"](\.\/?[^'"]+\.js)\?v=[^'"]+['"]/g)) {
+    const imported = new URL(match[1], `https://fixture/${path.slice(site.length + 1)}`).pathname;
+    assert.ok(requiredPaths.has(imported), `required executable asset omitted from service-worker shell: ${imported}`);
+  }
+}
 const executableHandler = swText.slice(swText.indexOf("async function handleScriptOrStyle"), swText.indexOf("async function handleStaticAsset"));
 assert.ok(!executableHandler.includes("ignoreSearch"), "executable asset fallback must not ignore query strings");
 console.log(JSON.stringify({ appVersion, buildId: release.buildId, commit: release.commit, shellCache, assetVersion: [...versions][0], requiredAssets: assets.length }));

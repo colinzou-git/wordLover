@@ -1,5 +1,5 @@
-const CACHE_NAME = "wordlover-shell-v157";
-const APP_VERSION = "0.6.2-product.20260714-1-v157";
+const CACHE_NAME = "wordlover-shell-v158";
+const APP_VERSION = "0.6.2-product.20260714-2-v158";
 const BUILD_STAMP = "dev";
 // Staging cache for atomic installs: required assets are written here first and the
 // live cache is only updated once every one of them succeeds, so an interrupted or
@@ -9,27 +9,27 @@ const SHELL_CACHE_PREFIX = "wordlover-shell-";
 
 const REQUIRED_SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260714-1",
-  "/update-manager.js?v=20260714-1",
-  "/dictionary-config.js?v=20260714-1",
-  "/dictionary-registry.js?v=20260714-1",
-  "/dictionary-selection.js?v=20260714-1",
-  "/dictionary-rendering.js?v=20260714-1",
-  "/full-dictionary.js?v=20260714-1",
-  "/online-dictionary-actions.js?v=20260714-1",
-  "/online-dictionary-provider.js?v=20260714-1",
-  "/youdao-provider.js?v=20260714-1",
-  "/persistence.js?v=20260714-1",
-  "/spelling.js?v=20260714-1",
-  "/ui-preferences.js?v=20260714-1",
-  "/review-state.js?v=20260714-1",
-  "/study-one-more.js?v=20260714-1",
-  "/sync.js?v=20260714-1",
-  "/fsrs-scheduler.js?v=20260714-1",
-  "/goal-forecast.js?v=20260714-1",
-  "/tracks.js?v=20260714-1",
-  "/styles.css?v=20260714-1",
-  "/wordlover-config.js?v=20260714-1",
+  "/app.js?v=20260714-2",
+  "/update-manager.js?v=20260714-2",
+  "/dictionary-config.js?v=20260714-2",
+  "/dictionary-registry.js?v=20260714-2",
+  "/dictionary-selection.js?v=20260714-2",
+  "/dictionary-rendering.js?v=20260714-2",
+  "/full-dictionary.js?v=20260714-2",
+  "/online-dictionary-actions.js?v=20260714-2",
+  "/online-dictionary-provider.js?v=20260714-2",
+  "/youdao-provider.js?v=20260714-2",
+  "/persistence.js?v=20260714-2",
+  "/spelling.js?v=20260714-2",
+  "/ui-preferences.js?v=20260714-2",
+  "/review-state.js?v=20260714-2",
+  "/study-one-more.js?v=20260714-2",
+  "/sync.js?v=20260714-2",
+  "/fsrs-scheduler.js?v=20260714-2",
+  "/goal-forecast.js?v=20260714-2",
+  "/tracks.js?v=20260714-2",
+  "/styles.css?v=20260714-2",
+  "/wordlover-config.js?v=20260714-2",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -48,7 +48,7 @@ const OPTIONAL_SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260714-1",
+  "/automated-tests.js?v=20260714-2",
 ];
 
 // Bounded timeouts. The root cause of the offline hang is that an unbounded

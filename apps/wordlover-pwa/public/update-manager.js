@@ -17,8 +17,8 @@ export function compareReleaseState(state) {
   if (!state?.server) return state?.network?.errorKind === "release-invalid" ? "release-invalid" : "server-unreachable";
   if (state.phase === "activating") return "activating";
   if (state.phase === "downloading") return "downloading";
-  if (state.waitingWorker) return "update-ready";
   if (state.workerError) return state.workerError;
+  if (state.waitingWorker) return "update-ready";
   if (state.activeWorker && (state.activeWorker.appVersion !== state.page.appVersion || state.activeWorker.cacheName !== state.page.shellCache)) return "page-worker-mismatch";
   if (state.server.appVersion !== state.page.appVersion || state.server.shellCache !== state.page.shellCache || state.server.buildId !== state.page.buildId) return "update-available";
   return "up-to-date";
@@ -49,6 +49,7 @@ export function formatUpdateStatus(state) {
     "release-invalid": "The live release manifest is invalid. No update was attempted.",
     "worker-update-failed": "The live release was found, but the offline worker update failed.",
     "worker-install-failed": "The live release was found, but the new offline shell could not be installed.",
+    "activation-failed": "The downloaded update could not be activated. The current offline version remains available.",
     unsupported: "Service workers are unavailable on this device.",
   };
   return `${messages[outcome] ?? "Update state is unavailable."}\n${lines.join("\n")}`;
@@ -144,14 +145,31 @@ export function createUpdateManager(options) {
     const reg = await registration();
     if (!reg?.waiting) return publish();
     state.phase = "activating"; publish();
-    await persist();
-    const changed = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Service-worker activation timed out.")), timeoutMs);
-      navigator.serviceWorker.addEventListener("controllerchange", () => { clearTimeout(timer); resolve(); }, { once: true });
-    });
-    reg.waiting.postMessage({ type: "SKIP_WAITING", explicit: true });
-    await changed;
-    if (reload) location.reload();
+    try {
+      await persist();
+      const changed = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Service-worker activation timed out.")), timeoutMs);
+        navigator.serviceWorker.addEventListener("controllerchange", () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+      reg.waiting.postMessage({ type: "SKIP_WAITING", explicit: true });
+      await changed;
+      await collectWorkers(await registration());
+      if (state.server && state.activeWorker && (state.activeWorker.appVersion !== state.server.appVersion || state.activeWorker.cacheName !== state.server.shellCache)) {
+        throw new Error("The activated worker does not match the live release.");
+      }
+      state.phase = "reloading";
+      if (reload) {
+        const marker = `wordfan-update-reload:${state.server?.buildId ?? state.activeWorker?.buildId ?? "unknown"}`;
+        if (sessionStorage.getItem(marker) !== "1") {
+          sessionStorage.setItem(marker, "1");
+          location.reload();
+        }
+      }
+    } catch (error) {
+      state.phase = "error";
+      state.workerError = "activation-failed";
+      state.network.message = error?.message ?? String(error);
+    }
     return publish();
   }
 

@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260714-1";
+} from "./fsrs-scheduler.js?v=20260714-2";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-1";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-1";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-1";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-2";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-2";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-2";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260714-1";
+} from "./dictionary-rendering.js?v=20260714-2";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260714-1";
+} from "./persistence.js?v=20260714-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260714-1";
+} from "./spelling.js?v=20260714-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -46,17 +46,17 @@ import {
   normalizeFontScale,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260714-1";
+} from "./ui-preferences.js?v=20260714-2";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-1";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-1";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-2";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260714-1";
+} from "./review-state.js?v=20260714-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -77,7 +77,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260714-1";
+} from "./study-one-more.js?v=20260714-2";
 
 import {
   studyEventTrack,
@@ -89,11 +89,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-1";
+} from "./sync.js?v=20260714-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260714-1";
+} from "./goal-forecast.js?v=20260714-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -105,11 +105,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-1";
+} from "./tracks.js?v=20260714-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260714-1";
+} from "./full-dictionary.js?v=20260714-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -256,7 +256,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260714-1-v157";
+const APP_VERSION = "0.6.2-product.20260714-2-v158";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -264,7 +264,7 @@ const APP_VERSION = "0.6.2-product.20260714-1-v157";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v157";
+const SHELL_CACHE_VERSION = "wordlover-shell-v158";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -8062,6 +8062,16 @@ async function registerServiceWorker() {
   });
   try {
     const registration = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+    let coldLaunch = true;
+    try {
+      coldLaunch = sessionStorage.getItem("wordfan-session-started") !== "1";
+      sessionStorage.setItem("wordfan-session-started", "1");
+    } catch { /* treat storage-restricted startup as a cold launch */ }
+    if (coldLaunch && registration.waiting) {
+      // A fully installed worker left waiting by the previous session is safe to
+      // activate before the user starts new study input on this cold launch.
+      registration.waiting.postMessage({ type: "SKIP_WAITING", nextLaunch: true });
+    }
     reflectRegistrationState(registration);
     registration.addEventListener("updatefound", () => {
       const incoming = registration.installing;
@@ -8258,6 +8268,7 @@ async function init() {
     .some((key) => params.has(key));
   if (!isAutomatedContext) {
     void showLoginGateIfNeeded();
+    window.setTimeout(() => void updateManager.check(), 3000);
   }
   const smokeTerm = params.get("q");
   if (canAutoLoad && !smokeTerm) {

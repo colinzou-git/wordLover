@@ -27,7 +27,7 @@ skipped; run `npm run bump` (in `apps/wordlover-pwa/`) and push to fix it.
 
 ## Confirming the exact live release
 
-`https://wordfan.app/release.json` is the canonical production identity. It records
+[`release.json`](https://wordfan.app/release.json) is the canonical production identity. It records
 the full source commit, app version, build ID, shell cache, user-data format, and
 publication time. The file is network-only in the service worker, so it cannot be
 silently answered by an old offline shell.
@@ -43,6 +43,14 @@ The verifier also checks the `gh-pages` orphan commit and its `release.json`
 separately. This distinguishes branch publication failures from Pages propagation,
 custom-domain DNS/TLS failures, stale releases, wrong MIME types, and missing
 assets.
+
+Before deployment, the independent `upgrade-regression` job uses one persistent
+Chromium profile and a hermetic two-release server to install N−1, seed all
+representative user stores, switch the same origin to N, and exercise explicit
+apply, cold-launch activation, partial install failure, server outage/retry, exact
+asset versions, truthful `fresh` recovery, and safe repair. It uses real service
+workers, Cache Storage, and IndexedDB; it does not depend on production or Git
+history.
 
 ## BUILD_STAMP
 

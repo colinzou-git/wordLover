@@ -464,9 +464,27 @@ jobs:
           path: apps/wordlover-pwa/test-results/
           if-no-files-found: ignore
 
+  upgrade-regression:
+    name: Real PWA N-1 to N upgrade regression
+    needs: static-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - run: python apps/wordlover-pwa/scripts/smoke-pwa-upgrade.py --report apps/wordlover-pwa/test-results/pwa-upgrade-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pwa-upgrade-results
+          path: apps/wordlover-pwa/test-results/pwa-upgrade-report.json
+          if-no-files-found: warn
+
   deploy:
     name: Deploy to GitHub Pages (gh-pages)
-    needs: [static-checks, smoke]
+    needs: [static-checks, smoke, upgrade-regression]
     # Only after checks pass, only for main (push or manual re-deploy).
     if: >-
       github.ref == 'refs/heads/main' &&
