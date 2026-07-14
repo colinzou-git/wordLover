@@ -1,0 +1,12 @@
+{
+  "name": "wordfan-youdao-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs && node scripts/check-no-secrets.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.24.3"
+  }
+}

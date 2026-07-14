@@ -9,9 +9,12 @@ import {
 import {
   buildYoudaoLookupUrl,
   canLookupYoudaoTerm,
+  createYoudaoProvider,
   normalizeYoudaoTerm,
+  YoudaoProviderError,
   youdaoProvider,
 } from "../public/youdao-provider.js";
+import { validateYoudaoEntry } from "../public/youdao-entry-schema.js";
 import {
   DEFAULT_ONLINE_DICTIONARY_MODE,
   normalizeOnlineDictionaryMode,
@@ -44,6 +47,32 @@ assert.equal(normalizeOnlineDictionaryMode("automatic"), "automatic");
 assert.equal(normalizeOnlineDictionaryMode("unexpected"), "manual");
 assert.equal(normalizeUiPreferences({}).onlineDictionaryMode, "manual");
 assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "automatic" }).onlineDictionaryMode, "automatic");
+
+const fixture = {
+  schemaVersion: 1, provider: { id: "youdao", label: "Youdao" }, normalizedTerm: "charge", headword: "charge",
+  sourceUrl: "https://m.youdao.com/dict?le=eng&q=charge", retrievedAt: "2026-07-14T00:00:00Z", parserVersion: "fixture-v1",
+  phonetics: { us: "tʃɑrdʒ" }, chineseDefinitions: [{ text: "费用", partOfSpeech: "n." }, { text: "指控", domain: "law" }], englishDefinitions: [],
+  wordForms: [{ name: "past", value: "charged" }], phrases: [{ phrase: "in charge", meanings: ["负责"] }],
+  examples: [{ sentence: "They charge a fee.", translation: "他们收取费用。" }], synonyms: ["cost"], antonyms: [], domains: ["law"],
+};
+assert.equal(validateYoudaoEntry({ ...fixture, unknownFutureField: true }).headword, "charge");
+assert.throws(() => validateYoudaoEntry({ ...fixture, schemaVersion: 2 }), /Unsupported/);
+assert.throws(() => validateYoudaoEntry({ ...fixture, chineseDefinitions: [], englishDefinitions: [] }), /at least one definition/);
+assert.doesNotMatch(JSON.stringify(validateYoudaoEntry({ ...fixture, chineseDefinitions: [{ text: "<b>费用</b>" }] })), /<b>/);
+
+const integrated = createYoudaoProvider({ endpoint: "https://gateway.example", fetchImpl: async (url, init) => {
+  assert.equal(url.searchParams.get("term"), "it's fine"); assert.equal(url.searchParams.get("refresh"), "1"); assert.ok(init.signal); return Response.json({ ...fixture, normalizedTerm: "it's fine", headword: "it's fine" });
+} });
+assert.equal(integrated.canLookupInApp, true);
+assert.equal((await integrated.lookup({ term: "It’s fine", signal: new AbortController().signal, forceRefresh: true })).normalizedTerm, "it's fine");
+const abortController = new AbortController(); abortController.abort();
+const aborting = createYoudaoProvider({ endpoint: "https://gateway.example", fetchImpl: async (_url, { signal }) => { throw signal.reason; } });
+await assert.rejects(aborting.lookup({ term: "charge", signal: abortController.signal }), (error) => error.name === "AbortError");
+const disabledIntegrated = createYoudaoProvider();
+await assert.rejects(disabledIntegrated.lookup({ term: "charge" }), (error) => error instanceof YoudaoProviderError && error.category === "configuration_disabled");
+const malformedIntegrated = createYoudaoProvider({ endpoint: "https://gateway.example", fetchImpl: async () => Response.json({ nope: true }) });
+await assert.rejects(malformedIntegrated.lookup({ term: "charge" }), (error) => error.category === "malformed_response");
+assert.equal(disabledIntegrated.buildExternalUrl("charge"), "https://m.youdao.com/dict?le=eng&q=charge");
 
 const actions = await import("../public/online-dictionary-actions.js");
 const manualHtml = actions.renderOnlineDictionaryActions("take off", { mode: "manual", context: "test", online: true });

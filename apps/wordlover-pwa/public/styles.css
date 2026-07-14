@@ -1796,6 +1796,35 @@ li button {
   overflow-wrap: anywhere;
 }
 
+.online-dictionary-actions > ul,
+.online-dictionary-actions > p {
+  flex: 1 0 100%;
+  margin: 2px 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.online-dictionary-actions > ul {
+  padding-left: 20px;
+}
+
+.youdao-headword {
+  font-size: 1rem;
+}
+
+.youdao-pos,
+.youdao-domain {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.online-dictionary-actions button:focus-visible,
+.online-dictionary-actions a:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
+}
+
 @media (max-width: 520px) {
   .online-dictionary-actions {
     align-items: flex-start;

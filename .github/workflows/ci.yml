@@ -26,6 +26,10 @@ jobs:
         working-directory: apps/wordlover-pwa
         run: node scripts/test-youdao-provider.mjs
 
+      - name: Test secure Youdao gateway boundary
+        working-directory: apps/youdao-gateway
+        run: npm test
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
