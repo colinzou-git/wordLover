@@ -19,10 +19,17 @@ parser.add_argument("--report", required=True)
 args = parser.parse_args()
 report = {"expected": vars(args), "observed": {"release": None, "assets": []}, "attempts": 0, "startedAt": now(), "completedAt": None, "success": False, "failureKind": None}
 
-def fetch(path):
-    request = urllib.request.Request(args.base.rstrip("/") + path, headers={"Cache-Control": "no-cache", "User-Agent": "WordFan-deploy-verifier"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.status, response.headers.get("Content-Type", ""), response.read()
+def fetch(path, retries=1):
+    last_error = None
+    for attempt in range(1, retries + 1):
+        request = urllib.request.Request(args.base.rstrip("/") + path, headers={"Cache-Control": "no-cache", "User-Agent": "WordFan-deploy-verifier"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.status, response.headers.get("Content-Type", ""), response.read()
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
+            last_error = error
+            if attempt < retries: time.sleep(2 * attempt)
+    raise last_error
 
 try:
     release = None
@@ -43,7 +50,7 @@ try:
         if release.get(key) != expected: report["failureKind"] = f"wrong {key}"; raise RuntimeError(report["failureKind"])
     checks = [("/", "text/html"), (f"/app.js?v={args.asset_version}", "javascript"), ("/sw.js", "javascript"), (f"/update-manager.js?v={args.asset_version}", "javascript"), (f"/styles.css?v={args.asset_version}", "text/css"), ("/manifest.webmanifest", "manifest"), ("/vendor/sql-wasm.wasm", "wasm")]
     for path, kind in checks:
-        status, mime, body = fetch(path + ("&" if "?" in path else "?") + f"deploy={args.commit}")
+        status, mime, body = fetch(path + ("&" if "?" in path else "?") + f"deploy={args.commit}", retries=3)
         html = body[:100].lstrip().lower().startswith((b"<!doctype html", b"<html"))
         item = {"path": path, "status": status, "contentType": mime, "bytes": len(body), "html": html}
         report["observed"]["assets"].append(item)
