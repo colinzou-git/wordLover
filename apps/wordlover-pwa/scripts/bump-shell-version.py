@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1] / "public"
 
 APP_JS = ROOT / "app.js"
 CACHE_NAME_FILES = [APP_JS, ROOT / "sw.js", ROOT / "automated-tests.js"]
+RELEASE_JSON = ROOT / "release.json"
 
 # A versioned shell source is any top-level public .js/.html that carries a ?v= ref.
 VERSIONED_SUFFIXES = {".js", ".html"}
@@ -87,12 +89,20 @@ def apply(date: str, sub: int, release: int) -> list[str]:
     for path in CACHE_NAME_FILES:
         original = read(path)
         updated = CACHE_NAME_RE.sub(rf"\g<1>{release}", original)
-        if path == APP_JS:
+        if path in (APP_JS, ROOT / "sw.js"):
             updated = APP_VERSION_RE.sub(rf"\g<1>{stamp}-v{release}\g<5>", updated)
         if updated != original and path.name not in changed:
             changed.append(path.name)
         if updated != original:
             write(path, updated)
+
+    manifest = json.loads(read(RELEASE_JSON))
+    app_version = APP_VERSION_RE.search(read(APP_JS)).group(0).split('"')[1]
+    manifest.update({"appVersion": app_version, "shellCache": f"wordlover-shell-v{release}"})
+    rendered = json.dumps(manifest, indent=2) + "\n"
+    if rendered != read(RELEASE_JSON):
+        write(RELEASE_JSON, rendered)
+        changed.append(RELEASE_JSON.name)
 
     return sorted(set(changed))
 

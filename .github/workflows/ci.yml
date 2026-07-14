@@ -474,8 +474,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      app_version: ${{ steps.release.outputs.app_version }}
+      build_id: ${{ steps.release.outputs.build_id }}
+      commit: ${{ steps.release.outputs.commit }}
+      shell_cache: ${{ steps.release.outputs.shell_cache }}
+      asset_version: ${{ steps.release.outputs.asset_version }}
+      gh_pages_commit: ${{ steps.publish.outputs.gh_pages_commit }}
     concurrency:
-      group: deploy-gh-pages
+      group: deploy-wordfan-production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -547,24 +554,23 @@ jobs:
           done
           echo "Dictionary matches manifest ($(jq -r .dictionaryDataVersion "$MAN"))."
 
-      - name: Stamp build identity (date-time-commit) into the deployed shell
+      - name: Stamp and validate canonical release identity
+        id: release
         run: |
           set -euo pipefail
           SITE="$RUNNER_TEMP/site"
           STAMP="$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA:0:7}"
-          python - "$SITE/app.js" "$STAMP" <<'PY'
-          import re, sys
-          path, stamp = sys.argv[1], sys.argv[2]
-          text = open(path, encoding="utf-8").read()
-          new, n = re.subn(r'const BUILD_STAMP = "[^"]*";', f'const BUILD_STAMP = "{stamp}";', text, count=1)
-          if n != 1:
-              raise SystemExit(f"Expected exactly one BUILD_STAMP marker in {path}, found {n}")
-          with open(path, "w", encoding="utf-8", newline="") as handle:
-              handle.write(new)
-          print(f"Stamped BUILD_STAMP = {stamp}")
-          PY
+          PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          META="$(node apps/wordlover-pwa/scripts/validate-release-artifact.mjs "$SITE" "commit=$GITHUB_SHA" "buildId=$STAMP" "publishedAt=$PUBLISHED_AT")"
+          echo "$META" | jq .
+          echo "app_version=$(echo "$META" | jq -r .appVersion)" >> "$GITHUB_OUTPUT"
+          echo "build_id=$(echo "$META" | jq -r .buildId)" >> "$GITHUB_OUTPUT"
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "shell_cache=$(echo "$META" | jq -r .shellCache)" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$(echo "$META" | jq -r .assetVersion)" >> "$GITHUB_OUTPUT"
 
       - name: Publish to gh-pages
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -577,11 +583,45 @@ jobs:
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -q -m "Deploy WordFan from ${GITHUB_SHA:0:7}"
+          echo "gh_pages_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           # Single orphan commit (force) prevents dictionary history from accumulating.
           git push -q --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             gh-pages
           echo "Pushed to gh-pages — GitHub Pages will rebuild https://$(cat CNAME)/"
+
+  verify-live-release:
+    name: Verify live WordFan release
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: ${{ always() && needs.deploy.result == 'success' }}
+    concurrency:
+      group: deploy-wordfan-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify gh-pages branch release identity
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin gh-pages:refs/remotes/origin/gh-pages
+          test "$(git rev-parse origin/gh-pages)" = "${{ needs.deploy.outputs.gh_pages_commit }}"
+          test "$(git show origin/gh-pages:release.json | jq -r .commit)" = "${{ needs.deploy.outputs.commit }}"
+      - name: Poll custom domain and validate critical live assets
+        run: |
+          python apps/wordlover-pwa/scripts/verify-live-release.py \
+            --commit "${{ needs.deploy.outputs.commit }}" \
+            --app-version "${{ needs.deploy.outputs.app_version }}" \
+            --build-id "${{ needs.deploy.outputs.build_id }}" \
+            --shell-cache "${{ needs.deploy.outputs.shell_cache }}" \
+            --asset-version "${{ needs.deploy.outputs.asset_version }}" \
+            --report apps/wordlover-pwa/test-results/deployment-verification.json
+      - name: Upload deployment verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-verification
+          path: apps/wordlover-pwa/test-results/deployment-verification.json
+          if-no-files-found: warn
 
   full-dictionary-artifact:
     name: Build full ECDICT dictionary artifact

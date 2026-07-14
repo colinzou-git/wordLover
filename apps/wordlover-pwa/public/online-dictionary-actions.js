@@ -1,8 +1,8 @@
 import {
   getOnlineDictionaryProvider,
   registerOnlineDictionaryProvider,
-} from "./online-dictionary-provider.js?v=20260713-1";
-import { youdaoProvider } from "./youdao-provider.js?v=20260713-1";
+} from "./online-dictionary-provider.js?v=20260714-1";
+import { youdaoProvider } from "./youdao-provider.js?v=20260714-1";
 
 if (!getOnlineDictionaryProvider(youdaoProvider.id)) registerOnlineDictionaryProvider(youdaoProvider);
 

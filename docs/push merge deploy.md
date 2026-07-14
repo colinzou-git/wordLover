@@ -25,18 +25,35 @@ version — there is nothing new to cache-bust. If you ever commit on a box with
 the hook and the markers drift, CI's `check_versions.py` goes red and the deploy is
 skipped; run `npm run bump` (in `apps/wordlover-pwa/`) and push to fix it.
 
-## Confirming the *exact* commit that is live (BUILD_STAMP)
+## Confirming the exact live release
 
-`APP_VERSION` identifies the shell (and drives the "Apply update" prompt), but it
+`https://wordfan.app/release.json` is the canonical production identity. It records
+the full source commit, app version, build ID, shell cache, user-data format, and
+publication time. The file is network-only in the service worker, so it cannot be
+silently answered by an old offline shell.
+
+After publishing `gh-pages`, CI polls the custom-domain manifest until its full
+commit matches the deployment, then checks the MIME type and non-HTML content of
+the document, versioned application module, update manager, service worker, CSS,
+web manifest, and required WASM. Deployment is not considered successful until
+the `verify-live-release` job passes. Its `deployment-verification` artifact
+records expected/observed identities, attempts, assets, and a categorized failure.
+
+The verifier also checks the `gh-pages` orphan commit and its `release.json`
+separately. This distinguishes branch publication failures from Pages propagation,
+custom-domain DNS/TLS failures, stale releases, wrong MIME types, and missing
+assets.
+
+## BUILD_STAMP
+
+`APP_VERSION` identifies the shell, but it
 only moves when the shell changes. To verify a specific commit actually deployed,
 the **deploy job stamps `BUILD_STAMP`** in the published `app.js` with
 `<YYYYMMDD>-<HHMM>-<shortsha>` (UTC; the commit SHA only exists after the commit, so
 this can only happen at deploy time, not in the pre-commit hook). The menu shows it
 next to the version (`… · 20260623-1807-50a32ac`), and **Check for update** prints
-`Device: … build <stamp>` vs `Server: … build <stamp>` — the *Server* line is
-fetched live (cache-bypassing), so its short SHA is the commit currently on
-`wordfan.app`. Match it against `git rev-parse --short HEAD` on `main` to confirm
-the latest push is live.
+separate page, active-worker, waiting-worker, and live-server identities. The live
+identity comes from the cache-bypassing release manifest.
 
 Locally `BUILD_STAMP` stays `"dev"` and is hidden, so a dev build is never mistaken
 for a deployed one. The manual `deploy-github-pages.ps1` stamps the same way (local
@@ -57,8 +74,12 @@ What the job does:
    manifest, validates all full shards, and verifies slim SQLite/zstd hashes.
    If no package exists, deployment continues because dictionary switching is
    rollback-safe and keeps ECDICT active.
-5. Force-pushes a single orphan commit to `gh-pages` (keeps the branch from
+5. Stamps and validates `release.json`, `app.js`, `sw.js`, shell cache names, and
+   versioned asset references as one release artifact.
+6. Force-pushes a single orphan commit to `gh-pages` (keeps the branch from
    accumulating 32 MB blobs in history).
+7. Verifies the orphan branch and the actual custom-domain responses before the
+   workflow succeeds.
 
 Re-deploy without a new commit: GitHub → Actions → CI → **Run workflow** on `main`
 (the job also accepts `workflow_dispatch`).

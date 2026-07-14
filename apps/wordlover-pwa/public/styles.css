@@ -580,6 +580,13 @@ body[data-ai-chat-open="true"] {
   overflow: auto;
 }
 
+.update-diagnostics {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
 .ai-chat-loading {
   padding: 20px;
   text-align: center;

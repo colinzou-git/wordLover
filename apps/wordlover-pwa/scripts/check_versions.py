@@ -10,6 +10,7 @@ Usage:  python apps/wordlover-pwa/scripts/check_versions.py
 from __future__ import annotations
 
 import re
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ TESTS_JS = ROOT / "automated-tests.js"
 INDEX_HTML = ROOT / "index.html"
 TESTS_HTML = ROOT / "automated-tests.html"
 CORE_FILES = [APP_JS, SW_JS, TESTS_JS, INDEX_HTML, TESTS_HTML]
+RELEASE_JSON = ROOT / "release.json"
 
 VERSIONED_SUFFIXES = {".js", ".html"}
 CACHE_NAME_RE = re.compile(r'(?:CACHE_NAME|SHELL_CACHE_VERSION|SHELL_CACHE_NAME)\s*=\s*"([^"]+)"')
@@ -98,6 +100,20 @@ def main() -> int:
             failures.append(
                 f"APP_VERSION release v{app_release.group(1)} does not match shell cache release v{cache_release.group(1)}"
             )
+
+    sw_versions = APP_VERSION_RE.findall(read(SW_JS))
+    if len(sw_versions) != 1 or (app_versions and sw_versions[0] != app_versions[0]):
+        failures.append(f"sw.js APP_VERSION does not match app.js: {sw_versions}")
+    try:
+        release = json.loads(read(RELEASE_JSON))
+        if app_versions and release.get("appVersion") != app_versions[0]:
+            failures.append("release.json appVersion does not match app.js")
+        if len(all_cache_names) == 1 and release.get("shellCache") != next(iter(all_cache_names)):
+            failures.append("release.json shellCache does not match shell constants")
+        if release.get("schemaVersion") != 1:
+            failures.append("release.json schemaVersion must be 1")
+    except (OSError, json.JSONDecodeError) as error:
+        failures.append(f"release.json is invalid: {error}")
 
     fsrs_import_versions: dict[str, set[str]] = {}
     for path in asset_files:
