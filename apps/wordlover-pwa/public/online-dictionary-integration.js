@@ -1,8 +1,8 @@
-import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260714-7";
-import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260714-7";
-import { youdaoProvider } from "./youdao-provider.js?v=20260714-7";
-import { createOnlineDictionarySupplementLifecycle } from "./online-dictionary-supplement-lifecycle.js?v=20260714-7";
-import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-7";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260714-8";
+import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260714-8";
+import { youdaoProvider } from "./youdao-provider.js?v=20260714-8";
+import { createOnlineDictionarySupplementLifecycle } from "./online-dictionary-supplement-lifecycle.js?v=20260714-8";
+import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-8";
 
 const controllers = new WeakMap();
 function hydrate(element) {

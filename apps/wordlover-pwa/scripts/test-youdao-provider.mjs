@@ -41,11 +41,11 @@ assert.equal(buildYoudaoLookupUrl("charge"), "https://m.youdao.com/dict?le=eng&q
 assert.equal(buildYoudaoLookupUrl("it’s fine"), "https://m.youdao.com/dict?le=eng&q=it's%20fine");
 assert.equal(buildYoudaoLookupUrl("take off"), "https://m.youdao.com/dict?le=eng&q=take%20off");
 
-assert.equal(DEFAULT_ONLINE_DICTIONARY_MODE, "manual");
+assert.equal(DEFAULT_ONLINE_DICTIONARY_MODE, "automatic");
 assert.equal(normalizeOnlineDictionaryMode("off"), "off");
 assert.equal(normalizeOnlineDictionaryMode("automatic"), "automatic");
-assert.equal(normalizeOnlineDictionaryMode("unexpected"), "manual");
-assert.equal(normalizeUiPreferences({}).onlineDictionaryMode, "manual");
+assert.equal(normalizeOnlineDictionaryMode("unexpected"), "automatic");
+assert.equal(normalizeUiPreferences({}).onlineDictionaryMode, "automatic");
 assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "automatic" }).onlineDictionaryMode, "automatic");
 
 const fixture = {

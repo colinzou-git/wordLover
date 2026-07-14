@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260714-7";
+} from "./fsrs-scheduler.js?v=20260714-8";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-7";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-7";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-7";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260714-8";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260714-8";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260714-8";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260714-7";
+} from "./dictionary-rendering.js?v=20260714-8";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260714-7";
+} from "./persistence.js?v=20260714-8";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260714-7";
+} from "./spelling.js?v=20260714-8";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -46,21 +46,25 @@ import {
   normalizeFontScale,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260714-7";
+} from "./ui-preferences.js?v=20260714-8";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-7";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-7";
-import { createDictionarySupplementStore, normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260714-7";
-import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260714-7";
-import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260714-7";
-import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260714-7";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260714-8";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260714-8";
+import {
+  createDictionarySupplementStore,
+  mergeDictionarySupplementRecords,
+  normalizeSupplementTerm,
+} from "./dictionary-supplements.js?v=20260714-8";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260714-8";
+import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260714-8";
+import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260714-8";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260714-7";
+} from "./review-state.js?v=20260714-8";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -81,7 +85,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260714-7";
+} from "./study-one-more.js?v=20260714-8";
 
 import {
   studyEventTrack,
@@ -93,11 +97,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-7";
+} from "./sync.js?v=20260714-8";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260714-7";
+} from "./goal-forecast.js?v=20260714-8";
 
 import {
   DEFAULT_TRACK_ID,
@@ -109,11 +113,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-7";
+} from "./tracks.js?v=20260714-8";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260714-7";
+} from "./full-dictionary.js?v=20260714-8";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -150,6 +154,7 @@ const createCheckpointButton = document.querySelector("#createCheckpoint");
 const rollbackCheckpointButton = document.querySelector("#rollbackCheckpoint");
 const deleteLocalDataButton = document.querySelector("#deleteLocalData");
 const exportUserDataButton = document.querySelector("#exportUserData");
+const exportEnhancedDictionaryButton = document.querySelector("#exportEnhancedDictionary");
 const importUserDataButton = document.querySelector("#importUserData");
 const importUserDataFileInput = document.querySelector("#importUserDataFile");
 const learningTrackSelect = document.querySelector("#learningTrackSelect");
@@ -261,7 +266,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260714-7-v163";
+const APP_VERSION = "0.6.2-product.20260714-8-v164";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -269,7 +274,7 @@ const APP_VERSION = "0.6.2-product.20260714-7-v163";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.3";
-const SHELL_CACHE_VERSION = "wordlover-shell-v163";
+const SHELL_CACHE_VERSION = "wordlover-shell-v164";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -6354,6 +6359,11 @@ async function applyLearningTracksBackup(backup, options = {}) {
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("Learning-tracks backup transaction aborted."));
   });
+  const localSupplements = await dictionarySupplements.list({ includeDeleted: true });
+  const supplementMerge = mergeDictionarySupplementRecords(localSupplements, validated.dictionarySupplements, { validateEntry: validateYoudaoEntry });
+  for (const record of supplementMerge.records) {
+    await saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
+  }
   if (allowDuringDecryptBlock) clearDataDecryptBlock();
 
   userDataRoot = registry;
@@ -6372,7 +6382,12 @@ async function applyLearningTracksBackup(backup, options = {}) {
   renderAllTrackViews();
   renderMetrics();
   renderAppMenu();
-  return { trackCount: Object.keys(registryTracks).length, activeTrackId: activeLearningTrackId };
+  return {
+    trackCount: Object.keys(registryTracks).length,
+    activeTrackId: activeLearningTrackId,
+    supplementCount: supplementMerge.records.filter((record) => record.deleted !== true).length,
+    skippedSupplementCount: supplementMerge.skipped,
+  };
 }
 
 async function listCheckpoints() {
@@ -6982,11 +6997,15 @@ async function loadActiveTrackIntoMemory({ rebuildReviewState = false } = {}) {
 async function buildLearningTracksBackup() {
   const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
   const trackData = await collectAllTracksData();
+  const portableSupplements = CONFIG.youdaoPortabilityAllowed === true
+    ? await dictionarySupplements.list({ includeDeleted: true })
+    : [];
   return buildBackup({
     activeTrackId: activeLearningTrackId,
     tracks: root.tracks,
     globalSettings: { theme, fontScale, onReturnAction, speakOnReturn, uiPreferences: currentUiPreferences() },
     trackData,
+    dictionarySupplements: portableSupplements,
   }, nowIso());
 }
 
@@ -7003,6 +7022,28 @@ async function exportUserData() {
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   return { backup, fileName, trackCount: Object.keys(backup.tracks).length };
+}
+
+async function exportEnhancedDictionary() {
+  if (CONFIG.youdaoPortabilityAllowed !== true) throw new Error("Youdao portability is disabled.");
+  const supplements = await dictionarySupplements.list();
+  const payload = {
+    format: "wordfan-personal-dictionary-supplements-v1",
+    exportedAt: nowIso(),
+    description: "Personal saved definitions with original provider attribution; not a WordFan dictionary package.",
+    entries: supplements,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const fileName = `wordfan-personal-dictionary-${localDateKey()}.json`;
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { fileName, entryCount: supplements.length };
 }
 
 async function writeImportedTracksAtomically(imported, registry) {
@@ -7072,6 +7113,11 @@ async function importUserData(file) {
   const root = userDataRoot ?? migrateLegacyToRoot(nowIso());
   const { registry, imported, newActiveTrackId } = planImport(root, backup, today, newTrackId);
   await writeImportedTracksAtomically(imported, registry);
+  const localSupplements = await dictionarySupplements.list({ includeDeleted: true });
+  const supplementMerge = mergeDictionarySupplementRecords(localSupplements, backup.dictionarySupplements, { validateEntry: validateYoudaoEntry });
+  for (const record of supplementMerge.records) {
+    await saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
+  }
   // Switch to the imported active track and load it into memory.
   userDataRoot = registry;
   activeLearningTrackId = registry.activeTrackId;
@@ -7085,6 +7131,8 @@ async function importUserData(file) {
     activeTrackId: newActiveTrackId,
     activeTrackName: registry.tracks[newActiveTrackId]?.name ?? newActiveTrackId,
     legacy: backup.importNote === "legacy-wordlover-snapshot",
+    supplementCount: supplementMerge.records.filter((record) => record.deleted !== true).length,
+    skippedSupplementCount: supplementMerge.skipped,
   };
 }
 
@@ -8242,6 +8290,14 @@ async function init() {
   applyFontScale(fontScale);
   const savedUiPreferences = await loadValue("uiPreferences", {});
   applyUiPreferences(savedUiPreferences);
+  // One-time rollout migration: earlier builds defaulted Youdao to manual links. Move existing
+  // installs to automatic lookup now that the VPS endpoint is live; a later explicit user choice
+  // remains untouched because this marker is persisted after the migration.
+  if (CONFIG.youdaoGatewayUrl && !(await loadValue("youdaoAutomaticLookupRolledOut", false))) {
+    onlineDictionaryMode = "automatic";
+    await persistUiPreferences();
+    await saveValue("youdaoAutomaticLookupRolledOut", true);
+  }
   debugMode = await loadValue("debugMode", debugMode);
   googleClientIdOverride = String(await loadValue("googleClientIdOverride", "") ?? "").trim();
   geminiApiKeyOverride = String(await loadValue("geminiApiKeyOverride", "") ?? "").trim();
@@ -9070,6 +9126,15 @@ exportUserDataButton?.addEventListener("click", async () => {
     setLearningTracksStatus(`Exported ${result.trackCount} track(s) to ${result.fileName}.`);
   } catch (error) {
     setLearningTracksStatus(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+});
+
+exportEnhancedDictionaryButton?.addEventListener("click", async () => {
+  try {
+    const result = await exportEnhancedDictionary();
+    setLearningTracksStatus(`Exported ${result.entryCount} saved provider definition(s) to ${result.fileName}.`);
+  } catch (error) {
+    setLearningTracksStatus(`Dictionary export failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 

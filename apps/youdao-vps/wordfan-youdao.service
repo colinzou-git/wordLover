@@ -1,0 +1,14 @@
+[Unit]
+Description=WordFan Youdao lookup service
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/wordfan/apps/youdao-vps
+ExecStart=/usr/bin/python3 /home/ubuntu/wordfan/apps/youdao-vps/server.py --database /var/lib/wordfan-youdao/lookups.sqlite
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

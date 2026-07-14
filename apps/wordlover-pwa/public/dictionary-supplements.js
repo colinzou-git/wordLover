@@ -65,6 +65,56 @@ export function validateDictionarySupplement(value, { validateEntry } = {}) {
   });
 }
 
+export function createDictionarySupplementTombstone(term, providerId, { now = () => new Date().toISOString() } = {}) {
+  const id = dictionarySupplementKey(term, providerId);
+  return Object.freeze({
+    recordSchemaVersion: SCHEMA_VERSION,
+    id,
+    normalizedTerm: normalizeSupplementTerm(term),
+    providerId: String(providerId).trim().toLowerCase(),
+    deleted: true,
+    updatedAt: now(),
+  });
+}
+
+export function validateDictionarySupplementPortableRecord(value, options = {}) {
+  if (value?.deleted === true) {
+    const id = dictionarySupplementKey(value.normalizedTerm, value.providerId);
+    if (value.recordSchemaVersion !== SCHEMA_VERSION || value.id !== id || !Number.isFinite(Date.parse(value.updatedAt))) {
+      throw new TypeError("Dictionary supplement tombstone is invalid.");
+    }
+    return Object.freeze({
+      recordSchemaVersion: SCHEMA_VERSION,
+      id,
+      normalizedTerm: normalizeSupplementTerm(value.normalizedTerm),
+      providerId: String(value.providerId).trim().toLowerCase(),
+      deleted: true,
+      updatedAt: new Date(value.updatedAt).toISOString(),
+    });
+  }
+  return validateDictionarySupplement(value, options);
+}
+
+export function mergeDictionarySupplementRecords(local = [], remote = [], options = {}) {
+  const byId = new Map();
+  let skipped = 0;
+  const validate = (value) => validateDictionarySupplementPortableRecord(value, options);
+  for (const source of [remote, local]) {
+    for (const raw of source ?? []) {
+      let record;
+      try { record = validate(raw); } catch { skipped += 1; continue; }
+      const existing = byId.get(record.id);
+      if (!existing) { byId.set(record.id, record); continue; }
+      const recordTime = Date.parse(record.updatedAt);
+      const existingTime = Date.parse(existing.updatedAt);
+      if (recordTime > existingTime || (recordTime === existingTime && record.deleted === true && existing.deleted !== true)) {
+        byId.set(record.id, record);
+      }
+    }
+  }
+  return { records: [...byId.values()].sort((a, b) => a.id.localeCompare(b.id)), skipped };
+}
+
 export function createDictionarySupplementRecord(entry, { now = () => new Date().toISOString() } = {}) {
   if (!entry || typeof entry !== "object") throw new TypeError("A normalized provider entry is required.");
   const providerId = String(entry.provider?.id ?? "").trim().toLowerCase();
@@ -105,11 +155,21 @@ export function createDictionarySupplementStore({ read, write, remove, list, val
       await write(saved.id, saved);
       return saved;
     },
-    async remove(term, providerId) { await remove(dictionarySupplementKey(term, providerId)); },
-    async list() {
+    async remove(term, providerId) {
+      assertPermitted(providerId);
+      const tombstone = createDictionarySupplementTombstone(term, providerId);
+      await write(tombstone.id, tombstone);
+      return tombstone;
+    },
+    async list({ includeDeleted = false } = {}) {
       const values = await list();
       const valid = [];
-      for (const value of values ?? []) { try { valid.push(validate(value)); } catch { /* Isolate corrupt records. */ } }
+      for (const value of values ?? []) {
+        try {
+          const record = validateDictionarySupplementPortableRecord(value, { validateEntry });
+          if (includeDeleted || record.deleted !== true) valid.push(record);
+        } catch { /* Isolate corrupt records. */ }
+      }
       return valid;
     },
     canPersist: permitted,
