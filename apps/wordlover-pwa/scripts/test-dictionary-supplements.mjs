@@ -19,6 +19,8 @@ assert.equal((await store.get("They’re", "youdao")).entry.chineseDefinitions[0
 const second = await store.save({ ...fixture(), chineseDefinitions: [{ text: "他们正在" }] });
 assert.equal(records.size, 1, "save must be idempotent per provider and normalized term");
 assert.equal(second.savedAt, first.savedAt, "refresh-like saves preserve the original savedAt");
+const upserted = await store.upsertFromLookup(fixture(), { cacheOrigin: "gateway-hit" });
+assert.equal(upserted.cacheMetadata.cacheOrigin, "gateway-hit");
 assert.equal((await store.list()).length, 1);
 records.set("corrupt", { nope: true });
 assert.equal((await store.list()).length, 1, "corrupt records must be isolated");

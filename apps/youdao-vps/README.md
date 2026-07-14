@@ -37,14 +37,12 @@ python3 apps/youdao-vps/server.py --database /var/lib/wordfan-youdao/lookups.sql
 
 The checked-in systemd unit and nginx virtual host are the deployment files for `vps-ee890919.vps.ovh.us`. HTTPS is managed by Certbot.
 
-## Implementation requirements
-
-The current cache is functional but issue #104 requires additional hardening:
+## Implemented persistence guarantees
 
 - migrate to a versioned SQLite record schema;
 - validate cached payload, provider, schema, and exact normalized term before reuse;
 - make Refresh replacement atomic;
-- avoid unsafe concurrent use of one SQLite connection under `ThreadingHTTPServer`;
+- serialize concurrent misses and use bounded per-operation SQLite connections;
 - add cache-hit, restart, migration, refresh-failure, invalid-row-repair, and concurrent-request tests;
-- expose gateway cache hit/miss/refresh status for diagnostics;
+- expose `X-WordFan-Cache: HIT | MISS | REFRESH` and the cached timestamp;
 - keep ordinary repeated terms in SQLite permanently until explicit refresh, repair, or schema migration.

@@ -24,7 +24,19 @@ function acquireShared(provider, term) {
 }
 
 export function createOnlineDictionaryLookupController(options) {
-  const { provider, mode = "manual", online = () => navigator.onLine, getSaved = async () => null, onState = () => {}, timeoutMs = DEFAULT_TIMEOUT_MS, allowSessionCache = false, cacheMaxEntries = 20, cacheTtlMs = 5 * 60 * 1000 } = options;
+  const {
+    provider,
+    mode = "manual",
+    online = () => navigator.onLine,
+    getSaved = async () => null,
+    onSuccess = async ({ entry }) => ({ status: "success", entry }),
+    normalizeTerm = (value) => String(value ?? "").normalize("NFKC").replace(/[‘’ʼ`＇]/g, "'").trim().replace(/\s+/g, " ").toLowerCase(),
+    onState = () => {},
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    allowSessionCache = false,
+    cacheMaxEntries = 20,
+    cacheTtlMs = 5 * 60 * 1000,
+  } = options;
   let current = null, requestId = 0, closed = false;
   const cache = new Map();
   const emit = (state) => { if (!closed) onState(Object.freeze({ providerId: provider.id, term: current?.term ?? null, ...state })); return state; };
@@ -44,7 +56,7 @@ export function createOnlineDictionaryLookupController(options) {
   async function lookup(term, { forceRefresh = false } = {}) {
     if (closed) return { status: "cancelled" };
     stop();
-    const normalized = String(term ?? "").trim();
+    const normalized = normalizeTerm(term);
     const id = ++requestId, controller = new AbortController(); current = { id, term: normalized, controller };
     if (!provider.supports(normalized)) return emit({ status: "hidden" });
     if (mode === "off") return emit({ status: "hidden" });
@@ -64,7 +76,20 @@ export function createOnlineDictionaryLookupController(options) {
       else { shared = acquireShared(provider, normalized); promise = shared.promise; }
       const entry = await Promise.race([promise, new Promise((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }))]);
       if (id !== requestId || closed) return { status: "cancelled" };
-      const state = { status: "success", entry }; remember(normalized, state); return emit(state);
+      if (normalizeTerm(entry?.normalizedTerm ?? entry?.headword) !== normalized) {
+        const error = new Error("The provider response did not match the requested term.");
+        error.category = "malformed_response";
+        throw error;
+      }
+      let state;
+      try {
+        state = await onSuccess({ term: normalized, entry, forceRefresh, signal: controller.signal });
+      } catch (error) {
+        state = { status: "success", entry, saveError: { category: error?.category ?? "save_failed", message: "Definition loaded, but it could not be saved on this device." } };
+      }
+      if (id !== requestId || closed || controller.signal.aborted) return { status: "cancelled" };
+      if (!state || !["success", "saved"].includes(state.status)) state = { status: "success", entry };
+      remember(normalized, state); return emit(state);
     } catch (error) {
       if (id !== requestId || closed) return { status: "cancelled" };
       const timedOut = controller.signal.aborted && controller.signal.reason?.name === "AbortError" && controller.signal.reason?.message === "Timed out";
@@ -73,14 +98,14 @@ export function createOnlineDictionaryLookupController(options) {
     } finally { clearTimeout(timer); shared?.release(); }
   }
 
-  async function display(term) {
-    if (mode === "automatic") return lookup(term);
-    stop(); current = { id: ++requestId, term: String(term ?? "").trim(), controller: null };
+  async function display(term, { skipLookup = false } = {}) {
+    if (mode === "automatic" && !skipLookup) return lookup(term);
+    stop(); current = { id: ++requestId, term: normalizeTerm(term), controller: null };
     if (mode === "off" || !provider.supports(current.term)) return emit({ status: "hidden" });
     const saved = await getSaved(current.term, provider.id).catch(() => null);
     if (saved) return emit({ status: "saved", entry: saved });
     if (!online()) return emit({ status: "offline" });
-    return emit({ status: provider.canLookupInApp ? "manual-ready" : "disabled" });
+    return emit({ status: provider.canLookupInApp ? "manual-ready" : "disabled", lookupSuppressed: skipLookup });
   }
 
   return { display, lookup, refresh: (term) => lookup(term, { forceRefresh: true }), cancel: stop, close: () => { closed = true; stop(); }, cacheSize: () => cache.size };
