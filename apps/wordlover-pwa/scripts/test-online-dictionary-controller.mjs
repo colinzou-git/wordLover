@@ -34,6 +34,10 @@ const old = staleController.display("old"); await new Promise((resolve) => setTi
 let refreshCalls = 0;
 const refresh = createOnlineDictionaryLookupController({ provider: makeProvider(async () => { refreshCalls += 1; return entry; }), mode: "manual", online: () => true, allowSessionCache: true });
 await refresh.lookup("charge"); await refresh.lookup("charge"); assert.equal(refreshCalls, 1); await refresh.refresh("charge"); assert.equal(refreshCalls, 2, "refresh bypasses cache and deduplication");
+const refreshStates = [];
+const refreshSaved = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, headword: "fresh" })), mode: "manual", online: () => true, getSaved: async () => entry, onState: (state) => refreshStates.push(state) });
+assert.equal((await refreshSaved.refresh("charge")).entry.headword, "fresh");
+assert.equal(refreshStates.some((state) => state.status === "saved" && state.refreshing), true, "refresh keeps the prior saved entry visible while checking");
 
 const timeout = createOnlineDictionaryLookupController({ provider: makeProvider((_args) => new Promise(() => {})), mode: "automatic", online: () => true, timeoutMs: 5 });
 assert.equal((await timeout.display("charge")).status, "timed-out");
@@ -65,5 +69,9 @@ for (const status of ["manual-ready", "checking", "offline", "no-result", "timed
 }
 const resultHtml = renderYoudaoState("charge", { status: "success", entry: { ...entry, chineseDefinitions: [{ text: "<script>alert(1)</script>" }] } });
 assert.doesNotMatch(resultHtml, /<script>/); assert.match(resultHtml, /&lt;script&gt;/); assert.match(resultHtml, /Source: Youdao/);
+const saveHtml = renderYoudaoState("charge", { status: "success", entry, canSave: true });
+assert.match(saveHtml, /Add as additional definition/);
+const savedHtml = renderYoudaoState("charge", { status: "saved", entry, canRefresh: true, refreshError: { message: "kept" } });
+assert.match(savedHtml, /Refresh saved entry/); assert.match(savedHtml, /Remove saved definition/); assert.match(savedHtml, /kept/);
 
 console.log("online dictionary controller and renderer tests passed");

@@ -18,7 +18,7 @@ const REQUIRED = [
   "app.js", "sw.js", "automated-tests.js", "wordlover-config.js", "dictionary-config.js",
   "dictionary-registry.js", "dictionary-selection.js", "tracks.js",
   "online-dictionary-actions.js", "online-dictionary-provider.js", "youdao-provider.js", "youdao-entry-schema.js",
-  "online-dictionary-lookup-controller.js", "online-dictionary-result-renderer.js", "online-dictionary-integration.js", "dictionary-supplements.js",
+  "online-dictionary-lookup-controller.js", "online-dictionary-result-renderer.js", "online-dictionary-integration.js", "online-dictionary-supplement-lifecycle.js", "dictionary-supplements.js",
 ];
 const OPTIONAL = ["wa-sqlite-opfs-worker.js"];
 
