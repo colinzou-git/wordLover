@@ -16,3 +16,7 @@ Phase 1 consequently uses only a same-page external link. Rendering a definition
 4. **External link fallback:** feasible now and retained in every future design. It needs no parser, proxy, credential, popup, iframe, or background request.
 
 Decision: ship the external-link-only provider in Phase 1. Do not implement automatic in-app retrieval or permanent Youdao caching until both an authorized technical endpoint and compatible storage/reuse terms are established.
+
+The Phase 2 decision, production-origin browser evidence, trust boundary, and
+contract gates are maintained in
+[`docs/youdao-integrated-lookup-adr.md`](../youdao-integrated-lookup-adr.md).
