@@ -43,3 +43,18 @@ is running. The new validated entry is written with one IndexedDB `put`; no succ
 reported until that write completes. A timeout, malformed response, no-result, cancellation,
 or storage error leaves the previous encrypted record unchanged. Removing a record requires
 confirmation and deletes only its provider/term key.
+
+## Study snapshots
+
+Study starts lazily read only the saved supplement for the term(s) being queued; WordFan does
+not scan the supplement store during app startup. Question construction then uses an immutable
+compact snapshot, so a save, refresh, or removal affects later questions but cannot mutate the
+active one. Transient lookup results never enter this cache or a question.
+
+The deterministic study policy prefers up to three Chinese definitions in provider order and
+falls back to English only when Chinese is absent. Each meaning is capped at 96 characters;
+exact local duplicates, examples, phrases, synonyms, and antonyms are excluded. The local
+meaning stays first in quiz labels. Spelling hints mask the target and common inflections, and
+the integrated full entry is not hydrated on an unrevealed spelling surface. Source attribution
+is rendered from the stable snapshot only after normal review/Study One More reveal points.
+FSRS state and grading never inspect provider metadata.
