@@ -8,12 +8,13 @@ window.WORDLOVER_CONFIG = {
   geminiApiKey: "",
   geminiModel: "gemini-2.5-flash",
   localDevelopmentPassphrase: "",
-  // Disabled by default. Set only after deploying the approved server-side gateway.
-  youdaoGatewayUrl: "",
-  // Keep false unless Youdao has granted written permission for persistent storage.
-  youdaoPersistenceAllowed: false,
+  youdaoGatewayUrl: "https://vps-ee890919.vps.ovh.us",
+  // The user has authorized saved Youdao definitions to participate in local persistence,
+  // sync, backup/import, and explicit personal export.
+  youdaoPersistenceAllowed: true,
+  youdaoPortabilityAllowed: true,
 };
 
 // The fallback waits for WordFan's local and full dictionary lookups to finish,
 // then reuses the existing Gemini settings dialog and native Add-to-dictionary flow.
-void import("/online-dictionary-bridge.js?v=20260714-7");
+void import("/online-dictionary-bridge.js?v=20260714-8");

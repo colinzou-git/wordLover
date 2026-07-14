@@ -114,6 +114,7 @@ export function buildBackup(input = {}, now) {
     activeTrackId: input.activeTrackId ?? DEFAULT_TRACK_ID,
     globalSettings: pickGlobalSettings(input.globalSettings ?? {}),
     tracks,
+    ...(Array.isArray(input.dictionarySupplements) ? { dictionarySupplements: cloneJson(input.dictionarySupplements) } : {}),
   };
 }
 
@@ -325,7 +326,8 @@ export function validateBackup(parsed) {
     tracks[id] = validateTrack(track, id);
   }
   const activeTrackId = tracks[candidate.activeTrackId] ? candidate.activeTrackId : Object.keys(tracks)[0];
-  return { ...candidate, activeTrackId, globalSettings: pickGlobalSettings(candidate.globalSettings ?? {}), tracks };
+  const dictionarySupplements = Array.isArray(candidate.dictionarySupplements) ? candidate.dictionarySupplements : [];
+  return { ...candidate, activeTrackId, globalSettings: pickGlobalSettings(candidate.globalSettings ?? {}), tracks, dictionarySupplements };
 }
 
 // A track may be deleted only if it exists, is not the active track, and is not the last

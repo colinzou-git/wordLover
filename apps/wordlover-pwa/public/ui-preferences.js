@@ -42,7 +42,7 @@ export const DEFAULT_FONT_SCALE = 1;
 export const FONT_SCALE_MIN = 0.9;
 export const FONT_SCALE_MAX = 2;
 export const FONT_SCALE_STEP = 0.1;
-export const DEFAULT_ONLINE_DICTIONARY_MODE = "manual";
+export const DEFAULT_ONLINE_DICTIONARY_MODE = "automatic";
 export const ONLINE_DICTIONARY_MODES = ["off", "manual", "automatic"];
 
 export function normalizeTrack(value) {

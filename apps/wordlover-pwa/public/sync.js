@@ -1,15 +1,16 @@
 // Pure snapshot merge helpers for Google Drive sync.
 // No globals, no DOM, no IndexedDB. All time-sensitive helpers accept nowMs.
 
-import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260714-7";
-import { normalizeTrack } from "./ui-preferences.js?v=20260714-7";
+import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260714-8";
+import { normalizeTrack } from "./ui-preferences.js?v=20260714-8";
 import {
   BACKUP_SCHEMA_VERSION,
   BACKUP_APP,
   DEFAULT_TRACK_ID,
   serializeTrack,
   trackRecords,
-} from "./tracks.js?v=20260714-7";
+} from "./tracks.js?v=20260714-8";
+import { mergeDictionarySupplementRecords } from "./dictionary-supplements.js?v=20260714-8";
 
 function normalizeTerm(term) {
   return String(term ?? "")
@@ -240,6 +241,10 @@ export function mergeLearningTracksBackups(localBackup = {}, remoteBackup = {}, 
     activeTrackId,
     globalSettings: { ...(remoteBackup.globalSettings ?? {}), ...(localBackup.globalSettings ?? {}) },
     tracks,
+    dictionarySupplements: mergeDictionarySupplementRecords(
+      localBackup.dictionarySupplements,
+      remoteBackup.dictionarySupplements,
+    ).records,
   };
 }
 
