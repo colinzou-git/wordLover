@@ -1,8 +1,8 @@
 import {
   getOnlineDictionaryProvider,
   registerOnlineDictionaryProvider,
-} from "./online-dictionary-provider.js?v=20260715-1";
-import { youdaoProvider } from "./youdao-provider.js?v=20260715-1";
+} from "./online-dictionary-provider.js?v=20260715-2";
+import { youdaoProvider } from "./youdao-provider.js?v=20260715-2";
 
 if (!getOnlineDictionaryProvider(youdaoProvider.id)) registerOnlineDictionaryProvider(youdaoProvider);
 
@@ -22,25 +22,11 @@ export function onlineDictionaryExternalUrl(providerId, term) {
 }
 
 export function renderOnlineDictionaryActions(term, options = {}) {
-  const mode = ["off", "manual", "automatic"].includes(options.mode) ? options.mode : "manual";
-  if (mode === "off") return "";
+  if (options.enabled !== true) return "";
   const provider = getOnlineDictionaryProvider(options.providerId ?? "youdao");
   if (!provider?.supports(term)) return "";
   const context = String(options.context ?? "definition");
-  if (options.online === false) {
-    return `
-      <aside class="online-dictionary-actions" data-online-dictionary-provider="${escapeHtml(provider.id)}" data-online-dictionary-context="${escapeHtml(context)}" data-term="${escapeHtml(term)}" data-mode="${escapeHtml(mode)}">
-        <span class="online-dictionary-source">Experimental · Source: ${escapeHtml(provider.label)}</span>
-        <span class="small muted">Online lookup is unavailable while offline.</span>
-      </aside>
-    `;
-  }
-  const url = provider.buildExternalUrl(term);
-  if (!url) return "";
   return `
-    <aside class="online-dictionary-actions" data-online-dictionary-provider="${escapeHtml(provider.id)}" data-online-dictionary-context="${escapeHtml(context)}" data-term="${escapeHtml(term)}" data-mode="${escapeHtml(mode)}">
-      <span class="online-dictionary-source">Experimental · Source: ${escapeHtml(provider.label)}</span>
-      <a class="online-dictionary-link" href="${escapeHtml(url)}">Open full entry on ${escapeHtml(provider.label)}</a>
-    </aside>
+    <aside class="online-dictionary-actions" data-online-dictionary-provider="${escapeHtml(provider.id)}" data-online-dictionary-context="${escapeHtml(context)}" data-term="${escapeHtml(term)}"></aside>
   `;
 }

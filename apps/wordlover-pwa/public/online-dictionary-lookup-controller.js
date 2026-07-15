@@ -26,7 +26,7 @@ function acquireShared(provider, term) {
 export function createOnlineDictionaryLookupController(options) {
   const {
     provider,
-    mode = "manual",
+    enabled = true,
     online = () => navigator.onLine,
     getSaved = async () => null,
     onSuccess = async ({ entry }) => ({ status: "success", entry }),
@@ -59,7 +59,7 @@ export function createOnlineDictionaryLookupController(options) {
     const normalized = normalizeTerm(term);
     const id = ++requestId, controller = new AbortController(); current = { id, term: normalized, controller };
     if (!provider.supports(normalized)) return emit({ status: "hidden" });
-    if (mode === "off") return emit({ status: "hidden" });
+    if (!enabled) return emit({ status: "hidden" });
     const saved = await getSaved(normalized, provider.id).catch(() => null);
     if (id !== requestId || closed) return { status: "cancelled" };
     if (saved && !forceRefresh) return emit({ status: "saved", entry: saved });
@@ -98,14 +98,14 @@ export function createOnlineDictionaryLookupController(options) {
     } finally { clearTimeout(timer); shared?.release(); }
   }
 
-  async function display(term, { skipLookup = false } = {}) {
-    if (mode === "automatic" && !skipLookup) return lookup(term);
+  async function display(term, { allowNetwork = true } = {}) {
+    if (enabled && allowNetwork) return lookup(term);
     stop(); current = { id: ++requestId, term: normalizeTerm(term), controller: null };
-    if (mode === "off" || !provider.supports(current.term)) return emit({ status: "hidden" });
+    if (!enabled || !provider.supports(current.term)) return emit({ status: "hidden" });
     const saved = await getSaved(current.term, provider.id).catch(() => null);
     if (saved) return emit({ status: "saved", entry: saved });
     if (!online()) return emit({ status: "offline" });
-    return emit({ status: provider.canLookupInApp ? "manual-ready" : "disabled", lookupSuppressed: skipLookup });
+    return emit({ status: allowNetwork && provider.canLookupInApp ? "checking" : "offline" });
   }
 
   return { display, lookup, refresh: (term) => lookup(term, { forceRefresh: true }), cancel: stop, close: () => { closed = true; stop(); }, cacheSize: () => cache.size };

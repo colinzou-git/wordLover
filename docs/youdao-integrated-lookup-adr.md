@@ -106,7 +106,7 @@ Enterprise-grade multi-tenant controls, formal compliance sign-off, contractual 
 
 ## Local cache policy
 
-- The dedicated encrypted dictionary supplement store is the device source of truth for saved Youdao entries.
+- The dedicated plaintext dictionary supplement store is the device source of truth for cached Youdao entries; vocabulary and learning data remain encrypted separately.
 - Every successful validated integrated result is automatically upserted locally.
 - A valid local hit makes zero gateway requests.
 - Local persistence is idempotent per provider and normalized term.

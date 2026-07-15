@@ -6,7 +6,7 @@ Project scope:
 
 - [`docs/youdao-personal-use-scope.md`](../../docs/youdao-personal-use-scope.md)
 - [`docs/youdao-two-layer-cache-design.md`](../../docs/youdao-two-layer-cache-design.md)
-- tracking issue: #104
+- tracking issue: #107
 
 ## Required cache behavior
 
@@ -21,17 +21,17 @@ WordFan device miss
        -> retrieve + normalize + validate
        -> persist SQLite
        -> return entry
-       -> PWA persists encrypted local copy
+       -> PWA persists a plaintext local supplement
 ```
 
 Valid gateway records do not expire automatically. Explicit Refresh retrieves a fresh entry and replaces the existing row only after successful parsing and validation. A failed refresh must preserve the previous valid row.
 
-The normal client removal action removes only the device copy. It does not erase the gateway SQLite cache; the device may later be rehydrated from the gateway.
+Turning automatic display off retains both the device and gateway copies. Re-enabling it can render the device copy without a gateway request.
 
 ## Run
 
 ```bash
-python3 -m unittest apps/youdao-vps/test_server.py
+cd apps/youdao-vps && python3 -m unittest test_server.py
 python3 apps/youdao-vps/server.py --database /var/lib/wordfan-youdao/lookups.sqlite
 ```
 

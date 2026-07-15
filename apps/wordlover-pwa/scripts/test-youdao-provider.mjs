@@ -17,6 +17,8 @@ import {
 import { validateYoudaoEntry } from "../public/youdao-entry-schema.js";
 import {
   DEFAULT_ONLINE_DICTIONARY_MODE,
+  DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS,
+  normalizeAutoShowYoudaoDefinitions,
   normalizeOnlineDictionaryMode,
   normalizeUiPreferences,
 } from "../public/ui-preferences.js";
@@ -45,10 +47,16 @@ assert.equal(DEFAULT_ONLINE_DICTIONARY_MODE, "automatic");
 assert.equal(normalizeOnlineDictionaryMode("off"), "off");
 assert.equal(normalizeOnlineDictionaryMode("automatic"), "automatic");
 assert.equal(normalizeOnlineDictionaryMode("unexpected"), "automatic");
-assert.equal(normalizeUiPreferences({}).onlineDictionaryMode, "automatic");
-assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "automatic" }).onlineDictionaryMode, "automatic");
-assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "manual" }).onlineDictionaryMode, "manual");
-assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "off" }).onlineDictionaryMode, "off");
+assert.equal(DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS, true);
+assert.equal(normalizeAutoShowYoudaoDefinitions(undefined, "automatic"), true);
+assert.equal(normalizeAutoShowYoudaoDefinitions(undefined, "manual"), true);
+assert.equal(normalizeAutoShowYoudaoDefinitions(undefined, "off"), false);
+assert.equal(normalizeUiPreferences({}).autoShowYoudaoDefinitions, true);
+assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "automatic" }).autoShowYoudaoDefinitions, true);
+assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "manual" }).autoShowYoudaoDefinitions, true);
+assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "off" }).autoShowYoudaoDefinitions, false);
+assert.equal(normalizeUiPreferences({ autoShowYoudaoDefinitions: true, onlineDictionaryMode: "off" }).autoShowYoudaoDefinitions, true);
+assert.equal(normalizeUiPreferences({ autoShowYoudaoDefinitions: false, onlineDictionaryMode: "automatic" }).autoShowYoudaoDefinitions, false);
 
 const fixture = {
   schemaVersion: 1, provider: { id: "youdao", label: "Youdao" }, normalizedTerm: "charge", headword: "charge",
@@ -77,14 +85,10 @@ await assert.rejects(malformedIntegrated.lookup({ term: "charge" }), (error) => 
 assert.equal(disabledIntegrated.buildExternalUrl("charge"), "https://m.youdao.com/dict?le=eng&q=charge");
 
 const actions = await import("../public/online-dictionary-actions.js");
-const manualHtml = actions.renderOnlineDictionaryActions("take off", { mode: "manual", context: "test", online: true });
-assert.match(manualHtml, /Source: Youdao/);
-assert.match(manualHtml, /Open full entry on Youdao/);
-assert.match(manualHtml, /q=take%20off/);
-assert.doesNotMatch(manualHtml, /target=/);
-assert.equal(actions.renderOnlineDictionaryActions("charge", { mode: "off" }), "");
-const offlineHtml = actions.renderOnlineDictionaryActions("charge", { mode: "manual", online: false });
-assert.match(offlineHtml, /unavailable while offline/);
-assert.doesNotMatch(offlineHtml, /href=/);
+const enabledHtml = actions.renderOnlineDictionaryActions("take off", { enabled: true, context: "test" });
+assert.match(enabledHtml, /online-dictionary-actions/);
+assert.match(enabledHtml, /data-term="take off"/);
+assert.doesNotMatch(enabledHtml, /Check Youdao|Open full entry|data-youdao-check/);
+assert.equal(actions.renderOnlineDictionaryActions("charge", { enabled: false }), "");
 
 console.log("youdao provider tests passed");
