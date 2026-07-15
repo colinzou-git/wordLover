@@ -31,7 +31,7 @@ export function createOnlineDictionarySupplementLifecycle({ providerId, suppleme
   function remove(term) { return exclusive("remove", async () => {
     try {
       await supplements.remove(term, providerId);
-      return await display(term);
+      return await controller.display(term, { skipLookup: true });
     } catch (error) {
       const record = await supplements.get(term, providerId).catch(() => null);
       const state = record
@@ -45,6 +45,7 @@ export function createOnlineDictionarySupplementLifecycle({ providerId, suppleme
   function refresh(term) { return exclusive("refresh", async () => {
     const previous = await supplements.get(term, providerId).catch(() => null);
     const result = await controller.refresh(term);
+    if (result.status === "saved") return result;
     if (result.status !== "success") {
       if (previous?.entry) {
         const state = { status: "saved", entry: previous.entry, refreshError: { category: result.error?.category ?? result.status, message: "Refresh failed; the saved definition was kept." } };

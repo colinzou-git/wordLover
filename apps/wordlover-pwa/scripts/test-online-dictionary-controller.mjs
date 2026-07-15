@@ -13,6 +13,22 @@ assert.equal((await manual.display("charge")).status, "manual-ready");
 assert.equal((await manual.lookup("charge")).status, "success");
 const automatic = createOnlineDictionaryLookupController({ provider: makeProvider(async () => entry), mode: "automatic", online: () => true });
 assert.equal((await automatic.display("charge")).status, "success");
+assert.equal((await automatic.display("charge", { skipLookup: true })).status, "manual-ready", "local removal can suppress immediate automatic rehydration");
+let automaticallySaved = null, automaticCalls = 0;
+const automaticPersistence = createOnlineDictionaryLookupController({
+  provider: makeProvider(async () => { automaticCalls += 1; return { ...entry, normalizedTerm: "charge" }; }),
+  mode: "automatic",
+  online: () => true,
+  getSaved: async () => automaticallySaved,
+  onSuccess: async ({ entry: found }) => { automaticallySaved = found; return { status: "saved", entry: found }; },
+});
+assert.equal((await automaticPersistence.display("charge")).status, "saved");
+assert.equal((await automaticPersistence.display("charge")).status, "saved");
+assert.equal(automaticCalls, 1, "second display must use the encrypted local record without a provider request");
+let manualSaved = 0;
+const manualPersistence = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, normalizedTerm: "charge" })), mode: "manual", online: () => true, onSuccess: async ({ entry: found }) => { manualSaved += 1; return { status: "saved", entry: found }; } });
+assert.equal((await manualPersistence.lookup("charge")).status, "saved");
+assert.equal(manualSaved, 1, "manual integrated checks persist automatically");
 const saved = createOnlineDictionaryLookupController({ provider: makeProvider(async () => { throw new Error("must not call"); }), mode: "automatic", online: () => true, getSaved: async () => entry });
 assert.equal((await saved.display("charge")).status, "saved");
 const offline = createOnlineDictionaryLookupController({ provider: makeProvider(async () => entry), mode: "automatic", online: () => false });
@@ -31,11 +47,25 @@ const staleProvider = makeProvider((args) => args.term === "old" ? new Promise((
 const staleController = createOnlineDictionaryLookupController({ provider: staleProvider, mode: "automatic", online: () => true, onState: (state) => staleStates.push(state) });
 const old = staleController.display("old"); await new Promise((resolve) => setTimeout(resolve)); const newer = await staleController.display("new"); staleResolve(entry); await old; assert.equal(newer.entry.headword, "new"); assert.notEqual(staleStates.at(-1)?.entry?.headword, "charge", "late old response cannot replace new term");
 
+let staleSaveCount = 0, staleSaveResolve;
+const stalePersistence = createOnlineDictionaryLookupController({ provider: makeProvider(({ term }) => term === "old" ? new Promise((resolve) => { staleSaveResolve = resolve; }) : Promise.resolve({ ...entry, headword: "new", normalizedTerm: "new" })), mode: "automatic", online: () => true, onSuccess: async ({ entry: found }) => { staleSaveCount += 1; return { status: "saved", entry: found }; } });
+const staleOld = stalePersistence.display("old"); await new Promise((resolve) => setTimeout(resolve)); await stalePersistence.display("new"); staleSaveResolve({ ...entry, normalizedTerm: "old" }); await staleOld; assert.equal(staleSaveCount, 1, "stale provider responses are not persisted");
+
+let mismatchedSaved = 0;
+const mismatched = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, normalizedTerm: "other" })), mode: "automatic", online: () => true, onSuccess: async () => { mismatchedSaved += 1; } });
+assert.equal((await mismatched.display("charge")).status, "malformed");
+assert.equal(mismatchedSaved, 0, "wrong-term responses are never persisted");
+
+const failedPersistence = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, normalizedTerm: "charge" })), mode: "automatic", online: () => true, onSuccess: async () => { throw new Error("disk full"); } });
+const failedPersistenceState = await failedPersistence.display("charge");
+assert.equal(failedPersistenceState.status, "success");
+assert.match(failedPersistenceState.saveError.message, /could not be saved/);
+
 let refreshCalls = 0;
 const refresh = createOnlineDictionaryLookupController({ provider: makeProvider(async () => { refreshCalls += 1; return entry; }), mode: "manual", online: () => true, allowSessionCache: true });
 await refresh.lookup("charge"); await refresh.lookup("charge"); assert.equal(refreshCalls, 1); await refresh.refresh("charge"); assert.equal(refreshCalls, 2, "refresh bypasses cache and deduplication");
 const refreshStates = [];
-const refreshSaved = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, headword: "fresh" })), mode: "manual", online: () => true, getSaved: async () => entry, onState: (state) => refreshStates.push(state) });
+const refreshSaved = createOnlineDictionaryLookupController({ provider: makeProvider(async () => ({ ...entry, headword: "fresh", normalizedTerm: "charge" })), mode: "manual", online: () => true, getSaved: async () => entry, onState: (state) => refreshStates.push(state) });
 assert.equal((await refreshSaved.refresh("charge")).entry.headword, "fresh");
 assert.equal(refreshStates.some((state) => state.status === "saved" && state.refreshing), true, "refresh keeps the prior saved entry visible while checking");
 
@@ -69,9 +99,9 @@ for (const status of ["manual-ready", "checking", "offline", "no-result", "timed
 }
 const resultHtml = renderYoudaoState("charge", { status: "success", entry: { ...entry, chineseDefinitions: [{ text: "<script>alert(1)</script>" }] } });
 assert.doesNotMatch(resultHtml, /<script>/); assert.match(resultHtml, /&lt;script&gt;/); assert.match(resultHtml, /Source: Youdao/);
-const saveHtml = renderYoudaoState("charge", { status: "success", entry, canSave: true });
-assert.match(saveHtml, /Add as additional definition/);
+const saveHtml = renderYoudaoState("charge", { status: "success", entry, canSave: true, saveError: { message: "not saved" } });
+assert.match(saveHtml, /Retry local save/);
 const savedHtml = renderYoudaoState("charge", { status: "saved", entry, canRefresh: true, refreshError: { message: "kept" } });
-assert.match(savedHtml, /Refresh saved entry/); assert.match(savedHtml, /Remove saved definition/); assert.match(savedHtml, /kept/);
+assert.match(savedHtml, /Refresh saved entry/); assert.match(savedHtml, /Remove saved definition/); assert.match(savedHtml, /Saved locally/); assert.match(savedHtml, /VPS copy/); assert.match(savedHtml, /kept/);
 
 console.log("online dictionary controller and renderer tests passed");

@@ -3,10 +3,10 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260714-8";
+} from "./fsrs-scheduler.js?v=20260714-9";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260714-8";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260714-8";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260714-9";
+import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260714-9";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +16,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260714-8";
+} from "./ui-preferences.js?v=20260714-9";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +27,17 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260714-8";
+} from "./sync.js?v=20260714-9";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260714-8";
+} from "./study-one-more.js?v=20260714-9";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260714-8";
+} from "./goal-forecast.js?v=20260714-9";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,9 +48,10 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260714-8";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-8";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260714-8";
+} from "./tracks.js?v=20260714-9";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260714-9";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260714-9";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260714-9";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -64,7 +65,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v164";
+const SHELL_CACHE_NAME = "wordlover-shell-v165";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 8;
 const APP_KV_STORE = "kv";
@@ -82,33 +83,33 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260714-8",
-  "/dictionary-config.js?v=20260714-8",
-  "/dictionary-registry.js?v=20260714-8",
-  "/dictionary-selection.js?v=20260714-8",
-  "/dictionary-rendering.js?v=20260714-8",
-  "/full-dictionary.js?v=20260714-8",
-  "/online-dictionary-actions.js?v=20260714-8",
-  "/online-dictionary-provider.js?v=20260714-8",
-  "/online-dictionary-lookup-controller.js?v=20260714-8",
-  "/online-dictionary-result-renderer.js?v=20260714-8",
-  "/online-dictionary-integration.js?v=20260714-8",
-  "/online-dictionary-supplement-lifecycle.js?v=20260714-8",
-  "/dictionary-supplements.js?v=20260714-8",
-  "/study-supplements.js?v=20260714-8",
-  "/youdao-provider.js?v=20260714-8",
-  "/youdao-entry-schema.js?v=20260714-8",
-  "/persistence.js?v=20260714-8",
-  "/spelling.js?v=20260714-8",
-  "/ui-preferences.js?v=20260714-8",
-  "/review-state.js?v=20260714-8",
-  "/study-one-more.js?v=20260714-8",
-  "/sync.js?v=20260714-8",
-  "/fsrs-scheduler.js?v=20260714-8",
-  "/goal-forecast.js?v=20260714-8",
-  "/tracks.js?v=20260714-8",
-  "/styles.css?v=20260714-8",
-  "/wordlover-config.js?v=20260714-8",
+  "/app.js?v=20260714-9",
+  "/dictionary-config.js?v=20260714-9",
+  "/dictionary-registry.js?v=20260714-9",
+  "/dictionary-selection.js?v=20260714-9",
+  "/dictionary-rendering.js?v=20260714-9",
+  "/full-dictionary.js?v=20260714-9",
+  "/online-dictionary-actions.js?v=20260714-9",
+  "/online-dictionary-provider.js?v=20260714-9",
+  "/online-dictionary-lookup-controller.js?v=20260714-9",
+  "/online-dictionary-result-renderer.js?v=20260714-9",
+  "/online-dictionary-integration.js?v=20260714-9",
+  "/online-dictionary-supplement-lifecycle.js?v=20260714-9",
+  "/dictionary-supplements.js?v=20260714-9",
+  "/study-supplements.js?v=20260714-9",
+  "/youdao-provider.js?v=20260714-9",
+  "/youdao-entry-schema.js?v=20260714-9",
+  "/persistence.js?v=20260714-9",
+  "/spelling.js?v=20260714-9",
+  "/ui-preferences.js?v=20260714-9",
+  "/review-state.js?v=20260714-9",
+  "/study-one-more.js?v=20260714-9",
+  "/sync.js?v=20260714-9",
+  "/fsrs-scheduler.js?v=20260714-9",
+  "/goal-forecast.js?v=20260714-9",
+  "/tracks.js?v=20260714-9",
+  "/styles.css?v=20260714-9",
+  "/wordlover-config.js?v=20260714-9",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -124,7 +125,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260714-8",
+  "/automated-tests.js?v=20260714-9",
 ];
 
 let lastResults = null;
@@ -887,6 +888,38 @@ async function runMainAppDictionarySmoke() {
           chineseDefinitions: [{ text: "他们是" }],
           englishDefinitions: [],
         };
+        const automaticTerm = "cacheprobe";
+        const automaticEntry = {
+          ...fixtureEntry,
+          normalizedTerm: automaticTerm,
+          headword: automaticTerm,
+          sourceUrl: `https://m.youdao.com/dict?le=eng&q=${automaticTerm}`,
+        };
+        await supplements.remove(automaticTerm, "youdao");
+        let automaticProviderCalls = 0;
+        const automaticController = createOnlineDictionaryLookupController({
+          provider: {
+            id: "youdao",
+            supports: () => true,
+            canLookupInApp: true,
+            lookup: async () => { automaticProviderCalls += 1; return automaticEntry; },
+          },
+          mode: "automatic",
+          online: () => true,
+          getSaved: async (term, providerId) => (await supplements.get(term, providerId))?.entry ?? null,
+          onSuccess: async ({ entry }) => {
+            const record = await supplements.upsertFromLookup(entry, { testOrigin: "automatic-browser" });
+            return { status: "saved", entry: record.entry };
+          },
+        });
+        const automaticFirst = await automaticController.display(automaticTerm);
+        const automaticRaw = await getAppStoreValue(APP_DICTIONARY_SUPPLEMENT_STORE, `youdao:${automaticTerm}`);
+        const automaticSecond = await automaticController.display(automaticTerm);
+        if (automaticFirst.status !== "saved" || automaticSecond.status !== "saved" || automaticProviderCalls !== 1 || !automaticRaw?.__encrypted) {
+          throw new Error(`Automatic encrypted supplement persistence failed: ${JSON.stringify({ first: automaticFirst.status, second: automaticSecond.status, automaticProviderCalls, encrypted: automaticRaw?.__encrypted })}`);
+        }
+        await supplements.remove(automaticTerm, "youdao");
+        result.automaticEncryptedSupplementPersistence = true;
         const learningBefore = app.dictionaries.learningCounts();
         const saved = await supplements.save(fixtureEntry);
         const raw = await getAppStoreValue(APP_DICTIONARY_SUPPLEMENT_STORE, "youdao:they're");
@@ -3099,7 +3132,7 @@ async function runLearningTracksImportExportTest() {
     };
     await app.persistVocabularyItemForTest(item);
     const backup = await app.learningTracks.exportBackupForTest();
-    const exportedSchemaOk = backup.app === "WordFan" && backup.schemaVersion === 1 && Object.keys(backup.tracks ?? {}).length >= 1;
+    const exportedSchemaOk = backup.app === "WordFan" && backup.schemaVersion === BACKUP_SCHEMA_VERSION && Object.keys(backup.tracks ?? {}).length >= 1;
 
     const rejectedInvalidJson = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor(["{"], "bad.json", { type: "application/json" })));
     const rejectedUnsupportedVersion = await catchesAsync(() => app.learningTracks.importForTest(new FileCtor([JSON.stringify({ ...backup, schemaVersion: 99 })], "bad-version.json", { type: "application/json" })));
@@ -3444,8 +3477,8 @@ function runModuleSmokeTests() {
     trackData: { track_default: { vocabulary: sampleVocab, studyEvents: sampleEvents, spelling: [], spellingEvents: [], userDictionary: [], known: [], history: [{ term: "abandon", searchedAt: "2026-06-03T00:00:00.000Z", queriedAt: "2026-06-03T00:00:00.000Z" }], goals: { dailyNewWords: 5 }, studyOneMoreFilter: null } },
   }, "2026-06-07T00:00:00.000Z");
 
-  // 2) Export creates valid schemaVersion 1 JSON.
-  assert("backup schemaVersion is 1", backup.schemaVersion, BACKUP_SCHEMA_VERSION);
+  // 2) Export creates JSON using the current backup schema.
+  assert("backup uses current schemaVersion", backup.schemaVersion, BACKUP_SCHEMA_VERSION);
   assert("backup app is WordFan", backup.app, "WordFan");
   assert("backup activeTrackId", backup.activeTrackId, "track_default");
   assert("backup has track_default", typeof backup.tracks.track_default, "object");

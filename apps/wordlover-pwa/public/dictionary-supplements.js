@@ -62,6 +62,7 @@ export function validateDictionarySupplement(value, { validateEntry } = {}) {
     sourceRetrievedAt: new Date(value.sourceRetrievedAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
     ...(value.userFields && typeof value.userFields === "object" && !Array.isArray(value.userFields) ? { userFields: structuredClone(value.userFields) } : {}),
+    ...(value.cacheMetadata && typeof value.cacheMetadata === "object" && !Array.isArray(value.cacheMetadata) ? { cacheMetadata: structuredClone(value.cacheMetadata) } : {}),
   });
 }
 
@@ -141,20 +142,27 @@ export function createDictionarySupplementStore({ read, write, remove, list, val
   const validate = (record) => validateDictionarySupplement(record, { validateEntry });
   const permitted = (providerId) => Boolean(canPersistProvider(String(providerId ?? "").toLowerCase()));
   const assertPermitted = (providerId) => { if (!permitted(providerId)) throw new SupplementPolicyError(); };
+  const upsertFromLookup = async (entry, metadata = {}) => {
+    const providerId = String(entry?.provider?.id ?? "").toLowerCase();
+    assertPermitted(providerId);
+    const record = validate(createDictionarySupplementRecord(entry), { validateEntry });
+    const existing = await read(record.id).catch(() => null);
+    const saved = validate({
+      ...record,
+      savedAt: existing?.deleted !== true ? existing?.savedAt ?? record.savedAt : record.savedAt,
+      updatedAt: new Date().toISOString(),
+      ...(metadata && typeof metadata === "object" ? { cacheMetadata: structuredClone(metadata) } : {}),
+    });
+    await write(saved.id, saved);
+    return saved;
+  };
   return Object.freeze({
     async get(term, providerId) {
       const key = dictionarySupplementKey(term, providerId);
       try { const value = await read(key); return value ? validate(value) : null; } catch (error) { if (error instanceof SupplementPolicyError) throw error; return null; }
     },
-    async save(entry) {
-      const providerId = String(entry?.provider?.id ?? "").toLowerCase();
-      assertPermitted(providerId);
-      const record = validate(createDictionarySupplementRecord(entry), { validateEntry });
-      const existing = await read(record.id).catch(() => null);
-      const saved = validate({ ...record, savedAt: existing?.savedAt ?? record.savedAt, updatedAt: new Date().toISOString() });
-      await write(saved.id, saved);
-      return saved;
-    },
+    save: upsertFromLookup,
+    upsertFromLookup,
     async remove(term, providerId) {
       assertPermitted(providerId);
       const tombstone = createDictionarySupplementTombstone(term, providerId);

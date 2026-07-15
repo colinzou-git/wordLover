@@ -6,7 +6,7 @@
 // migration, export, validation, and import as plain unit tests (like persistence.js and
 // sync.js).
 
-export const BACKUP_SCHEMA_VERSION = 1;
+export const BACKUP_SCHEMA_VERSION = 2;
 export const BACKUP_APP = "WordFan";
 export const DEFAULT_TRACK_ID = "track_default";
 export const DEFAULT_TRACK_NAME = "Default Track";
