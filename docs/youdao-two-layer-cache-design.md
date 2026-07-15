@@ -1,386 +1,429 @@
-# Youdao two-layer persistent cache design
+# Youdao automatic display and two-layer cache design
 
-Status: Required implementation design
+Status: Required implementation specification
 
 Scope: Personal-use WordFan deployment
 
-Related scope: `docs/youdao-personal-use-scope.md`
+Primary tracking issue: #107
 
-## Goal
+Completed persistence foundation: #104
 
-Persist every successful normalized Youdao definition in two places:
+## 1. Final product decision
 
-1. the owner's personal gateway SQLite database; and
-2. the current browser/PWA device's encrypted IndexedDB supplement store.
+WordFan must not require a per-word Youdao lookup or save action.
 
-After a definition has been successfully retrieved once on a device, ordinary future displays on that device must not call the gateway. A first lookup on another device should reuse the gateway copy without retrieving the definition from Youdao again, then persist it locally on that device.
+The complete feature is controlled by one global Settings toggle:
 
-## Current main-branch state
+```text
+Youdao definitions
+[ On ] Automatically show Youdao definitions
+```
 
-### Gateway persistence exists
+Default: On.
 
-`apps/youdao-vps/server.py` currently:
+When enabled, WordFan automatically shows a Youdao definition below the local WordFan definition. When disabled, WordFan performs no integrated Youdao lookup and renders no Youdao section. Existing local and gateway cache records remain stored.
 
-- normalizes the request term to a lowercase SQLite key;
-- reads table `lookups` before making an upstream request;
-- stores a successful normalized payload in SQLite;
-- supports `refresh=1` to bypass the SQLite record.
+The old Off/Manual/Automatic selector and normal per-word Check/Add buttons are obsolete.
 
-Thus the gateway already avoids repeated upstream requests for an ordinary repeated term.
-
-### Device persistence is manual only
-
-The PWA already has:
-
-- encrypted IndexedDB store `dictionarySupplements`;
-- cache-first lookup through `getSaved(...)`;
-- offline rendering of a saved supplement;
-- saved supplement integration with future study content;
-- sync/import/export support.
-
-However, `apps/wordlover-pwa/public/online-dictionary-integration.js` saves only when the user clicks **Add as additional definition**. A successful ordinary lookup is displayed as a transient result and is not automatically written to IndexedDB.
-
-This means the missing behavior is automatic local persistence after a successful validated lookup.
-
-## Required lookup flow
+## 2. Required runtime flow
 
 ```text
 render local WordFan definition immediately
         |
         v
-read encrypted local Youdao supplement
+read global autoShowYoudaoDefinitions preference
         |
-        +-- valid local hit --> render saved entry --> stop
+        +-- false --> render no Youdao section; make no request
         |
-        +-- local miss/invalid --> evaluate Off/Manual/Automatic mode
-                                  |
-                                  v
-                             request gateway
-                                  |
-                                  v
-                         read gateway SQLite cache
-                                  |
-                    +-------------+-------------+
-                    |                           |
-                  hit                          miss
-                    |                           |
-                    |                    retrieve from Youdao
-                    |                           |
-                    |                    parse + validate
-                    |                           |
-                    |                    persist SQLite
-                    +-------------+-------------+
-                                  |
-                                  v
-                         return normalized entry
-                                  |
-                                  v
-                     validate exact requested term
-                                  |
-                                  v
-                    persist encrypted IndexedDB
-                                  |
-                                  v
-                    render saved/offline-ready state
+        v
+read device-local Youdao supplement from IndexedDB
+        |
+        +-- valid hit --> render immediately; zero gateway calls
+        |
+        +-- miss/corrupt --> if offline, show compact offline state
+                            |
+                            v
+                       request WordFan gateway
+                            |
+                            v
+                    read gateway SQLite cache
+                            |
+                 +----------+----------+
+                 |                     |
+                hit                   miss
+                 |                     |
+                 |               retrieve Youdao
+                 |                     |
+                 |               parse + validate
+                 |                     |
+                 |               persist SQLite
+                 +----------+----------+
+                            |
+                            v
+                 return normalized entry
+                            |
+                            v
+               validate exact requested term
+                            |
+                            v
+            upsert plaintext IndexedDB supplement
+                            |
+                            v
+                  render Youdao definition
 ```
 
-## Client behavior
+## 3. User-visible states
 
-### Automatic persistence trigger
+| State | UI |
+|---|---|
+| Disabled | No Youdao section |
+| Local cache hit | Definition and `Source: Youdao` |
+| Gateway lookup running | Compact `Checking Youdao…` |
+| Success | Definition and optional full-entry link |
+| Offline local miss | Compact non-blocking offline message |
+| Gateway failure | Compact error; optional failure-only Retry |
+| Local save failure | Show transient definition plus compact save warning |
 
-Automatically persist a successful validated integrated lookup produced by:
+Normal views must not show:
 
-- Automatic mode;
-- an explicit Manual-mode **Check Youdao** action;
-- an explicit successful Refresh.
+- Check Youdao Online;
+- Add as additional definition;
+- routine Retry Youdao;
+- Manual lookup mode.
 
-Do not persist:
+`Open full entry on Youdao` may remain as a secondary fallback link.
 
-- unsupported input;
-- no-result responses;
-- network/provider errors;
-- malformed entries;
-- entries whose normalized term differs from the request;
-- stale results after the displayed term changes;
-- aborted/timed-out requests;
-- external-link navigation without an integrated response.
+## 4. Preference model
 
-### Additive data model
-
-The cached definition remains a provider supplement. It must not replace:
-
-- the ECDICT/Kaikki definition;
-- a user-authored dictionary entry;
-- vocabulary/review/FSRS state.
-
-The local WordFan definition remains primary. The Youdao section remains visibly attributed.
-
-### Lookup controller changes
-
-Update `online-dictionary-lookup-controller.js` or add a focused orchestration layer with an asynchronous successful-result hook:
+Add one canonical preference:
 
 ```js
-onSuccess: async ({ term, entry, forceRefresh }) => finalState
+autoShowYoudaoDefinitions: boolean
 ```
 
-Required invariants:
+Default:
 
-- run only after request-ID, stale-result, and abort checks pass;
-- verify the entry belongs to the requested normalized term;
-- await the local save before publishing final `saved` state;
-- if IndexedDB saving fails, still render the valid transient entry and attach a non-blocking `saveError`;
-- shared request deduplication may result in repeated idempotent save calls, but must not corrupt data or produce conflicting timestamps;
-- a response for an old view must never be persisted under the new view's term.
+```js
+true
+```
 
-### Integration changes
-
-Update `online-dictionary-integration.js` so persistence is not owned only by the Save button.
-
-Normal successful lookup should become:
+Migration:
 
 ```text
-checking -> success received -> local upsert -> saved
+legacy automatic -> true
+legacy manual    -> true
+legacy off       -> false
+missing          -> true
 ```
 
-The ordinary success UI should not require **Add as additional definition**. That button may be removed, or retained only as **Retry local save** after an IndexedDB failure.
+Rules:
 
-### Supplement repository changes
+- persisted boolean overrides the legacy enum;
+- runtime code reads only the boolean after normalization;
+- legacy `onlineDictionaryMode` may remain temporarily only for old backup/import compatibility;
+- explicit legacy Off must never be silently changed to On.
 
-In `dictionary-supplements.js`, add or adapt an idempotent upsert operation such as:
+## 5. Context and answer-reveal rules
 
-```js
-upsertFromLookup(entry, metadata)
-```
+Automatic Youdao display is allowed only where a definition is already allowed:
 
-Requirements:
+- main dictionary result;
+- vocabulary detail;
+- review after answer/definition reveal;
+- Study One More after reveal;
+- spelling meaning/reveal surfaces after the answer is permitted.
 
-- stable ID remains `youdao:<normalizedTerm>`;
-- preserve original `savedAt` when updating an existing record;
-- update `sourceRetrievedAt` and `updatedAt`;
-- retain provider ID, label, source URL, parser version, and entry schema version;
-- validate the complete entry before writing;
-- identical repeated results must not create duplicate records;
-- tombstones continue to prevent unwanted resurrection through sync.
+It must never reveal a quiz, review, Study One More, or spelling answer before the existing local-definition reveal point.
 
-Optional operational metadata:
+## 6. Device-local persistence
+
+### 6.1 Storage decision
+
+Youdao supplements are stored as plaintext records in the dedicated `dictionarySupplements` IndexedDB object store. Encryption is not required for this personal-use feature.
+
+Existing encryption for vocabulary, learning history, and other WordFan data remains unchanged and is out of scope.
+
+### 6.2 Record shape
 
 ```js
 {
-  cacheOrigin: "gateway-hit" | "gateway-miss" | "refresh",
-  locallyPersistedAt: ISO_TIMESTAMP,
-  gatewayCachedAt: ISO_TIMESTAMP
+  recordSchemaVersion: 1,
+  id: `youdao:${normalizedTerm}`,
+  providerId: "youdao",
+  normalizedTerm,
+  entry,
+  savedAt,
+  updatedAt,
+  sourceRetrievedAt,
+  deleted: false
 }
 ```
 
-These fields are diagnostic only and must not affect record identity.
+Required behavior:
 
-### Runtime cache invalidation
+- stable key: provider + normalized term;
+- idempotent upsert;
+- preserve original `savedAt`;
+- update `updatedAt` and provider retrieval metadata;
+- validate before write;
+- never create duplicate rows;
+- local supplement scope is global across learning tracks;
+- do not write aborted, stale, malformed, wrong-term, no-result, timeout, or failed responses.
 
-All local supplement changes, including automatic save, refresh, import, sync, and removal, must update one shared repository/event path that:
+### 6.3 Existing encrypted-row migration
 
-- updates or invalidates `savedStudySupplements`;
-- refreshes all open Youdao panels for the same normalized term;
-- updates future quiz, review, Study One More, and spelling snapshots;
-- updates supplement counts and diagnostics.
+Existing encrypted supplement rows must migrate without data loss.
 
-An active question already shown to the user remains frozen. Only future questions use a newly saved or refreshed entry.
+Preferred lazy migration:
 
-### Renderer changes
+1. read raw row;
+2. if plaintext, validate and return;
+3. if encrypted, decrypt using the existing helper;
+4. validate the supplement;
+5. rewrite the same key as plaintext;
+6. return the migrated record;
+7. if decrypt/validation fails, quarantine or skip only that optional row.
 
-Update `online-dictionary-result-renderer.js` so normal completion shows a status such as:
+A corrupt optional Youdao row must not globally block WordFan vocabulary saves, checkpoints, import, or sync.
 
-```text
-Saved locally for offline use · Source: Youdao
-```
+## 7. Gateway persistence
 
-Controls:
+The personal VPS remains cache-first.
 
-- Refresh saved entry;
-- Remove local copy.
+Required SQLite behavior:
 
-When local persistence fails, render the definition and a retryable message:
+- normalized key shared across case, whitespace, and apostrophe variants;
+- first miss retrieves and stores;
+- later request returns SQLite copy without Youdao retrieval;
+- cache survives process restart;
+- definitions do not expire automatically;
+- explicit refresh replaces only after successful validation;
+- refresh failure preserves the old row;
+- invalid cached rows are repaired;
+- concurrent same-term requests do not corrupt SQLite or multiply upstream retrievals.
 
-```text
-Definition loaded, but it could not be saved on this device.
-```
-
-The UI should explain that removing the local copy does not remove the gateway copy and that the entry may be restored on a later lookup.
-
-## Gateway behavior
-
-### Persistent cache schema
-
-Migrate the current payload-only SQLite table to an explicit versioned record, for example:
-
-```sql
-CREATE TABLE lookups (
-  provider_id TEXT NOT NULL,
-  normalized_term TEXT NOT NULL,
-  entry_schema_version INTEGER NOT NULL,
-  parser_version TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  source_retrieved_at TEXT NOT NULL,
-  cached_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  PRIMARY KEY (provider_id, normalized_term, entry_schema_version)
-);
-```
-
-Provide an idempotent migration from the existing table and retain valid rows where possible.
-
-### Cache-hit validation
-
-Before returning a cached row:
-
-- parse payload JSON;
-- validate provider and schema version;
-- verify `normalizedTerm` exactly matches the normalized request;
-- require at least one usable definition;
-- verify required retrieval/parser metadata;
-- if invalid, quarantine or remove the row and perform a fresh upstream retrieval.
-
-### Atomic refresh
-
-Explicit Refresh must:
-
-1. retain the existing valid SQLite row;
-2. retrieve and parse a fresh upstream result;
-3. validate and serialize it;
-4. replace the row within a transaction;
-5. return the new entry.
-
-A refresh failure leaves the old row untouched and usable.
-
-### SQLite concurrency
-
-The current server uses `ThreadingHTTPServer` with one SQLite connection and `check_same_thread=False`. Replace this with either:
-
-- one SQLite connection per repository operation/request; or
-- serialized access through a lock and a configured busy timeout.
-
-Add concurrent same-term tests. Prefer deduplicating simultaneous cache misses so they perform one upstream retrieval.
-
-### Cache lifetime
-
-For this personal app, valid gateway definitions do not expire automatically. They remain until:
-
-- explicit Refresh replaces them;
-- invalid-record repair removes them;
-- a future schema migration invalidates them.
-
-Do not add periodic or background refresh.
-
-### Gateway cache metadata
-
-Expose cache status for diagnostics using response headers or a versioned envelope, for example:
+Recommended cache metadata:
 
 ```text
 X-WordFan-Cache: HIT | MISS | REFRESH
 X-WordFan-Gateway-Cached-At: <ISO timestamp>
 ```
 
-Normal UI does not need to display cache status.
+## 8. Exact code changes
 
-## Removal behavior
+### `apps/wordlover-pwa/public/index.html`
 
-### Remove local copy
+- replace `#onlineDictionaryMode` select with checkbox `#autoShowYoudaoDefinitions`;
+- remove Off/Manual/Automatic options;
+- remove planned/Phase-1 copy;
+- add accurate short explanatory text.
 
-The normal PWA removal action:
+### `apps/wordlover-pwa/public/ui-preferences.js`
 
-- removes or tombstones the encrypted local supplement;
-- clears the in-memory study supplement cache;
-- updates open views;
-- does not delete the gateway SQLite row.
+Add:
 
-A later online lookup can rehydrate the device from the gateway without another upstream retrieval.
+```js
+export const DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS = true;
+export function normalizeAutoShowYoudaoDefinitions(value, legacyMode) { ... }
+```
 
-### Gateway removal
+Include the boolean in `normalizeUiPreferences()`.
 
-Deleting a gateway record is an owner administrative/debug operation and is not exposed through ordinary WordFan UI.
+Keep legacy enum normalization only for migration/import compatibility tests.
 
-## Sync, backup, and export
+### `apps/wordlover-pwa/public/app.js`
 
-Automatically persisted local entries are ordinary saved supplements and must participate in:
+- replace runtime `onlineDictionaryMode` decisions with `autoShowYoudaoDefinitions`;
+- migrate and persist the boolean once;
+- bind and synchronize the Settings checkbox;
+- Off: cancel active requests and rerender current views without Youdao mount points;
+- On: rerender the current eligible view and hydrate automatically;
+- preserve all answer-reveal timing;
+- expose the boolean in diagnostics/export where appropriate.
 
-- encrypted local persistence;
-- owner-only Google Drive app-data sync;
-- user-data backup/import;
-- personal enhanced-dictionary export;
-- deterministic tombstone/conflict handling.
+### `apps/wordlover-pwa/public/online-dictionary-actions.js`
 
-Transient failures and no-result responses create no supplement record.
+Change the renderer contract from mode-based to enabled-based:
 
-Bump backup or user-data schema versions if necessary so an older client cannot silently remove the supplement collection when it rewrites a backup.
+```js
+renderOnlineDictionaryActions(term, { enabled, context })
+```
 
-## Failure matrix
+- disabled returns empty string;
+- enabled returns a passive source-attributed mount point;
+- do not render a normal lookup button.
+
+### `apps/wordlover-pwa/public/online-dictionary-integration.js`
+
+- hydrate enabled mount points immediately;
+- local hit renders saved state;
+- local miss automatically starts provider lookup;
+- remove normal listeners for `[data-youdao-check]` and `[data-youdao-save]`;
+- successful lookup automatically calls `upsertFromLookup()`;
+- cancel on node removal, term change, toggle Off, superseding request, and timeout;
+- shared in-flight requests remain deduplicated;
+- persistence remains idempotent.
+
+### `apps/wordlover-pwa/public/online-dictionary-lookup-controller.js`
+
+Replace public mode branching with automatic-only enabled behavior, for example:
+
+```js
+display(term, { enabled = true, allowNetwork = true } = {})
+```
+
+State flow:
+
+```text
+unsupported/disabled -> hidden
+saved local entry -> saved
+local miss + offline -> offline
+local miss + online -> checking -> lookup -> onSuccess upsert -> saved
+```
+
+Retain request IDs, AbortController, timeout, stale-response checks, and shared request deduplication. Persistence must run only after stale/abort validation.
+
+### `apps/wordlover-pwa/public/dictionary-supplements.js`
+
+- provide idempotent `upsertFromLookup(entry, metadata)`;
+- preserve stable key and original `savedAt`;
+- validate complete provider entry;
+- support plaintext records;
+- keep deterministic merge/tombstone behavior if sync uses tombstones.
+
+### `apps/wordlover-pwa/public/app.js` storage adapter
+
+- use raw IndexedDB read/write/list/remove for `dictionarySupplements`;
+- detect and lazily migrate encrypted rows;
+- isolate corrupt optional rows;
+- ensure import, restore, sync, and rollback invalidate runtime supplement caches and notify open views.
+
+### `apps/wordlover-pwa/public/online-dictionary-result-renderer.js`
+
+- no normal Check or Add button;
+- checking, saved, offline, failure, and save-warning states only;
+- Retry control only after a real failure;
+- escape all provider text;
+- retain `Source: Youdao` and optional external link.
+
+### `apps/youdao-vps/server.py`
+
+- preserve persistent SQLite cache-first behavior;
+- validate cached entries before return;
+- use safe concurrent SQLite access;
+- deduplicate same-term misses if practical;
+- preserve old row on refresh failure;
+- expose cache hit/miss metadata.
+
+### Release/version files
+
+Use the repository bump script and update in lockstep:
+
+- HTML asset query versions;
+- service-worker shell cache/assets;
+- release manifest;
+- automated test asset list;
+- generated symbol map.
+
+Never edit `gh-pages` directly.
+
+## 9. Failure matrix
 
 | Condition | Required behavior |
 |---|---|
-| Valid local IndexedDB hit | Render locally and make zero gateway requests |
-| Corrupt local record | Ignore/quarantine it, use gateway, then repair local copy |
-| Offline with local hit | Render saved Youdao definition |
-| Offline with local miss | Keep local WordFan definition usable and show a non-blocking offline state |
-| Gateway SQLite hit | Return without upstream retrieval and persist on the device |
-| Invalid gateway row | Retrieve a fresh entry and repair SQLite |
-| Upstream failure on gateway miss | Keep local WordFan result; create no local supplement |
-| Local IndexedDB write failure | Display transient result and show retryable save error |
+| Toggle Off | No section and zero gateway requests |
+| Local plaintext hit | Immediate render, zero gateway requests |
+| Legacy encrypted hit | Migrate to plaintext and render |
+| Corrupt local row | Skip/quarantine, use gateway, repair local row |
+| Offline local hit | Render cached definition |
+| Offline local miss | Keep local WordFan definition usable |
+| Gateway SQLite hit | Return cached gateway copy and persist locally |
+| Gateway miss | Retrieve, validate, store gateway + local |
+| Gateway error | Non-blocking error; no local success record |
+| Local write failure | Render transient valid entry with warning |
+| Term changes | Old result never rendered or persisted |
+| Toggle turns Off during lookup | Abort/ignore completion |
 | Refresh failure | Preserve old local and gateway copies |
-| Stale or aborted response | Never render or persist it |
 
-## Tests
+## 10. Required tests
+
+### Preference tests
+
+- missing -> enabled;
+- automatic -> enabled;
+- manual -> enabled;
+- off -> disabled;
+- boolean overrides legacy enum;
+- export/import round-trip preserves boolean.
+
+### Controller tests
+
+- disabled makes zero provider calls;
+- local hit makes zero provider calls;
+- local miss automatically calls provider;
+- success persists once and returns saved state;
+- shared requests persist idempotently;
+- stale, aborted, timeout, malformed, wrong-term, and no-result responses are not persisted;
+- Off during request cancels and suppresses completion;
+- offline miss is non-blocking.
+
+### Supplement-store tests
+
+- plaintext create/read/update/remove;
+- stable key and idempotent upsert;
+- preserve `savedAt`, update `updatedAt`;
+- lazy migration from encrypted row;
+- corrupt optional row does not block core WordFan writes;
+- sync/import/export round-trip remains correct;
+- deterministic tombstone behavior if retained.
+
+### Renderer tests
+
+- no Check or Add button in normal states;
+- disabled renders nothing;
+- checking/saved/offline/failure states are correct;
+- Retry exists only after failure;
+- provider HTML is escaped;
+- source link is valid.
 
 ### Gateway tests
 
-- first request retrieves upstream and persists SQLite;
-- second request returns SQLite with upstream call count still one;
-- process restart still reuses SQLite;
-- case, whitespace, and smart-apostrophe variants resolve to one key;
-- Refresh atomically replaces the row;
-- Refresh failure preserves the old row;
-- invalid JSON, wrong schema, and wrong-term rows are repaired;
-- concurrent requests do not corrupt SQLite;
-- existing schema migration retains valid entries;
-- failed/no-result responses are not stored as successful definitions.
+- first miss retrieves and stores;
+- second request does not retrieve upstream;
+- process restart reuses SQLite;
+- normalization variants share one key;
+- invalid cached row is repaired;
+- refresh succeeds atomically;
+- refresh failure preserves old row;
+- concurrent same-term requests are safe.
 
-### Client unit tests
+### Browser/PWA tests in Chromium and WebKit
 
-- local hit results in zero provider calls;
-- successful Automatic lookup saves locally exactly once;
-- successful Manual check saves locally;
-- shared lookup from multiple views remains idempotent;
-- stale, aborted, malformed, and wrong-term responses are not saved;
-- persistence failure displays the entry with `saveError`;
-- second display after persistence makes zero gateway calls;
-- Refresh success replaces the local record;
-- Refresh failure keeps the old record;
-- removal allows later gateway rehydration.
+1. fresh profile defaults On;
+2. local definition appears before Youdao;
+3. Youdao appears without clicking;
+4. one gateway call and one local row are created;
+5. reload/reopen makes zero additional gateway calls;
+6. offline cached display works;
+7. turning Off removes the section and prevents requests;
+8. turning On restores cached definition immediately;
+9. rapid term changes produce no stale result;
+10. review/Study One More/spelling reveal timing remains correct;
+11. legacy Manual/Automatic/Off preferences migrate correctly;
+12. encrypted supplement rows migrate to plaintext;
+13. installed-PWA update succeeds through the current update flow.
 
-### Browser/PWA scenario
+## 11. Acceptance criteria
 
-Use gateway and upstream request counters:
-
-1. fresh device searches `charge`;
-2. one gateway request occurs and local IndexedDB record is created;
-3. reload and search again;
-4. gateway request count does not increase;
-5. switch offline and reload;
-6. saved Youdao definition still renders;
-7. remove only the local copy, reconnect, and search again;
-8. gateway request count increases but upstream count does not;
-9. explicit Refresh increases upstream count and updates both copies.
-
-Run in Chromium and WebKit where supported.
-
-## Acceptance criteria
-
-- Gateway persistence survives process restart.
-- An ordinary repeated gateway request does not retrieve the same term from Youdao again.
-- Every successful validated integrated result is automatically stored in encrypted local IndexedDB.
-- Repeated display on the same device makes zero gateway requests.
-- A first lookup on another device reuses the gateway copy and stores it locally.
-- The definition remains available offline after the first successful lookup on that device.
-- Refresh updates both layers only after successful validation and preserves old data on failure.
-- Invalid, stale, aborted, and error responses are never persisted.
-- Removing the local copy does not delete gateway data and later lookup rehydrates the device.
-- Sync, import, export, existing dictionary behavior, study, FSRS, and offline startup remain correct.
-- Unit, gateway, restart, browser, and PWA tests pass.
+- one global toggle controls all integrated Youdao behavior;
+- default On, explicit legacy Off preserved;
+- no normal per-word Check or Add button;
+- enabled mode automatically displays local-cache or gateway definitions;
+- successful definitions persist automatically in plaintext IndexedDB;
+- same-device repeat display makes zero gateway requests;
+- gateway repeat lookup makes no additional Youdao retrieval;
+- disabled mode hides the section and makes zero requests without deleting cache;
+- existing encrypted supplement data migrates without loss;
+- local definitions never wait for Youdao;
+- review/study/spelling reveal timing is unchanged;
+- all unit, migration, gateway, browser, offline, sync/import/export, and PWA-upgrade tests pass.
