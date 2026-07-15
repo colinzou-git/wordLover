@@ -44,6 +44,7 @@ export const FONT_SCALE_MAX = 2;
 export const FONT_SCALE_STEP = 0.1;
 export const DEFAULT_ONLINE_DICTIONARY_MODE = "automatic";
 export const ONLINE_DICTIONARY_MODES = ["off", "manual", "automatic"];
+export const DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS = true;
 
 export function normalizeTrack(value) {
   return value === "spelling" ? "spelling" : "vocabulary";
@@ -71,7 +72,17 @@ export function normalizeOnlineDictionaryMode(value) {
   return ONLINE_DICTIONARY_MODES.includes(value) ? value : DEFAULT_ONLINE_DICTIONARY_MODE;
 }
 
+export function normalizeAutoShowYoudaoDefinitions(value, legacyMode) {
+  if (typeof value === "boolean") return value;
+  return normalizeOnlineDictionaryMode(legacyMode) !== "off";
+}
+
 export function normalizeUiPreferences(preferences = {}, fallback = {}) {
+  const autoShowYoudaoDefinitions = typeof preferences.autoShowYoudaoDefinitions === "boolean"
+    ? preferences.autoShowYoudaoDefinitions
+    : Object.prototype.hasOwnProperty.call(preferences, "onlineDictionaryMode")
+      ? normalizeAutoShowYoudaoDefinitions(undefined, preferences.onlineDictionaryMode)
+      : normalizeAutoShowYoudaoDefinitions(fallback.autoShowYoudaoDefinitions, fallback.onlineDictionaryMode);
   return {
     todayTrack: normalizeTrack(preferences.todayTrack ?? fallback.todayTrack),
     vocabularyTrack: normalizeTrack(preferences.vocabularyTrack ?? fallback.vocabularyTrack),
@@ -79,9 +90,7 @@ export function normalizeUiPreferences(preferences = {}, fallback = {}) {
     historyGranularity: normalizeHistoryGranularity(preferences.historyGranularity ?? fallback.historyGranularity),
     fontScale: normalizeFontScale(preferences.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE),
     goalsPeriod: normalizeGoalsPeriod(preferences.goalsPeriod ?? fallback.goalsPeriod ?? "day"),
-    onlineDictionaryMode: normalizeOnlineDictionaryMode(
-      preferences.onlineDictionaryMode ?? fallback.onlineDictionaryMode ?? DEFAULT_ONLINE_DICTIONARY_MODE,
-    ),
+    autoShowYoudaoDefinitions,
     studyOneMoreFilter: normalizeStudyOneMoreFilter(preferences.studyOneMoreFilter ?? fallback.studyOneMoreFilter ?? {}),
   };
 }

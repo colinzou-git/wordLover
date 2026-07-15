@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260715-1";
+} from "./fsrs-scheduler.js?v=20260715-2";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260715-1";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260715-1";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260715-1";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260715-2";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260715-2";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260715-2";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260715-1";
+} from "./dictionary-rendering.js?v=20260715-2";
 
 import {
   isEncryptedRecord,
@@ -24,12 +24,12 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260715-1";
+} from "./persistence.js?v=20260715-2";
 
 import {
   ratingFromRetries,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260715-1";
+} from "./spelling.js?v=20260715-2";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -37,34 +37,35 @@ import {
   FONT_SCALE_MIN,
   FONT_SCALE_MAX,
   FONT_SCALE_STEP,
-  DEFAULT_ONLINE_DICTIONARY_MODE,
+  DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS,
   normalizeTrack,
   normalizeHistoryGranularity,
   normalizeGoalsPeriod,
   normalizeStudyOneMoreLevel,
   normalizeStudyOneMoreFilter,
   normalizeFontScale,
-  normalizeOnlineDictionaryMode,
+  normalizeAutoShowYoudaoDefinitions,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260715-1";
+} from "./ui-preferences.js?v=20260715-2";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260715-1";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260715-1";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260715-2";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260715-2";
 import {
   createDictionarySupplementStore,
   mergeDictionarySupplementRecords,
   normalizeSupplementTerm,
-} from "./dictionary-supplements.js?v=20260715-1";
-import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260715-1";
-import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260715-1";
-import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260715-1";
+  validateDictionarySupplementPortableRecord,
+} from "./dictionary-supplements.js?v=20260715-2";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260715-2";
+import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260715-2";
+import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260715-2";
 
 import {
   createFsrsCard,
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260715-1";
+} from "./review-state.js?v=20260715-2";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -85,7 +86,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260715-1";
+} from "./study-one-more.js?v=20260715-2";
 
 import {
   studyEventTrack,
@@ -97,11 +98,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260715-1";
+} from "./sync.js?v=20260715-2";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260715-1";
+} from "./goal-forecast.js?v=20260715-2";
 
 import {
   DEFAULT_TRACK_ID,
@@ -113,11 +114,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260715-1";
+} from "./tracks.js?v=20260715-2";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260715-1";
+} from "./full-dictionary.js?v=20260715-2";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -187,7 +188,7 @@ const onReturnSelect = document.querySelector("#onReturnSelect");
 const speakOnReturnToggle = document.querySelector("#speakOnReturnToggle");
 const dictionarySelect = document.querySelector("#dictionarySelect");
 const dictionarySelectionStatus = document.querySelector("#dictionarySelectionStatus");
-const onlineDictionaryModeSelect = document.querySelector("#onlineDictionaryMode");
+const autoShowYoudaoDefinitionsToggle = document.querySelector("#autoShowYoudaoDefinitions");
 const fullDictionaryStatus = document.querySelector("#fullDictionaryStatus");
 const fullDictionaryProgress = document.querySelector("#fullDictionaryProgress");
 const fullDictionaryInstallButton = document.querySelector("#fullDictionaryInstall");
@@ -266,7 +267,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260715-1-v166";
+const APP_VERSION = "0.6.2-product.20260715-2-v167";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -274,7 +275,7 @@ const APP_VERSION = "0.6.2-product.20260715-1-v166";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.4";
-const SHELL_CACHE_VERSION = "wordlover-shell-v166";
+const SHELL_CACHE_VERSION = "wordlover-shell-v167";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -382,7 +383,7 @@ let reviewPersistenceTimeoutMs = 4000;
 let reviewScheduleBeforeFsrsForTest = null;
 let theme = DEFAULT_THEME;
 let fontScale = DEFAULT_FONT_SCALE;
-let onlineDictionaryMode = DEFAULT_ONLINE_DICTIONARY_MODE;
+let autoShowYoudaoDefinitions = DEFAULT_AUTO_SHOW_YOUDAO_DEFINITIONS;
 let vocabularyView = {
   filter: "summary",
   page: 0,
@@ -475,7 +476,7 @@ function currentUiPreferences() {
     historyGranularity: normalizeHistoryGranularity(historyView.granularity),
     fontScale: normalizeFontScale(fontScale),
     goalsPeriod: normalizeGoalsPeriod(goalsPeriod),
-    onlineDictionaryMode: normalizeOnlineDictionaryMode(onlineDictionaryMode),
+    autoShowYoudaoDefinitions: Boolean(autoShowYoudaoDefinitions),
     studyOneMoreFilter: normalizeStudyOneMoreFilter(studyOneMoreFilter),
   };
 }
@@ -493,7 +494,9 @@ function applyUiPreferences(preferences = {}) {
   };
   if (preferences.fontScale !== undefined) applyFontScale(preferences.fontScale);
   goalsPeriod = normalizeGoalsPeriod(preferences.goalsPeriod ?? goalsPeriod);
-  onlineDictionaryMode = normalizeOnlineDictionaryMode(preferences.onlineDictionaryMode ?? onlineDictionaryMode);
+  if (typeof preferences.autoShowYoudaoDefinitions === "boolean" || Object.prototype.hasOwnProperty.call(preferences, "onlineDictionaryMode")) {
+    autoShowYoudaoDefinitions = normalizeAutoShowYoudaoDefinitions(preferences.autoShowYoudaoDefinitions, preferences.onlineDictionaryMode);
+  }
   studyOneMoreFilter = normalizeStudyOneMoreFilter(preferences.studyOneMoreFilter ?? studyOneMoreFilter);
   applyStudyOneMoreFilterToPopup(studyOneMoreFilter);
   return currentUiPreferences();
@@ -501,9 +504,8 @@ function applyUiPreferences(preferences = {}) {
 
 function renderExperimentalOnlineDictionaryActions(term, context) {
   return renderOnlineDictionaryActions(term, {
-    mode: onlineDictionaryMode,
+    enabled: autoShowYoudaoDefinitions && context !== "spelling-hint",
     context,
-    online: navigator.onLine,
   });
 }
 
@@ -1091,11 +1093,36 @@ async function deleteEncryptedStoreValue(storeName, key) {
   await deleteRawValue(storeName, key);
 }
 
+async function loadPlaintextSupplementValue(key) {
+  const raw = await loadRawValue(DICTIONARY_SUPPLEMENT_STORE, key);
+  if (!isEncryptedRecord(raw)) return raw;
+  try {
+    const migrated = validateDictionarySupplementPortableRecord(await decryptValue(raw), { validateEntry: validateYoudaoEntry });
+    await saveRawValue(DICTIONARY_SUPPLEMENT_STORE, key, migrated);
+    return migrated;
+  } catch {
+    return null;
+  }
+}
+
+async function loadPlaintextSupplementValues() {
+  const values = [];
+  for (const raw of await loadAllRawValues(DICTIONARY_SUPPLEMENT_STORE)) {
+    if (!isEncryptedRecord(raw)) { values.push(raw); continue; }
+    try {
+      const migrated = validateDictionarySupplementPortableRecord(await decryptValue(raw), { validateEntry: validateYoudaoEntry });
+      if (migrated?.id) await saveRawValue(DICTIONARY_SUPPLEMENT_STORE, migrated.id, migrated);
+      values.push(migrated);
+    } catch { /* A corrupt optional supplement must not block core user data. */ }
+  }
+  return values;
+}
+
 const dictionarySupplements = createDictionarySupplementStore({
-  read: (key) => loadEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key),
-  write: (key, value) => saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key, value),
-  remove: (key) => deleteEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, key),
-  list: () => loadAllRecordValues(DICTIONARY_SUPPLEMENT_STORE),
+  read: loadPlaintextSupplementValue,
+  write: (key, value) => saveRawValue(DICTIONARY_SUPPLEMENT_STORE, key, value),
+  remove: (key) => deleteRawValue(DICTIONARY_SUPPLEMENT_STORE, key),
+  list: loadPlaintextSupplementValues,
   validateEntry: validateYoudaoEntry,
   canPersistProvider: (providerId) => providerId === "youdao" && CONFIG.youdaoPersistenceAllowed === true,
 });
@@ -4585,7 +4612,7 @@ function checkSpelling() {
     activeSpellingSession.consecutive += 1;
     // Show the result (with the correct word) and keep the typed text on screen for a beat so the
     // user can see what they entered before it clears / advances.
-    feedback.innerHTML = `<span class="spelling-correct-label">Correct!</span><span class="spelling-answer-correct">${escapeHtml(item.term)}</span>`;
+    feedback.innerHTML = `<span class="spelling-correct-label">Correct!</span><span class="spelling-answer-correct">${escapeHtml(item.term)}</span>${renderExperimentalOnlineDictionaryActions(item.term, "spelling-reveal")}`;
     feedback.className = "spelling-feedback correct";
     input.classList.add("spelling-correct-flash");
     const reachedThreshold = activeSpellingSession.consecutive >= spellingThreshold();
@@ -6363,7 +6390,7 @@ async function applyLearningTracksBackup(backup, options = {}) {
   const localSupplements = await dictionarySupplements.list({ includeDeleted: true });
   const supplementMerge = mergeDictionarySupplementRecords(localSupplements, validated.dictionarySupplements, { validateEntry: validateYoudaoEntry });
   for (const record of supplementMerge.records) {
-    await saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
+    await saveRawValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
   }
   if (allowDuringDecryptBlock) clearDataDecryptBlock();
 
@@ -7117,7 +7144,7 @@ async function importUserData(file) {
   const localSupplements = await dictionarySupplements.list({ includeDeleted: true });
   const supplementMerge = mergeDictionarySupplementRecords(localSupplements, backup.dictionarySupplements, { validateEntry: validateYoudaoEntry });
   for (const record of supplementMerge.records) {
-    await saveEncryptedStoreValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
+    await saveRawValue(DICTIONARY_SUPPLEMENT_STORE, record.id, record);
   }
   // Switch to the imported active track and load it into memory.
   userDataRoot = registry;
@@ -7193,7 +7220,7 @@ function normalizeOnReturnAction(value) {
 function syncSettingsControls() {
   if (onReturnSelect) onReturnSelect.value = onReturnAction;
   if (speakOnReturnToggle) speakOnReturnToggle.checked = speakOnReturn;
-  if (onlineDictionaryModeSelect) onlineDictionaryModeSelect.value = onlineDictionaryMode;
+  if (autoShowYoudaoDefinitionsToggle) autoShowYoudaoDefinitionsToggle.checked = autoShowYoudaoDefinitions;
 }
 
 async function restoreFromGoogleDrive() {
@@ -8291,8 +8318,7 @@ async function init() {
   applyFontScale(fontScale);
   const savedUiPreferences = await loadValue("uiPreferences", {});
   applyUiPreferences(savedUiPreferences);
-  // Missing preferences inherit the Automatic default. A stored Off or Manual mode is an
-  // explicit user choice and must survive upgrades.
+  if (typeof savedUiPreferences?.autoShowYoudaoDefinitions !== "boolean") await persistUiPreferences();
   debugMode = await loadValue("debugMode", debugMode);
   googleClientIdOverride = String(await loadValue("googleClientIdOverride", "") ?? "").trim();
   geminiApiKeyOverride = String(await loadValue("geminiApiKeyOverride", "") ?? "").trim();
@@ -8764,12 +8790,13 @@ speakOnReturnToggle?.addEventListener("change", async () => {
   await saveValue("speakOnReturn", speakOnReturn);
 });
 
-onlineDictionaryModeSelect?.addEventListener("change", async () => {
-  onlineDictionaryMode = normalizeOnlineDictionaryMode(onlineDictionaryModeSelect.value);
+autoShowYoudaoDefinitionsToggle?.addEventListener("change", async () => {
+  autoShowYoudaoDefinitions = autoShowYoudaoDefinitionsToggle.checked;
   await persistUiPreferences();
+  window.dispatchEvent(new CustomEvent("wordlover:youdao-setting-changed", { detail: { enabled: autoShowYoudaoDefinitions } }));
   if (currentResult) renderResult(currentResult);
   renderVocabulary();
-  if (onlineDictionaryMode === "off") {
+  if (!autoShowYoudaoDefinitions) {
     document.querySelectorAll(".online-dictionary-actions").forEach((element) => element.remove());
   }
 });
@@ -8895,7 +8922,7 @@ spellingReviewPanel.addEventListener("click", (event) => {
     const item = currentSpellingItem();
     const feedback = spellingReviewPanel.querySelector("#spellingFeedback");
     if (item && feedback) {
-      feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span><span class="spelling-retry-hint">Try again when ready.</span>`;
+      feedback.innerHTML = `<span class="spelling-wrong-label">Correct spelling:</span><span class="spelling-answer">${escapeHtml(item.term)}</span><span class="spelling-retry-hint">Try again when ready.</span>${renderExperimentalOnlineDictionaryActions(item.term, "spelling-reveal")}`;
       feedback.className = "spelling-feedback wrong";
       spellingReviewPanel.querySelector("#spellingInput")?.focus();
     }
@@ -10029,6 +10056,12 @@ window.WordLoverApp = {
     quizMeaning: quizMeaningWithSupplement,
     cachedCount: () => savedStudySupplements.size,
   },
+  supplementTesting: {
+    writeLegacyEncryptedForTest: async (record) => {
+      if (!record?.id) throw new TypeError("A supplement record with an id is required.");
+      await saveRawValue(DICTIONARY_SUPPLEMENT_STORE, record.id, await encryptValue(record));
+    },
+  },
   recordReviewRating,
   persistVocabularyItemForTest: (item) => persistVocabularyItem(item),
   reviewScheduling: {
@@ -10180,8 +10213,12 @@ window.WordLoverApp = {
   uiPreferences: {
     state: () => currentUiPreferences(),
     set: async (preferences = {}) => {
+      const previousAutoShow = autoShowYoudaoDefinitions;
       applyUiPreferences(preferences);
       await persistUiPreferences();
+      if (previousAutoShow !== autoShowYoudaoDefinitions) {
+        window.dispatchEvent(new CustomEvent("wordlover:youdao-setting-changed", { detail: { enabled: autoShowYoudaoDefinitions } }));
+      }
       if (currentResult) renderResult(currentResult);
       renderVocabulary();
       renderStudyStats();

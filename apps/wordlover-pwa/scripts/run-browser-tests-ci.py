@@ -31,6 +31,7 @@ BASE = f"http://127.0.0.1:{PORT}"
 # place. (In a throwaway CI checkout there is nothing to lose; restore is a no-op
 # beyond rewriting identical bytes.)
 DICTIONARY_FILES = ("dictionary-manifest.json", "dictionary.sqlite", "dictionary.sqlite.zst")
+KAIKKI_PACKAGE = PUBLIC / "kaikki"
 
 
 @contextmanager
@@ -59,6 +60,25 @@ def preserved_dictionary():
             print("--- Restored production dictionary in public/ ---", flush=True)
 
 
+@contextmanager
+def without_optional_kaikki_package():
+    """Make the missing-package rollback test deterministic on developer machines."""
+    backup_dir = Path(tempfile.mkdtemp(prefix="wordfan-kaikki-backup-"))
+    moved = []
+    for name in DICTIONARY_FILES:
+        source = KAIKKI_PACKAGE / name
+        if source.exists():
+            shutil.move(source, backup_dir / name)
+            moved.append(name)
+    try:
+        yield
+    finally:
+        KAIKKI_PACKAGE.mkdir(parents=True, exist_ok=True)
+        for name in moved:
+            shutil.move(backup_dir / name, KAIKKI_PACKAGE / name)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
+
 def wait_for_server(timeout: int = 30) -> bool:
     for _ in range(timeout):
         try:
@@ -70,7 +90,7 @@ def wait_for_server(timeout: int = 30) -> bool:
 
 
 def main() -> int:
-    with preserved_dictionary():
+    with preserved_dictionary(), without_optional_kaikki_package():
         print("--- Creating CI dictionary ---", flush=True)
         subprocess.run(
             [sys.executable, str(SCRIPTS / "create-ci-dictionary.py"), "--force"],

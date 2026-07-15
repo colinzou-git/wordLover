@@ -61,6 +61,7 @@ export function validateDictionarySupplement(value, { validateEntry } = {}) {
     savedAt: new Date(value.savedAt).toISOString(),
     sourceRetrievedAt: new Date(value.sourceRetrievedAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
+    deleted: false,
     ...(value.userFields && typeof value.userFields === "object" && !Array.isArray(value.userFields) ? { userFields: structuredClone(value.userFields) } : {}),
     ...(value.cacheMetadata && typeof value.cacheMetadata === "object" && !Array.isArray(value.cacheMetadata) ? { cacheMetadata: structuredClone(value.cacheMetadata) } : {}),
   });

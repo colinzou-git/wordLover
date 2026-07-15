@@ -165,13 +165,13 @@ def run_rating_button_pointer_check(page: Page) -> dict:
 
 
 def run_youdao_phase1_check(page: Page) -> dict:
-    """Verify the external action in the rendered app without following the third-party link."""
+    """Verify automatic Youdao display and the global disable toggle."""
     dismiss_optional_modal(page)
     ensure_dictionary_loaded_with_reload_retry(page)
     page.evaluate(
         """async () => {
             await window.WordLoverApp.setOnReturnAction('none');
-            await window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'manual' });
+            await window.WordLoverApp.uiPreferences.set({ autoShowYoudaoDefinitions: true });
         }"""
     )
     before = page.evaluate(
@@ -189,13 +189,13 @@ def run_youdao_phase1_check(page: Page) -> dict:
     link = action.locator(".online-dictionary-link")
     href = link.get_attribute("href") or ""
     same_page = link.get_attribute("target") is None
-    manual_visible = (
+    automatic_visible = (
         "Source: Youdao" in action.inner_text()
         and "m.youdao.com/dict" in href
         and "q=abandon" in href
         and same_page
     )
-    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'off' })")
+    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ autoShowYoudaoDefinitions: false })")
     off_hidden = page.locator("#result .online-dictionary-actions").count() == 0
     after = page.evaluate(
         """() => ({
@@ -203,10 +203,10 @@ def run_youdao_phase1_check(page: Page) -> dict:
             events: window.WordLoverApp.getStudyEvents().length,
         })"""
     )
-    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ onlineDictionaryMode: 'manual' })")
+    page.evaluate("async () => window.WordLoverApp.uiPreferences.set({ autoShowYoudaoDefinitions: true })")
     return {
-        "passed": manual_visible and off_hidden and before == after,
-        "manualVisible": manual_visible,
+        "passed": automatic_visible and off_hidden and before == after,
+        "automaticVisible": automatic_visible,
         "offHidden": off_hidden,
         "samePage": same_page,
         "href": href,
