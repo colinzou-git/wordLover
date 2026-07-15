@@ -47,6 +47,8 @@ assert.equal(normalizeOnlineDictionaryMode("automatic"), "automatic");
 assert.equal(normalizeOnlineDictionaryMode("unexpected"), "automatic");
 assert.equal(normalizeUiPreferences({}).onlineDictionaryMode, "automatic");
 assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "automatic" }).onlineDictionaryMode, "automatic");
+assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "manual" }).onlineDictionaryMode, "manual");
+assert.equal(normalizeUiPreferences({ onlineDictionaryMode: "off" }).onlineDictionaryMode, "off");
 
 const fixture = {
   schemaVersion: 1, provider: { id: "youdao", label: "Youdao" }, normalizedTerm: "charge", headword: "charge",
