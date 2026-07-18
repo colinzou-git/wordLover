@@ -186,16 +186,11 @@ export function scheduleFromFsrsRating(reviewState = {}, rating = "again", revie
   const fsrsCard = serializeFsrsCard(result.card);
   const fsrsLog = serializeFsrsLog(result.log);
   const intervalDays = numeric(result.card.scheduled_days, 0);
-  const shouldMarkMastered =
-    rating !== "again" &&
-    result.card.state === State.Review &&
-    numeric(result.card.scheduled_days, 0) >= 90 &&
-    numeric(result.card.reps, 0) >= 3;
   return {
     fsrsCard,
     fsrsLog,
     intervalDays,
     dueAt: fsrsCard.due,
-    masteredAt: shouldMarkMastered ? reviewedAt.toISOString() : rating === "again" ? null : (reviewState.masteredAt ?? null),
+    masteredAt: reviewState.masteredAt ?? null,
   };
 }

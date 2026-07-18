@@ -16,6 +16,10 @@ export const DEFAULT_TRACK_NAME = "Default Track";
 // cache — is intentionally excluded so secrets can never leak into an exported file.
 export const GLOBAL_SETTINGS_ALLOWED = ["theme", "fontScale", "onReturnAction", "speakOnReturn", "uiPreferences"];
 const FSRS_RATINGS = new Set(["again", "hard", "good", "easy"]);
+const SPELLING_ERROR_CATEGORIES = new Set([
+  "missing-letter", "extra-letter", "adjacent-transposition", "repeated-letter",
+  "vowel-confusion", "apostrophe-or-hyphen", "letter-substitution", "multiple-edits",
+]);
 
 export function newTrackId(rng) {
   const random = typeof rng === "function" ? rng : Math.random;
@@ -196,6 +200,39 @@ function validateItemRecord(record, path) {
   return review ? { ...normalized, review } : normalized;
 }
 
+function validateSpellingAttempt(attempt, path) {
+  if (!isPlainObject(attempt)) throw new Error(`Backup ${path} must be an object.`);
+  if (typeof attempt.submitted !== "string") throw new Error(`Backup ${path}.submitted must be a string.`);
+  if (typeof attempt.normalizedSubmitted !== "string") throw new Error(`Backup ${path}.normalizedSubmitted must be a string.`);
+  if (typeof attempt.correct !== "boolean") throw new Error(`Backup ${path}.correct must be boolean.`);
+  if (!Number.isInteger(attempt.sequence) || attempt.sequence < 1) throw new Error(`Backup ${path}.sequence must be a positive integer.`);
+  if (!Number.isFinite(Number(attempt.responseMs)) || Number(attempt.responseMs) < 0) throw new Error(`Backup ${path}.responseMs must be non-negative.`);
+  if (!Number.isInteger(attempt.editDistance) || attempt.editDistance < 0) throw new Error(`Backup ${path}.editDistance must be a non-negative integer.`);
+  if (!Number.isInteger(attempt.lengthDelta)) throw new Error(`Backup ${path}.lengthDelta must be an integer.`);
+  const categories = assertArray(attempt.categories, `${path}.categories`);
+  for (const category of categories) {
+    if (!SPELLING_ERROR_CATEGORIES.has(category)) throw new Error(`Backup ${path}.categories contains an unsupported value.`);
+  }
+  return { ...attempt, categories: [...categories] };
+}
+
+function validateSpellingDiagnostics(event, path) {
+  if (event.attempts === undefined) return event;
+  const attempts = assertArray(event.attempts, `${path}.attempts`)
+    .map((attempt, index) => validateSpellingAttempt(attempt, `${path}.attempts[${index}]`));
+  if (!Number.isInteger(event.attemptCount) || event.attemptCount !== attempts.length) throw new Error(`Backup ${path}.attemptCount must equal attempts.length.`);
+  for (const key of ["firstAttemptCorrect", "remediationCompleted", "answerRevealed"]) {
+    if (event[key] !== undefined && typeof event[key] !== "boolean") throw new Error(`Backup ${path}.${key} must be boolean.`);
+  }
+  if (!isPlainObject(event.errorProfile)) throw new Error(`Backup ${path}.errorProfile must be an object.`);
+  const profileCategories = assertArray(event.errorProfile.categories, `${path}.errorProfile.categories`);
+  if (profileCategories.some((category) => !SPELLING_ERROR_CATEGORIES.has(category))) throw new Error(`Backup ${path}.errorProfile.categories contains an unsupported value.`);
+  const repeated = assertArray(event.errorProfile.repeatedIncorrectForms, `${path}.errorProfile.repeatedIncorrectForms`);
+  if (repeated.some((value) => typeof value !== "string")) throw new Error(`Backup ${path}.errorProfile.repeatedIncorrectForms must contain strings.`);
+  if (!Number.isFinite(Number(event.errorProfile.maxEditDistance)) || Number(event.errorProfile.maxEditDistance) < 0) throw new Error(`Backup ${path}.errorProfile.maxEditDistance must be non-negative.`);
+  return { ...event, attempts };
+}
+
 function validateEventRecord(record, path) {
   const normalized = normalizeTermRecord(record, path);
   if (!normalized.id && !normalized.eventKey) throw new Error(`Backup ${path} is missing id/eventKey.`);
@@ -204,7 +241,7 @@ function validateEventRecord(record, path) {
   if (normalized.rating !== undefined || normalized.type === "review" || normalized.type === "practice") {
     assertValidRating(normalized.rating, `${path}.rating`);
   }
-  return normalized;
+  return validateSpellingDiagnostics(normalized, path);
 }
 
 function validateUserDictionaryRecord(record, path) {

@@ -1,16 +1,16 @@
 // Pure snapshot merge helpers for Google Drive sync.
 // No globals, no DOM, no IndexedDB. All time-sensitive helpers accept nowMs.
 
-import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260715-2";
-import { normalizeTrack } from "./ui-preferences.js?v=20260715-2";
+import { normalizeReviewState, rebuildItemsReviewStateFromEvents } from "./review-state.js?v=20260718-3";
+import { normalizeTrack } from "./ui-preferences.js?v=20260718-3";
 import {
   BACKUP_SCHEMA_VERSION,
   BACKUP_APP,
   DEFAULT_TRACK_ID,
   serializeTrack,
   trackRecords,
-} from "./tracks.js?v=20260715-2";
-import { mergeDictionarySupplementRecords } from "./dictionary-supplements.js?v=20260715-2";
+} from "./tracks.js?v=20260718-3";
+import { mergeDictionarySupplementRecords } from "./dictionary-supplements.js?v=20260718-3";
 
 function normalizeTerm(term) {
   return String(term ?? "")
@@ -192,10 +192,14 @@ function mergeOneTrack(id, localTrack, remoteTrack, nowMs, nowIso) {
   const vocabulary = rebuildItemsReviewStateFromEvents(
     mergeVocabularySources(local.vocabulary, remote.vocabulary, nowMs),
     studyEvents,
+    nowMs,
+    "vocabulary",
   );
   const spelling = rebuildItemsReviewStateFromEvents(
     mergeVocabularySources(local.spelling, remote.spelling, nowMs),
     spellingEvents,
+    nowMs,
+    "spelling",
   );
   const known = mergeKnownSources(local.known, remote.known, activeStudyTermsFromItems(vocabulary, spelling));
   const userDictionary = mergeUserDictionarySources(local.userDictionary, remote.userDictionary);
