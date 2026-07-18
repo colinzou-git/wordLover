@@ -3,10 +3,17 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260715-2";
+} from "./fsrs-scheduler.js?v=20260718-3";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260715-2";
-import { ratingFromRetries, spellingThreshold } from "./spelling.js?v=20260715-2";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260718-3";
+import {
+  analyzeSpellingAttempt,
+  firstAttemptCorrectFromRetries,
+  levenshteinDistance,
+  ratingFromRetries,
+  summarizeSpellingAttempts,
+  spellingThreshold,
+} from "./spelling.js?v=20260718-3";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -16,7 +23,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260715-2";
+} from "./ui-preferences.js?v=20260718-3";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -27,17 +34,21 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260715-2";
+} from "./sync.js?v=20260718-3";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260715-2";
+} from "./study-one-more.js?v=20260718-3";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260715-2";
+} from "./goal-forecast.js?v=20260718-3";
+import {
+  evaluateMasteryEvidence,
+  rebuildReviewStateFromEvents,
+} from "./review-state.js?v=20260718-3";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -48,10 +59,10 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260715-2";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260715-2";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260715-2";
-import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260715-2";
+} from "./tracks.js?v=20260718-3";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260718-3";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260718-3";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260718-3";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -65,7 +76,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v167";
+const SHELL_CACHE_NAME = "wordlover-shell-v170";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 8;
 const APP_KV_STORE = "kv";
@@ -83,33 +94,33 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260715-2",
-  "/dictionary-config.js?v=20260715-2",
-  "/dictionary-registry.js?v=20260715-2",
-  "/dictionary-selection.js?v=20260715-2",
-  "/dictionary-rendering.js?v=20260715-2",
-  "/full-dictionary.js?v=20260715-2",
-  "/online-dictionary-actions.js?v=20260715-2",
-  "/online-dictionary-provider.js?v=20260715-2",
-  "/online-dictionary-lookup-controller.js?v=20260715-2",
-  "/online-dictionary-result-renderer.js?v=20260715-2",
-  "/online-dictionary-integration.js?v=20260715-2",
-  "/online-dictionary-supplement-lifecycle.js?v=20260715-2",
-  "/dictionary-supplements.js?v=20260715-2",
-  "/study-supplements.js?v=20260715-2",
-  "/youdao-provider.js?v=20260715-2",
-  "/youdao-entry-schema.js?v=20260715-2",
-  "/persistence.js?v=20260715-2",
-  "/spelling.js?v=20260715-2",
-  "/ui-preferences.js?v=20260715-2",
-  "/review-state.js?v=20260715-2",
-  "/study-one-more.js?v=20260715-2",
-  "/sync.js?v=20260715-2",
-  "/fsrs-scheduler.js?v=20260715-2",
-  "/goal-forecast.js?v=20260715-2",
-  "/tracks.js?v=20260715-2",
-  "/styles.css?v=20260715-2",
-  "/wordlover-config.js?v=20260715-2",
+  "/app.js?v=20260718-3",
+  "/dictionary-config.js?v=20260718-3",
+  "/dictionary-registry.js?v=20260718-3",
+  "/dictionary-selection.js?v=20260718-3",
+  "/dictionary-rendering.js?v=20260718-3",
+  "/full-dictionary.js?v=20260718-3",
+  "/online-dictionary-actions.js?v=20260718-3",
+  "/online-dictionary-provider.js?v=20260718-3",
+  "/online-dictionary-lookup-controller.js?v=20260718-3",
+  "/online-dictionary-result-renderer.js?v=20260718-3",
+  "/online-dictionary-integration.js?v=20260718-3",
+  "/online-dictionary-supplement-lifecycle.js?v=20260718-3",
+  "/dictionary-supplements.js?v=20260718-3",
+  "/study-supplements.js?v=20260718-3",
+  "/youdao-provider.js?v=20260718-3",
+  "/youdao-entry-schema.js?v=20260718-3",
+  "/persistence.js?v=20260718-3",
+  "/spelling.js?v=20260718-3",
+  "/ui-preferences.js?v=20260718-3",
+  "/review-state.js?v=20260718-3",
+  "/study-one-more.js?v=20260718-3",
+  "/sync.js?v=20260718-3",
+  "/fsrs-scheduler.js?v=20260718-3",
+  "/goal-forecast.js?v=20260718-3",
+  "/tracks.js?v=20260718-3",
+  "/styles.css?v=20260718-3",
+  "/wordlover-config.js?v=20260718-3",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -125,7 +136,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260715-2",
+  "/automated-tests.js?v=20260718-3",
 ];
 
 let lastResults = null;
@@ -2309,6 +2320,11 @@ async function runMainAppStudySmoke() {
     await answerActiveVocabularyQuiz({ useKeyboard: true });
     clickFsrsRating("good");
     const reviewDueSecondTerm = await waitForVocabularyQuizTerm(reviewDueFirstTerm);
+    const assistedReviewEvent = frameWindow.WordLoverApp.getStudyEvents()
+      .find((event) => event.normalizedTerm === firstReviewItem?.normalizedTerm && event.type === "review");
+    if (assistedReviewEvent?.answerRevealed !== true) {
+      throw new Error(`Showing the vocabulary dictionary must persist assistance evidence: ${JSON.stringify(assistedReviewEvent)}`);
+    }
     reviewDictionaryResetsForNextWord =
       frameDocument.querySelector("#quizPanel [data-review-dictionary-toggle]")?.textContent?.trim() === "Show"
       && frameDocument.querySelector("#reviewDictionaryDefinition")?.hidden === true;
@@ -2460,6 +2476,22 @@ async function runMainAppStudySmoke() {
       (state) => state && state.completed >= 1 && state.currentTerm !== spellingFirstTryBefore.currentTerm,
       "Spelling did not auto-advance after a first-try correct answer with different capitalization",
     );
+    const spellingFirstTryEvent = frameWindow.WordLoverApp
+      .getSpellingEvents()
+      .find((event) => event.normalizedTerm === spellingFirstTryBefore.currentTerm && event.type === "review");
+    if (
+      !spellingFirstTryEvent
+      || spellingFirstTryEvent.rating !== "easy"
+      || spellingFirstTryEvent.firstAttemptCorrect !== true
+      || spellingFirstTryEvent.remediationCompleted !== false
+      || spellingFirstTryEvent.attemptCount !== 1
+      || spellingFirstTryEvent.attempts?.length !== 1
+      || spellingFirstTryEvent.attempts[0]?.correct !== true
+      || spellingFirstTryEvent.attempts[0]?.categories?.length !== 0
+      || spellingFirstTryEvent.answerRevealed !== false
+    ) {
+      throw new Error(`First-try spelling outcome was recorded incorrectly: ${JSON.stringify(spellingFirstTryEvent)}`);
+    }
     frameWindow.WordLoverApp.spelling.close();
 
     const spellingRetryOne = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingretryone", "retry one meaning", "retry one");
@@ -2471,7 +2503,9 @@ async function runMainAppStudySmoke() {
     await frameWindow.WordLoverApp.spelling.start();
     const spellingRetryBefore = frameWindow.WordLoverApp.spelling.state();
     if (!spellingRetryBefore?.currentTerm || spellingRetryBefore.queueLength < 2) throw new Error("Spelling retry design test did not start a multi-word session.");
-    frameWindow.WordLoverApp.spelling.answer(`${spellingRetryBefore.currentTerm}-wrong`);
+    const retryTerm = spellingRetryBefore.currentTerm;
+    const transposedRetryTerm = retryTerm.length > 1 ? `${retryTerm[1]}${retryTerm[0]}${retryTerm.slice(2)}` : `${retryTerm}x`;
+    frameWindow.WordLoverApp.spelling.answer(transposedRetryTerm);
     if (!frameWindow.WordLoverApp.spelling.state()?.awaitingRetry) throw new Error("Spelling retry design test did not enter retry state after a wrong answer.");
     const strictWrongText = frameDocument.querySelector("#spellingFeedback")?.textContent ?? "";
     const spellingWrongHidesAnswer = !strictWrongText.includes(spellingRetryBefore.currentTerm) && /Try again/i.test(strictWrongText);
@@ -2499,8 +2533,23 @@ async function runMainAppStudySmoke() {
     const spellingRetryEvent = frameWindow.WordLoverApp
       .getSpellingEvents()
       .find((event) => event.normalizedTerm === spellingRetryBefore.currentTerm && event.type === "review");
-    if (!spellingRetryEvent || spellingRetryEvent.rating !== "good") {
-      throw new Error(`Spelling retry completion should record retry-based rating. Event: ${JSON.stringify(spellingRetryEvent)}`);
+    const spellingRetryItem = frameWindow.WordLoverApp
+      .getSpelling()
+      .find((item) => item.normalizedTerm === spellingRetryBefore.currentTerm);
+    if (
+      !spellingRetryEvent
+      || spellingRetryEvent.rating !== "again"
+      || spellingRetryEvent.firstAttemptCorrect !== false
+      || spellingRetryEvent.remediationCompleted !== true
+      || spellingRetryEvent.attemptCount !== 4
+      || spellingRetryEvent.attempts?.length !== 4
+      || spellingRetryEvent.attempts[0]?.correct !== false
+      || !spellingRetryEvent.attempts[0]?.categories?.includes("adjacent-transposition")
+      || !spellingRetryEvent.attempts.slice(1).every((attempt) => attempt.correct)
+      || spellingRetryEvent.answerRevealed !== true
+      || spellingRetryItem?.review?.lastRating !== "again"
+    ) {
+      throw new Error(`Missed spelling must remain an FSRS failure after remediation: ${JSON.stringify({ event: spellingRetryEvent, review: spellingRetryItem?.review })}`);
     }
 
     const spellingPersistFailOne = await frameWindow.WordLoverApp.spelling.addItemForTest("spellingpersistfailone", "persist fail one meaning", "persist fail one");
@@ -2525,6 +2574,7 @@ async function runMainAppStudySmoke() {
       spellingPersistenceFailureSafe =
         after?.currentTerm === before.currentTerm
         && after?.completed === 0
+        && after?.pendingCompletion === true
         && frameWindow.WordLoverApp.getSpellingEvents().length === beforeSpellingEvents
         && afterReview === beforeReview
         && /Could not save this spelling review/i.test(frameDocument.querySelector("#spellingFeedback")?.textContent ?? "");
@@ -2815,6 +2865,7 @@ async function runEarlyPracticePersistenceTest() {
     const futureIso = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
     item.review.dueAt = futureIso;
     item.review.intervalDays = 10;
+    item.review.masteredAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     item.review.fsrsCard = { ...(item.review.fsrsCard ?? {}), due: futureIso };
     await app.persistVocabularyItemForTest(item);
     const itemStoreKey = item.learningTrackId ? `${item.learningTrackId}::${item.normalizedTerm}` : item.normalizedTerm;
@@ -2840,19 +2891,65 @@ async function runEarlyPracticePersistenceTest() {
     const blobAfterPractice = await getAppStoreValue(APP_VOCABULARY_STORE, itemStoreKey);
     const practiceNotUpdatedInDb = JSON.stringify(blobAfterPractice) === JSON.stringify(blobAfterSetup);
 
-    // Practice again/miss → early-practice-full-failure → event type "review", item updated
-    await app.recordReviewRating(item, "again", "miss", 5000, "practice", "early-practice-fail-test");
+    // Deliberately request Hard after a miss. Policy must normalize to Again.
+    await app.recordReviewRating(item, "hard", "miss", 5000, "practice", "early-practice-fail-test");
     const eventsAfterFail = app.getStudyEvents();
     const failEvent = eventsAfterFail[eventsAfterFail.length - 1];
     const failEventType = failEvent?.type;
     const failItemDueChanged = item.review.dueAt !== originalDueAt;
+    const failRatingForcedAgain = failEvent?.rating === "again" && failEvent?.requestedRating === "hard";
+    const failDueNotLengthened = Date.parse(item.review.dueAt) <= Date.parse(originalDueAt);
+    const failScheduleConsistent =
+      item.review.fsrsCard?.due === item.review.dueAt
+      && item.review.intervalDays === item.review.fsrsCard?.scheduled_days
+      && item.review.intervalDays === item.review.fsrsCard?.scheduledDays;
+    const failClearsMastery = item.review.masteredAt === null;
+    const failLastRatingAgain = item.review.lastRating === "again";
+
+    const spellingPolicyReviewedAt = "2026-07-01T12:00:00.000Z";
+    const spellingPolicyOriginalDue = "2026-07-11T12:00:00.000Z";
+    const spellingEarlyMissPolicy = app.reviewScheduling.applyPolicy({
+      reviewState: {
+        dueAt: spellingPolicyOriginalDue,
+        intervalDays: 10,
+        masteredAt: "2026-06-01T12:00:00.000Z",
+        fsrsCard: { due: spellingPolicyOriginalDue },
+      },
+      rating: "hard",
+      reviewedAt: spellingPolicyReviewedAt,
+      mode: "practice",
+      track: "spelling",
+      hadMiss: true,
+    });
+    const spellingPolicySafe =
+      spellingEarlyMissPolicy.rating === "again"
+      && spellingEarlyMissPolicy.requestedRating === "hard"
+      && spellingEarlyMissPolicy.masteredAt === null
+      && Date.parse(spellingEarlyMissPolicy.dueAt) <= Date.parse(spellingPolicyOriginalDue)
+      && spellingEarlyMissPolicy.fsrsCard?.due === spellingEarlyMissPolicy.dueAt
+      && spellingEarlyMissPolicy.intervalDays === spellingEarlyMissPolicy.fsrsCard?.scheduled_days
+      && spellingEarlyMissPolicy.intervalDays === spellingEarlyMissPolicy.fsrsCard?.scheduledDays;
 
     // Verify IndexedDB blob changed after full review (new encrypted write = different blob).
     const blobAfterFail = await getAppStoreValue(APP_VOCABULARY_STORE, itemStoreKey);
     const failUpdatedInDb = JSON.stringify(blobAfterFail) !== JSON.stringify(blobAfterSetup);
 
     return {
-      passed: practiceEventType === "practice" && practiceItemDueUnchanged && practiceItemIntervalUnchanged && practiceItemFsrsUnchanged && practiceNotUpdatedInDb && failEventType === "review" && failItemDueChanged && failUpdatedInDb,
+      passed:
+        practiceEventType === "practice"
+        && practiceItemDueUnchanged
+        && practiceItemIntervalUnchanged
+        && practiceItemFsrsUnchanged
+        && practiceNotUpdatedInDb
+        && failEventType === "review"
+        && failItemDueChanged
+        && failUpdatedInDb
+        && failRatingForcedAgain
+        && failDueNotLengthened
+        && failScheduleConsistent
+        && failClearsMastery
+        && failLastRatingAgain
+        && spellingPolicySafe,
       practiceEventType,
       failEventType,
       practiceItemDueUnchanged,
@@ -2861,6 +2958,12 @@ async function runEarlyPracticePersistenceTest() {
       practiceNotUpdatedInDb,
       failItemDueChanged,
       failUpdatedInDb,
+      failRatingForcedAgain,
+      failDueNotLengthened,
+      failScheduleConsistent,
+      failClearsMastery,
+      failLastRatingAgain,
+      spellingPolicySafe,
     };
   } finally {
     frame.remove();
@@ -3376,11 +3479,107 @@ function runModuleSmokeTests() {
 
   // spelling.js
   assert("ratingFromRetries 0 => easy", ratingFromRetries(0), "easy");
-  assert("ratingFromRetries 1 => good", ratingFromRetries(1), "good");
-  assert("ratingFromRetries 2 => hard", ratingFromRetries(2), "hard");
+  assert("ratingFromRetries 1 => again", ratingFromRetries(1), "again");
+  assert("ratingFromRetries 2 => again", ratingFromRetries(2), "again");
   assert("ratingFromRetries 3 => again", ratingFromRetries(3), "again");
+  assert("ratingFromRetries invalid => again", ratingFromRetries("invalid"), "again");
+  assert("ratingFromRetries NaN => again", ratingFromRetries(Number.NaN), "again");
+  assert("firstAttemptCorrectFromRetries 0", firstAttemptCorrectFromRetries(0), true);
+  assert("firstAttemptCorrectFromRetries 1", firstAttemptCorrectFromRetries(1), false);
+  assert("firstAttemptCorrectFromRetries invalid", firstAttemptCorrectFromRetries("invalid"), false);
   assert("spellingThreshold 0 retries => 1", spellingThreshold(0), 1);
   assert("spellingThreshold 1 retry => 3", spellingThreshold(1), 3);
+  assert("levenshtein omission", levenshteinDistance("enviroment", "environment"), 1);
+  assert("omission category", analyzeSpellingAttempt("enviroment", "environment").categories.includes("missing-letter"), true);
+  assert("addition category", analyzeSpellingAttempt("friendx", "friend").categories.includes("extra-letter"), true);
+  assert("repeated-letter category", analyzeSpellingAttempt("commitee", "committee").categories.includes("repeated-letter"), true);
+  assert("transposition category", analyzeSpellingAttempt("freind", "friend").categories.includes("adjacent-transposition"), true);
+  assert("vowel category", analyzeSpellingAttempt("cat", "cut").categories.includes("vowel-confusion"), true);
+  assert("punctuation category", analyzeSpellingAttempt("wellknown", "well-known").categories.includes("apostrophe-or-hyphen"), true);
+  assert("generic substitution", analyzeSpellingAttempt("cat", "car").categories.includes("letter-substitution"), true);
+  const repeatedProfile = summarizeSpellingAttempts([
+    { correct: false, normalizedSubmitted: "freind", editDistance: 2, categories: ["adjacent-transposition"] },
+    { correct: false, normalizedSubmitted: "freind", editDistance: 2, categories: ["adjacent-transposition"] },
+  ]);
+  assert("repeated incorrect form summarized", repeatedProfile.repeatedIncorrectForms, ["freind"]);
+  const masteryReview = {
+    intervalDays: 100,
+    fsrsCard: { due: "2026-06-01T00:00:00.000Z", stability: 100, difficulty: 5, scheduled_days: 100, scheduledDays: 100 },
+  };
+  const masteryEvent = (occurredAt, overrides = {}) => ({
+    id: `mastery-${occurredAt}-${Math.random()}`,
+    type: "review",
+    track: "spelling",
+    term: "masteryword",
+    normalizedTerm: "masteryword",
+    occurredAt,
+    rating: "easy",
+    retries: 0,
+    firstAttemptCorrect: true,
+    answerRevealed: false,
+    schedulingPolicy: "scheduled-review-full",
+    practiceMode: "review",
+    ...overrides,
+  });
+  const preFailure = [
+    masteryEvent("2026-01-01T00:00:00.000Z"),
+    masteryEvent("2026-02-01T00:00:00.000Z"),
+    masteryEvent("2026-03-01T00:00:00.000Z"),
+  ];
+  const qualified = evaluateMasteryEvidence({ track: "spelling", normalizedTerm: "masteryword", events: preFailure, reviewState: masteryReview });
+  assert("qualifying mastery evidence", qualified.qualified, true);
+  assert("mastery timestamp is latest qualifying review", qualified.masteredAt, "2026-03-01T00:00:00.000Z");
+  const failure = masteryEvent("2026-03-10T00:00:00.000Z", { rating: "again", retries: 1, firstAttemptCorrect: false, schedulingPolicy: "early-practice-full-failure", practiceMode: "practice" });
+  const oneAfterFailure = masteryEvent("2026-04-01T00:00:00.000Z");
+  const twoAfterFailure = masteryEvent("2026-05-01T00:00:00.000Z");
+  const resetResult = evaluateMasteryEvidence({ track: "spelling", normalizedTerm: "masteryword", events: [...preFailure, failure, oneAfterFailure, twoAfterFailure], reviewState: masteryReview });
+  assert("pre-failure confirmations are not reused", resetResult.qualified, false);
+  assert("failure boundary recorded", resetResult.lastFailureAt, failure.occurredAt);
+  const threeAfterFailure = masteryEvent("2026-06-01T00:00:00.000Z");
+  const requalified = evaluateMasteryEvidence({ track: "spelling", normalizedTerm: "masteryword", events: [...preFailure, failure, oneAfterFailure, twoAfterFailure, threeAfterFailure], reviewState: masteryReview });
+  assert("three scheduled reviews after failure requalify", requalified.qualified, true);
+  const assisted = evaluateMasteryEvidence({
+    track: "spelling",
+    normalizedTerm: "masteryword",
+    events: [masteryEvent("2026-01-01T00:00:00.000Z"), masteryEvent("2026-02-01T00:00:00.000Z"), masteryEvent("2026-03-01T00:00:00.000Z", { answerRevealed: true })],
+    reviewState: masteryReview,
+  });
+  assert("assisted confirmation is rejected", assisted.qualified, false);
+  const preserved = evaluateMasteryEvidence({
+    track: "spelling",
+    normalizedTerm: "masteryword",
+    events: [...preFailure, masteryEvent("2026-04-01T00:00:00.000Z")],
+    reviewState: { ...masteryReview, masteredAt: "2026-03-01T00:00:00.000Z", masteryPolicyVersion: 1 },
+  });
+  assert("masteredAt remains original while still qualified", preserved.masteredAt, "2026-03-01T00:00:00.000Z");
+  const rebuilt = rebuildReviewStateFromEvents(
+    { term: "masteryword", normalizedTerm: "masteryword", savedAt: "2025-12-01T00:00:00.000Z", review: masteryReview },
+    preFailure,
+    Date.parse("2026-06-01T00:00:00.000Z"),
+    "spelling",
+  );
+  assert("rebuilt review uses mastery policy v1", rebuilt.masteryPolicyVersion, 1);
+  const rebuildPreservesFirstMastery = rebuildReviewStateFromEvents(
+    { term: "masteryword", normalizedTerm: "masteryword", savedAt: "2025-12-01T00:00:00.000Z", review: masteryReview },
+    [
+      preFailure[0],
+      preFailure[1],
+      { ...preFailure[2], mastered: true, masteryEvidence: { policyVersion: 1, masteredAt: preFailure[2].occurredAt } },
+      masteryEvent("2026-04-01T00:00:00.000Z", { mastered: true, masteryEvidence: { policyVersion: 1, masteredAt: preFailure[2].occurredAt } }),
+    ],
+    Date.parse("2026-06-01T00:00:00.000Z"),
+    "spelling",
+  );
+  assert("rebuild preserves first policy-v1 mastery timestamp", rebuildPreservesFirstMastery.masteredAt, preFailure[2].occurredAt);
+  const cappedDueAt = "2026-01-12T00:00:00.000Z";
+  const cappedRebuild = rebuildReviewStateFromEvents(
+    { term: "masteryword", normalizedTerm: "masteryword", savedAt: "2025-12-01T00:00:00.000Z", review: masteryReview },
+    [masteryEvent("2026-01-10T00:00:00.000Z", { rating: "again", retries: 1, firstAttemptCorrect: false, appliedDueAt: cappedDueAt })],
+    Date.parse("2026-02-01T00:00:00.000Z"),
+    "spelling",
+  );
+  assert("rebuild preserves applied policy due", cappedRebuild.dueAt, cappedDueAt);
+  assert("rebuild synchronizes applied policy interval", cappedRebuild.intervalDays === cappedRebuild.fsrsCard.scheduled_days && cappedRebuild.intervalDays === cappedRebuild.fsrsCard.scheduledDays, true);
 
   // ui-preferences.js
   assert("normalizeTrack spelling", normalizeTrack("spelling"), "spelling");
@@ -3541,6 +3740,29 @@ function runModuleSmokeTests() {
   assert("validateBackup rejects malformed review event", throws(() => validateBackup({ app: "WordFan", schemaVersion: 1, tracks: { t: { name: "Bad", reviewLogs: [{ id: "bad", type: "review", term: "bad", rating: "easyy", occurredAt: "2026-06-01T00:00:00.000Z" }] } } })), true);
   assert("validateBackup repairs missing normalizedTerm", validateBackup({ app: "WordFan", schemaVersion: 1, tracks: { t: { name: "Repair", wordLists: { vocabulary: [{ term: "Mixed Case", savedAt: "2026-06-01T00:00:00.000Z" }] } } } }).tracks.t.wordLists.vocabulary[0].normalizedTerm, "mixed case");
   assert("validateBackup accepts a valid backup", validateBackup(backup).app, "WordFan");
+  const diagnosticBackup = structuredClone(backup);
+  diagnosticBackup.tracks.track_default.spellingReviewLogs = [{
+    id: "spelling-diag-1",
+    eventKey: "spelling-diag-key-1",
+    type: "review",
+    track: "spelling",
+    term: "friend",
+    normalizedTerm: "friend",
+    rating: "again",
+    retries: 1,
+    occurredAt: "2026-06-05T00:00:00.000Z",
+    firstAttemptCorrect: false,
+    remediationCompleted: true,
+    answerRevealed: false,
+    attempts: [{ sequence: 1, submitted: "freind", normalizedSubmitted: "freind", correct: false, responseMs: 1000, editDistance: 2, lengthDelta: 0, categories: ["adjacent-transposition"] }],
+    attemptCount: 1,
+    errorProfile: { categories: ["adjacent-transposition"], repeatedIncorrectForms: [], maxEditDistance: 2 },
+  }];
+  const validatedDiagnosticBackup = validateBackup(diagnosticBackup);
+  assert("diagnostic backup accepted", validatedDiagnosticBackup.tracks.track_default.spellingReviewLogs[0].attemptCount, 1);
+  const malformedDiagnosticBackup = structuredClone(diagnosticBackup);
+  malformedDiagnosticBackup.tracks.track_default.spellingReviewLogs[0].attempts[0].categories = ["unsupported-category"];
+  assert("malformed diagnostic backup rejected", throws(() => validateBackup(malformedDiagnosticBackup)), true);
   const legacyBackup = validateBackup({
     app: "wordlover",
     exportedAt: "2026-06-05T00:00:00.000Z",

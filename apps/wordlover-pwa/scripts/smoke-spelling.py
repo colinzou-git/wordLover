@@ -2,10 +2,10 @@
 
 Seeds spelling items via the test hook (no dictionary needed), then drives the
 review engine to verify:
-- strict, case-sensitive checking (no trim);
+- case-insensitive checking with accidental edge spaces ignored;
 - 3 consecutive correct required to complete a word;
 - wrong answer -> awaitingRetry, reveal, then retry resumes;
-- rating derived from retries: 0->easy, 1->good, 2->hard, 3+->again;
+- FSRS rating derived from first-attempt retrieval: 0 retries -> easy, any miss -> again;
 - a spelling study event is recorded with the rating + FSRS schedule.
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def main() -> int:
         mapping = page.evaluate(
             "() => [0,1,2,3,5].map(n => window.WordLoverApp.spelling.ratingFromRetries(n))"
         )
-        if mapping != ["easy", "good", "hard", "again", "again"]:
+        if mapping != ["easy", "again", "again", "again", "again"]:
             failures.append(f"ratingFromRetries mapping wrong: {mapping}")
 
         # Seed two spelling items.
@@ -75,23 +75,23 @@ def main() -> int:
             failures.append(f"expected 2 due spelling items, got {due}")
 
         # Start the review.
-        page.evaluate("() => { window.WordLoverApp.spelling.setTodayTrack('spelling'); window.WordLoverApp.spelling.start(); }")
+        page.evaluate("async () => { window.WordLoverApp.spelling.setTodayTrack('spelling'); await window.WordLoverApp.spelling.start(); }")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         print(f"start state: {st}", flush=True)
         if not st or st.get("queueLength") != 2:
             failures.append(f"spelling session did not start with 2 words: {st}")
         # Normal Spelling Review must not be marked to auto-advance into new Study one more words.
-        if st.get("autoNext") or st.get("source") == "spelling-study-one-more":
+        if st and (st.get("autoNext") or st.get("source") == "spelling-study-one-more"):
             failures.append(f"Spelling Review must not auto-continue into new words: {st}")
         first_term = st.get("currentTerm")
 
-        # --- Word 1: one wrong (retry), then 3 correct -> rating 'good' (1 retry) ---
+        # --- Word 1: one wrong (retry), then 3 correct -> rating 'again' (1 retry) ---
         # --- Word 1: a miss forces 3-in-a-row; also exercise Return-again-as-retry ---
-        # strict case-sensitivity: a capitalized version must be WRONG.
-        page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r}.toUpperCase())")
+        # Capitalization is ignored, so use a genuinely incorrect form.
+        page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r} + 'x')")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
         if not st.get("awaitingRetry") or st.get("retries") != 1:
-            failures.append(f"case-sensitive wrong answer not registered: {st}")
+            failures.append(f"wrong answer not registered: {st}")
         # answering while awaiting retry must be ignored
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
@@ -105,7 +105,7 @@ def main() -> int:
         if st.get("awaitingRetry"):
             failures.append("pressing Return again did not act like Retry (still awaiting)")
 
-        # After a miss, 3 correct in a row are required to complete -> rating 'good'.
+        # After a miss, 3 correct in a row are required to complete -> rating 'again'.
         # Each correct answer triggers a ~1s feedback pause; wait for it to clear between answers.
         page.evaluate(f"() => window.WordLoverApp.spelling.answer({first_term!r})")
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
@@ -123,10 +123,12 @@ def main() -> int:
         print(f"word1 event: {first_event}", flush=True)
         if not first_event:
             failures.append(f"no spelling event recorded for {first_term}")
-        elif first_event.get("rating") != "good":
-            failures.append(f"1-retry word should rate 'good', got {first_event.get('rating')}")
+        elif first_event.get("rating") != "again":
+            failures.append(f"a missed first attempt should rate 'again', got {first_event.get('rating')}")
         elif first_event.get("retries") != 1:
             failures.append(f"event retries should be 1, got {first_event.get('retries')}")
+        elif first_event.get("firstAttemptCorrect") is not False or first_event.get("attemptCount") != 4:
+            failures.append(f"missed review diagnostics are incomplete: {first_event}")
 
         # --- Word 2: first-try correct completes immediately (ONE answer) -> rating 'easy' ---
         st = page.evaluate("() => window.WordLoverApp.spelling.state()")
@@ -155,10 +157,10 @@ def main() -> int:
 
         # --- Spelling Practice More: drills all active words even when none are due ---
         practice = page.evaluate(
-            """() => {
+            """async () => {
                 const due = window.WordLoverApp.spelling.getDue().length;       // both just reviewed -> not due
                 const prac = window.WordLoverApp.spelling.getPractice().length; // all active
-                window.WordLoverApp.spelling.startPractice();
+                await window.WordLoverApp.spelling.startPractice();
                 const st = window.WordLoverApp.spelling.state();
                 const q = st ? st.queueLength : 0;
                 window.WordLoverApp.spelling.close();
