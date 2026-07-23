@@ -2334,6 +2334,10 @@ li button {
   fill: #56b4e9;
 }
 
+.history-chart .h-bar-practiced {
+  fill: #cc79a7;
+}
+
 .history-chart .h-bar-known {
   fill: #8b5cf6;
 }
@@ -2377,6 +2381,10 @@ li button {
 
 .history-legend i.dot-reviewed {
   background: #56b4e9;
+}
+
+.history-legend i.dot-practiced {
+  background: #cc79a7;
 }
 
 .history-legend i.dot-known {

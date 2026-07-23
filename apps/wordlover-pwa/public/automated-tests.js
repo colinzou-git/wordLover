@@ -3,9 +3,9 @@ import {
   ratingToFsrs,
   reviveFsrsCard,
   scheduleFromFsrsRating,
-} from "./fsrs-scheduler.js?v=20260718-3";
+} from "./fsrs-scheduler.js?v=20260723-1";
 
-import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260718-3";
+import { bytesToBase64, base64ToBytes, checksumText, isEncryptedRecord } from "./persistence.js?v=20260723-1";
 import {
   analyzeSpellingAttempt,
   firstAttemptCorrectFromRetries,
@@ -13,7 +13,7 @@ import {
   ratingFromRetries,
   summarizeSpellingAttempts,
   spellingThreshold,
-} from "./spelling.js?v=20260718-3";
+} from "./spelling.js?v=20260723-1";
 import {
   normalizeTrack,
   normalizeHistoryGranularity,
@@ -23,7 +23,7 @@ import {
   normalizeUiPreferences,
   STUDY_ONE_MORE_LEVELS,
   DEFAULT_FONT_SCALE,
-} from "./ui-preferences.js?v=20260718-3";
+} from "./ui-preferences.js?v=20260723-1";
 import {
   studyEventTrack,
   computeStudyEventKey,
@@ -34,21 +34,21 @@ import {
   mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups,
-} from "./sync.js?v=20260718-3";
+} from "./sync.js?v=20260723-1";
 import {
   fallbackStudyOneMoreLevel,
   buildStudyOneMoreExclusionSets,
   studyOneMoreLevelSql,
-} from "./study-one-more.js?v=20260718-3";
+} from "./study-one-more.js?v=20260723-1";
 import {
   forecastGoalWorkload,
   predictRating,
   normalizeForecastInput,
-} from "./goal-forecast.js?v=20260718-3";
+} from "./goal-forecast.js?v=20260723-1";
 import {
   evaluateMasteryEvidence,
   rebuildReviewStateFromEvents,
-} from "./review-state.js?v=20260718-3";
+} from "./review-state.js?v=20260723-1";
 import {
   BACKUP_SCHEMA_VERSION,
   migrateLegacyToRoot,
@@ -59,10 +59,10 @@ import {
   dedupeTrackName,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260718-3";
-import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260718-3";
-import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260718-3";
-import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260718-3";
+} from "./tracks.js?v=20260723-1";
+import { resolveOnlineDictionaryEntry } from "./online-dictionary.js?v=20260723-1";
+import { shouldAutoSubmit, openReviewDialog } from "./online-dictionary-auto-miss.js?v=20260723-1";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260723-1";
 
 const runButton = document.querySelector("#runSuite");
 const downloadButton = document.querySelector("#downloadResults");
@@ -76,7 +76,7 @@ const AUTOMATION_DB = "wordlover-product-tests";
 const KV_STORE = "kv";
 const FILE_STORE = "files";
 const DICTIONARY_KEY = "dictionary.sqlite";
-const SHELL_CACHE_NAME = "wordlover-shell-v170";
+const SHELL_CACHE_NAME = "wordlover-shell-v171";
 const APP_DB = "wordlover-user";
 const APP_DB_VERSION = 8;
 const APP_KV_STORE = "kv";
@@ -94,33 +94,33 @@ const TERM_RE = /^[a-z]+(?:[ '-][a-z]+){0,5}$/;
 const BENCHMARK_TERMS = ["abandon", "take off", "in terms of", "abundant", "accurate"];
 const SHELL_ASSETS = [
   "/",
-  "/app.js?v=20260718-3",
-  "/dictionary-config.js?v=20260718-3",
-  "/dictionary-registry.js?v=20260718-3",
-  "/dictionary-selection.js?v=20260718-3",
-  "/dictionary-rendering.js?v=20260718-3",
-  "/full-dictionary.js?v=20260718-3",
-  "/online-dictionary-actions.js?v=20260718-3",
-  "/online-dictionary-provider.js?v=20260718-3",
-  "/online-dictionary-lookup-controller.js?v=20260718-3",
-  "/online-dictionary-result-renderer.js?v=20260718-3",
-  "/online-dictionary-integration.js?v=20260718-3",
-  "/online-dictionary-supplement-lifecycle.js?v=20260718-3",
-  "/dictionary-supplements.js?v=20260718-3",
-  "/study-supplements.js?v=20260718-3",
-  "/youdao-provider.js?v=20260718-3",
-  "/youdao-entry-schema.js?v=20260718-3",
-  "/persistence.js?v=20260718-3",
-  "/spelling.js?v=20260718-3",
-  "/ui-preferences.js?v=20260718-3",
-  "/review-state.js?v=20260718-3",
-  "/study-one-more.js?v=20260718-3",
-  "/sync.js?v=20260718-3",
-  "/fsrs-scheduler.js?v=20260718-3",
-  "/goal-forecast.js?v=20260718-3",
-  "/tracks.js?v=20260718-3",
-  "/styles.css?v=20260718-3",
-  "/wordlover-config.js?v=20260718-3",
+  "/app.js?v=20260723-1",
+  "/dictionary-config.js?v=20260723-1",
+  "/dictionary-registry.js?v=20260723-1",
+  "/dictionary-selection.js?v=20260723-1",
+  "/dictionary-rendering.js?v=20260723-1",
+  "/full-dictionary.js?v=20260723-1",
+  "/online-dictionary-actions.js?v=20260723-1",
+  "/online-dictionary-provider.js?v=20260723-1",
+  "/online-dictionary-lookup-controller.js?v=20260723-1",
+  "/online-dictionary-result-renderer.js?v=20260723-1",
+  "/online-dictionary-integration.js?v=20260723-1",
+  "/online-dictionary-supplement-lifecycle.js?v=20260723-1",
+  "/dictionary-supplements.js?v=20260723-1",
+  "/study-supplements.js?v=20260723-1",
+  "/youdao-provider.js?v=20260723-1",
+  "/youdao-entry-schema.js?v=20260723-1",
+  "/persistence.js?v=20260723-1",
+  "/spelling.js?v=20260723-1",
+  "/ui-preferences.js?v=20260723-1",
+  "/review-state.js?v=20260723-1",
+  "/study-one-more.js?v=20260723-1",
+  "/sync.js?v=20260723-1",
+  "/fsrs-scheduler.js?v=20260723-1",
+  "/goal-forecast.js?v=20260723-1",
+  "/tracks.js?v=20260723-1",
+  "/styles.css?v=20260723-1",
+  "/wordlover-config.js?v=20260723-1",
   "/manifest.webmanifest",
   "/icon.svg",
   "/vendor/sql-wasm.js",
@@ -136,7 +136,7 @@ const SHELL_ASSETS = [
   "/vendor/wa-sqlite/src/examples/OriginPrivateFileSystemVFS.js",
   "/vendor/wa-sqlite/src/examples/WebLocks.js",
   "/automated-tests.html",
-  "/automated-tests.js?v=20260718-3",
+  "/automated-tests.js?v=20260723-1",
 ];
 
 let lastResults = null;
@@ -1090,6 +1090,88 @@ async function runMainAppStudySmoke() {
       return (hi + 0.05) / (lo + 0.05);
     };
 
+    const historyTesting = frameWindow.WordLoverApp.historyTesting;
+    const historyBucket = {
+      start: new Date("2026-07-01T00:00:00.000Z"),
+      end: new Date("2026-07-02T00:00:00.000Z"),
+      label: "7/1",
+    };
+    const historyFixtureEvents = [
+      { id: "history-alpha-good", type: "review", term: "history alpha", normalizedTerm: "history alpha", rating: "good", occurredAt: "2026-07-01T08:00:00.000Z" },
+      { id: "history-alpha-easy", type: "review", term: "history alpha", normalizedTerm: "history alpha", rating: "easy", occurredAt: "2026-07-01T09:00:00.000Z" },
+      { id: "history-alpha-practice-1", type: "practice", practiceMode: "practice", term: "history alpha", normalizedTerm: "history alpha", rating: "hard", occurredAt: "2026-07-01T10:00:00.000Z" },
+      { id: "history-alpha-practice-2", type: "practice", practiceMode: "practice", term: "history alpha", normalizedTerm: "history alpha", rating: "easy", occurredAt: "2026-07-01T11:00:00.000Z" },
+      { id: "history-beta-failed-practice", type: "review", practiceMode: "practice", term: "history beta", normalizedTerm: "history beta", rating: "again", occurredAt: "2026-07-01T12:00:00.000Z" },
+      { id: "history-gamma-before", type: "review", term: "history gamma", normalizedTerm: "history gamma", rating: "good", occurredAt: "2026-06-30T23:00:00.000Z" },
+      { id: "history-gamma-practice", type: "practice", practiceMode: "practice", term: "history gamma", normalizedTerm: "history gamma", rating: "easy", occurredAt: "2026-07-01T13:00:00.000Z" },
+    ];
+    const inHistoryBucket = (value) => {
+      const ms = Date.parse(value);
+      return Number.isFinite(ms) && ms >= historyBucket.start.getTime() && ms < historyBucket.end.getTime();
+    };
+    const historyActivity = historyTesting.countActivity(historyFixtureEvents, inHistoryBucket);
+    const historyData = { isSpelling: false, events: historyFixtureEvents, items: [], knownRecords: [] };
+    const historyPracticedRecords = historyTesting.recordsForData(historyBucket, "practiced", historyData);
+    const historyReviewedRecords = historyTesting.recordsForData(historyBucket, "reviewed", historyData);
+    const historyLevelUpRecords = historyTesting.recordsForData(historyBucket, "level-up", historyData);
+    // The Spelling track shares the same classifier; only Known is track-specific.
+    const historySpellingData = {
+      isSpelling: true,
+      events: historyFixtureEvents,
+      items: [],
+      knownRecords: [{ term: "history alpha", normalizedTerm: "history alpha", knownAt: "2026-07-01T08:00:00.000Z" }],
+    };
+    const historySpellingRows = historyTesting.summarizeBuckets([historyBucket], historySpellingData);
+    const historyRows = historyTesting.summarizeBuckets([historyBucket], historyData);
+    const historyTotalsRow = historyTesting.totals(historyRows);
+    const historySummary = historyTesting.formatSummary(historyTotalsRow);
+    const practiceOnlyActivityIsNotEmpty = historyTesting.activityTotal([
+      { newWords: 0, reviewed: 0, practiced: 1, known: 0, leveledUp: 0, leveledDown: 0 },
+    ]) === 1;
+    const renderedHistory = frameDocument.createElement("div");
+    renderedHistory.innerHTML = historyTesting.renderChartSvg(historyRows);
+    const renderedBars = renderedHistory.querySelectorAll("rect[data-history-bucket='0']");
+    const renderedPracticedBar = renderedHistory.querySelector("rect[data-history-type='practiced']");
+    const historyLegendEntries = [...frameDocument.querySelectorAll(".history-legend span")];
+    const historyPracticedStats =
+      historyTesting.series().length === 6
+      && historyActivity.reviewed === 2
+      && historyActivity.practiced === 3
+      && historyReviewedRecords.length === 2
+      && historyPracticedRecords.length === 3
+      && historyReviewedRecords.some((record) => record.normalizedTerm === "history beta")
+      && historyPracticedRecords.some((record) => record.normalizedTerm === "history beta")
+      && historyPracticedRecords.filter((record) => record.normalizedTerm === "history alpha").length === 1
+      && historyLevelUpRecords.some((record) => record.normalizedTerm === "history alpha")
+      && !historyLevelUpRecords.some((record) => record.normalizedTerm === "history gamma")
+      && historyRows[0].reviewed === 2
+      && historyRows[0].practiced === 3
+      && historySpellingRows[0].practiced === 3
+      && historySpellingRows[0].reviewed === 2
+      && historySpellingRows[0].known === 0
+      && historySummary === "0 new, 2 reviewed, 3 practiced, 0 known, 1 level-up, 0 level-down."
+      && practiceOnlyActivityIsNotEmpty
+      && renderedBars.length === 6
+      && Boolean(renderedPracticedBar)
+      && historyLegendEntries.length === 6
+      && Boolean(frameDocument.querySelector(".history-legend .dot-practiced"));
+    if (!historyPracticedStats) {
+      throw new Error(`History Practiced stats failed: ${JSON.stringify({
+        series: historyTesting.series(),
+        historyActivity,
+        reviewed: historyReviewedRecords.map((record) => record.normalizedTerm),
+        practiced: historyPracticedRecords.map((record) => record.normalizedTerm),
+        levelUp: historyLevelUpRecords.map((record) => record.normalizedTerm),
+        historyRows,
+        historySpellingRows,
+        historySummary,
+        practiceOnlyActivityIsNotEmpty,
+        renderedBars: renderedBars.length,
+        renderedPracticedBar: Boolean(renderedPracticedBar),
+        legendEntries: historyLegendEntries.length,
+      })}`);
+    }
+
     const candidateRows = [
       { word: "alpha", normalized_word: "alpha", frq: 100, bnc: 100, definition: "alpha definition", translation: "alpha" },
       { word: "bravo", normalized_word: "bravo", frq: 90, bnc: 90, definition: "bravo definition", translation: "bravo" },
@@ -1904,9 +1986,9 @@ async function runMainAppStudySmoke() {
     frameWindow.WordLoverApp.refreshReviewScheduleViews();
     const vocabStatsAfter = readTodayStats();
     const todayMemorizeStatsSplit = vocabStatsAfter.reviewed === vocabStatsBefore.reviewed + 1
-      && vocabStatsAfter.practiced === vocabStatsBefore.practiced + 2;
+      && vocabStatsAfter.practiced === vocabStatsBefore.practiced + 1;
     if (!todayMemorizeStatsSplit) {
-      throw new Error(`Today Memorize stats should split unique reviewed from extra practice: ${JSON.stringify({ vocabStatsBefore, vocabStatsAfter })}`);
+      throw new Error(`Today Memorize stats should count distinct reviewed and practiced words independently: ${JSON.stringify({ vocabStatsBefore, vocabStatsAfter })}`);
     }
     frameWindow.WordLoverApp.spelling.setTodayTrack("spelling");
     const spellingStatsBefore = readTodayStats();
@@ -1918,9 +2000,9 @@ async function runMainAppStudySmoke() {
     frameWindow.WordLoverApp.spelling.setTodayTrack("spelling");
     const spellingStatsAfter = readTodayStats();
     const todaySpellingStatsSplit = spellingStatsAfter.reviewed === spellingStatsBefore.reviewed + 1
-      && spellingStatsAfter.practiced === spellingStatsBefore.practiced + 2;
+      && spellingStatsAfter.practiced === spellingStatsBefore.practiced + 1;
     if (!todaySpellingStatsSplit) {
-      throw new Error(`Today Spelling stats should split unique reviewed from extra practice: ${JSON.stringify({ spellingStatsBefore, spellingStatsAfter })}`);
+      throw new Error(`Today Spelling stats should count distinct reviewed and practiced words independently: ${JSON.stringify({ spellingStatsBefore, spellingStatsAfter })}`);
     }
     frameWindow.WordLoverApp.spelling.setTodayTrack("vocabulary");
     // The second card came from the Add-to-Known auto-advance; it must not repeat the first word.
@@ -2666,6 +2748,7 @@ async function runMainAppStudySmoke() {
       inkQuizCorrectReadable,
       inkQuizIncorrectReadable,
       studyOneMoreFilterPersists: true,
+      historyPracticedStats,
       todayMemorizeStatsSplit,
       todaySpellingStatsSplit,
       firstQuizIpa,

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "appVersion": "0.6.2-product.20260718-3-v170",
+  "appVersion": "0.6.2-product.20260723-1-v171",
   "buildId": "dev",
   "commit": "dev",
-  "shellCache": "wordlover-shell-v170",
+  "shellCache": "wordlover-shell-v171",
   "userDataFormatVersion": "0.4",
   "publishedAt": "dev"
 }

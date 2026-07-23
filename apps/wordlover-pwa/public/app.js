@@ -2,11 +2,11 @@ import {
   reviveFsrsCard,
   scheduleFromFsrsRating as scheduleWithFsrs,
   serializeFsrsCard,
-} from "./fsrs-scheduler.js?v=20260718-3";
+} from "./fsrs-scheduler.js?v=20260723-1";
 
-import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260718-3";
-import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260718-3";
-import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260718-3";
+import { dictionaryStorageKeys, resolveDictionaryAssetUrl, resolveDictionaryConfig } from "./dictionary-config.js?v=20260723-1";
+import { userSelectableDictionaries } from "./dictionary-registry.js?v=20260723-1";
+import { dictionaryRecordMetadata, readSelectedDictionaryId, saveSelectedDictionaryId } from "./dictionary-selection.js?v=20260723-1";
 import {
   formatDomainSuffix,
   hasStructuredDictionaryDetail,
@@ -15,7 +15,7 @@ import {
   renderStructuredDetailedDefinitions,
   renderStructuredDictionaryResult,
   renderStructuredDisplayMeanings,
-} from "./dictionary-rendering.js?v=20260718-3";
+} from "./dictionary-rendering.js?v=20260723-1";
 
 import {
   isEncryptedRecord,
@@ -24,7 +24,7 @@ import {
   checksumText,
   derivePassphraseAesKey,
   deriveKek,
-} from "./persistence.js?v=20260718-3";
+} from "./persistence.js?v=20260723-1";
 
 import {
   analyzeSpellingAttempt,
@@ -32,7 +32,7 @@ import {
   ratingFromRetries,
   summarizeSpellingAttempts,
   spellingThreshold as _spellingThreshold,
-} from "./spelling.js?v=20260718-3";
+} from "./spelling.js?v=20260723-1";
 
 import {
   STUDY_ONE_MORE_LEVELS,
@@ -49,19 +49,19 @@ import {
   normalizeFontScale,
   normalizeAutoShowYoudaoDefinitions,
   normalizeUiPreferences as _normalizeUiPreferences,
-} from "./ui-preferences.js?v=20260718-3";
+} from "./ui-preferences.js?v=20260723-1";
 
-import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260718-3";
-import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260718-3";
+import { renderOnlineDictionaryActions } from "./online-dictionary-actions.js?v=20260723-1";
+import { createUpdateManager, formatUpdateStatus } from "./update-manager.js?v=20260723-1";
 import {
   createDictionarySupplementStore,
   mergeDictionarySupplementRecords,
   normalizeSupplementTerm,
   validateDictionarySupplementPortableRecord,
-} from "./dictionary-supplements.js?v=20260718-3";
-import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260718-3";
-import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260718-3";
-import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260718-3";
+} from "./dictionary-supplements.js?v=20260723-1";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260723-1";
+import { appendSupplementHint, quizMeaningWithSupplement, savedSupplementToStudySnapshot } from "./study-supplements.js?v=20260723-1";
+import { renderYoudaoState } from "./online-dictionary-result-renderer.js?v=20260723-1";
 
 import {
   createFsrsCard,
@@ -70,7 +70,7 @@ import {
   normalizeReviewState as _normalizeReviewState,
   rebuildReviewStateFromEvents,
   rebuildItemsReviewStateFromEvents,
-} from "./review-state.js?v=20260718-3";
+} from "./review-state.js?v=20260723-1";
 
 import {
   STUDY_ONE_MORE_SKIP_COOLDOWN_DAYS,
@@ -91,7 +91,7 @@ import {
   studyOneMoreRankSql,
   studyOneMoreLevelSql,
   studyOneMoreFilterSql,
-} from "./study-one-more.js?v=20260718-3";
+} from "./study-one-more.js?v=20260723-1";
 
 import {
   studyEventTrack,
@@ -103,11 +103,11 @@ import {
   mergeVocabularySources as _mergeVocabularySources,
   mergeUserDictionarySources,
   mergeLearningTracksBackups as _mergeLearningTracksBackups,
-} from "./sync.js?v=20260718-3";
+} from "./sync.js?v=20260723-1";
 
 import {
   forecastGoalWorkload,
-} from "./goal-forecast.js?v=20260718-3";
+} from "./goal-forecast.js?v=20260723-1";
 
 import {
   DEFAULT_TRACK_ID,
@@ -119,11 +119,11 @@ import {
   validateBackup,
   planImport,
   canDeleteTrack,
-} from "./tracks.js?v=20260718-3";
+} from "./tracks.js?v=20260723-1";
 
 import {
   createFullDictionaryClient,
-} from "./full-dictionary.js?v=20260718-3";
+} from "./full-dictionary.js?v=20260723-1";
 
 const loadButton = document.querySelector("#loadDictionary");
 const exportButton = document.querySelector("#exportState");
@@ -272,7 +272,7 @@ const HAN_RE = /[\u3400-\u9fff]/;
 const DEFAULT_PLACEHOLDER = "abandon, take off, in terms of";
 const DEFAULT_RESULT_HINT = "Type a term to search.";
 const AUTOSAVE_DWELL_MS = 5000;
-const APP_VERSION = "0.6.2-product.20260718-3-v170";
+const APP_VERSION = "0.6.2-product.20260723-1-v171";
 // Deploy-time build identity. CI (and the manual gh-pages deploy) replace "dev"
 // with "<YYYYMMDD>-<HHMM>-<shortsha>" (UTC) so the menu and update check show the
 // exact commit that is live. Stays "dev" for local/unstamped builds. Informational
@@ -280,7 +280,7 @@ const APP_VERSION = "0.6.2-product.20260718-3-v170";
 // identical shell code does not nag users to "Apply update".
 const BUILD_STAMP = "dev";
 const USER_DATA_FORMAT_VERSION = "0.4";
-const SHELL_CACHE_VERSION = "wordlover-shell-v170";
+const SHELL_CACHE_VERSION = "wordlover-shell-v171";
 const CONFIG = window.WORDLOVER_CONFIG ?? {};
 let selectedDictionaryId = readSelectedDictionaryId();
 let dictionaryConfig = resolveDictionaryConfig(window.location.search, {
@@ -3744,22 +3744,38 @@ function getDueTodaySpellingItems() {
   return spellingItems.filter((item) => !item.archivedAt && (!item.review?.dueAt || Date.parse(item.review.dueAt) < end.getTime()));
 }
 
-function countTodayReviewActivity(events) {
-  const todaysAttempts = events.filter((event) =>
-    (event.type === "review" || event.type === "practice")
-    && isToday(event.occurredAt)
+// A failed early practice is persisted as type "review" so FSRS still updates the
+// schedule, but it keeps practiceMode "practice" so it also counts as practiced.
+function isPracticeStudyEvent(event) {
+  return event?.type === "practice" || event?.practiceMode === "practice";
+}
+
+function countReviewActivity(events, includeOccurredAt = () => true) {
+  const relevantEvents = events.filter((event) =>
+    (event?.type === "review" || isPracticeStudyEvent(event))
+    && includeOccurredAt(event.occurredAt)
     && normalizeTerm(event.normalizedTerm ?? event.term ?? ""),
   );
-  const uniqueReviewedTerms = new Set(
-    todaysAttempts
+  const reviewedTerms = new Set(
+    relevantEvents
       .filter((event) => event.type === "review")
       .map((event) => normalizeTerm(event.normalizedTerm ?? event.term ?? ""))
       .filter(Boolean),
   );
+  const practicedTerms = new Set(
+    relevantEvents
+      .filter(isPracticeStudyEvent)
+      .map((event) => normalizeTerm(event.normalizedTerm ?? event.term ?? ""))
+      .filter(Boolean),
+  );
   return {
-    reviewed: uniqueReviewedTerms.size,
-    practiced: Math.max(0, todaysAttempts.length - uniqueReviewedTerms.size),
+    reviewed: reviewedTerms.size,
+    practiced: practicedTerms.size,
   };
+}
+
+function countTodayReviewActivity(events) {
+  return countReviewActivity(events, isToday);
 }
 
 function getTodayStats() {
@@ -3834,6 +3850,7 @@ const HISTORY_RATING_LEVEL = { again: 1, hard: 2, good: 3, easy: 4 };
 const HISTORY_SERIES = [
   { key: "newWords", type: "new", label: "New", cls: "h-bar-new" },
   { key: "reviewed", type: "reviewed", label: "Reviewed", cls: "h-bar-reviewed" },
+  { key: "practiced", type: "practiced", label: "Practiced", cls: "h-bar-practiced" },
   { key: "known", type: "known", label: "Known", cls: "h-bar-known" },
   { key: "leveledUp", type: "level-up", label: "Level up", cls: "h-bar-up" },
   { key: "leveledDown", type: "level-down", label: "Level down", cls: "h-bar-down" },
@@ -3913,18 +3930,33 @@ function computeHistoryBuckets(granularity, anchorDate) {
   return buckets;
 }
 
-function summarizeHistoryBuckets(buckets) {
+function summarizeHistoryBucketsForData(buckets, data) {
   return buckets.map((bucket) => {
     // Keep chart bar counts and click drill-down rows in lockstep. Review
     // events can repeat for the same term inside a bucket, but the UI shows
     // corresponding words, so these are unique word counts.
-    const newWords = getHistoryDrilldownRecords(bucket, "new").length;
-    const reviewed = getHistoryDrilldownRecords(bucket, "reviewed").length;
-    const known = getHistoryDrilldownRecords(bucket, "known").length;
-    const leveledUp = getHistoryDrilldownRecords(bucket, "level-up").length;
-    const leveledDown = getHistoryDrilldownRecords(bucket, "level-down").length;
-    return { ...bucket, newWords, reviewed, known, leveledUp, leveledDown };
+    const newWords = getHistoryRecordsForData(bucket, "new", data).length;
+    const reviewed = getHistoryRecordsForData(bucket, "reviewed", data).length;
+    const practiced = getHistoryRecordsForData(bucket, "practiced", data).length;
+    const known = getHistoryRecordsForData(bucket, "known", data).length;
+    const leveledUp = getHistoryRecordsForData(bucket, "level-up", data).length;
+    const leveledDown = getHistoryRecordsForData(bucket, "level-down", data).length;
+    return { ...bucket, newWords, reviewed, practiced, known, leveledUp, leveledDown };
   });
+}
+
+function activeHistoryData() {
+  const isSpelling = historyView.track === "spelling";
+  return {
+    isSpelling,
+    events: isSpelling ? spellingEvents : studyEvents,
+    items: isSpelling ? spellingItems : vocabularyItems,
+    knownRecords: knownWords,
+  };
+}
+
+function summarizeHistoryBuckets(buckets) {
+  return summarizeHistoryBucketsForData(buckets, activeHistoryData());
 }
 
 function historyBucketByIndex(index) {
@@ -3948,11 +3980,13 @@ function historyUniqueTerms(records) {
   return out;
 }
 
-function getHistoryDrilldownRecords(bucket, type) {
+function getHistoryRecordsForData(bucket, type, {
+  isSpelling = false,
+  events = [],
+  items = [],
+  knownRecords = [],
+} = {}) {
   if (!bucket) return [];
-  const isSpelling = historyView.track === "spelling";
-  const events = isSpelling ? spellingEvents : studyEvents;
-  const items = isSpelling ? spellingItems : vocabularyItems;
   const startMs = bucket.start.getTime();
   const endMs = bucket.end.getTime();
   const inBucket = (value) => {
@@ -3964,7 +3998,14 @@ function getHistoryDrilldownRecords(bucket, type) {
   }
   if (type === "known") {
     if (isSpelling) return [];
-    return historyUniqueTerms(knownWords.filter((record) => inBucket(record.knownAt)));
+    return historyUniqueTerms(knownRecords.filter((record) => inBucket(record.knownAt)));
+  }
+  if (type === "practiced") {
+    return historyUniqueTerms(events.filter((event) =>
+      inBucket(event.occurredAt)
+      && normalizeTerm(event.normalizedTerm ?? event.term ?? "")
+      && isPracticeStudyEvent(event),
+    ));
   }
   const previousRatingByTerm = new Map();
   const matches = [];
@@ -3989,6 +4030,10 @@ function getHistoryDrilldownRecords(bucket, type) {
     previousRatingByTerm.set(event.normalizedTerm, event.rating);
   }
   return historyUniqueTerms(matches);
+}
+
+function getHistoryDrilldownRecords(bucket, type) {
+  return getHistoryRecordsForData(bucket, type, activeHistoryData());
 }
 
 function renderHistoryDrilldown() {
@@ -4105,12 +4150,35 @@ function toLocalDateInputValue(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function historyTotals(rows) {
+  return rows.reduce(
+    (acc, row) => ({
+      newWords: acc.newWords + (row.newWords ?? 0),
+      reviewed: acc.reviewed + (row.reviewed ?? 0),
+      practiced: acc.practiced + (row.practiced ?? 0),
+      known: acc.known + (row.known ?? 0),
+      leveledUp: acc.leveledUp + (row.leveledUp ?? 0),
+      leveledDown: acc.leveledDown + (row.leveledDown ?? 0),
+    }),
+    { newWords: 0, reviewed: 0, practiced: 0, known: 0, leveledUp: 0, leveledDown: 0 },
+  );
+}
+
+function historyActivityTotal(rows) {
+  const totals = historyTotals(rows);
+  return totals.newWords + totals.reviewed + totals.practiced + totals.known;
+}
+
+function formatHistorySummary(totals) {
+  return `${totals.newWords} new, ${totals.reviewed} reviewed, ${totals.practiced} practiced, ${totals.known} known, ${totals.leveledUp} level-up, ${totals.leveledDown} level-down.`;
+}
+
 function renderHistoryChart() {
   if (!historyChart) return;
   const anchorDate = getHistoryAnchorDate();
   const buckets = computeHistoryBuckets(historyView.granularity, anchorDate);
   const rows = summarizeHistoryBuckets(buckets);
-  const totalActivity = rows.reduce((acc, row) => acc + row.newWords + row.reviewed + row.known, 0);
+  const totalActivity = historyActivityTotal(rows);
   if (totalActivity === 0) {
     historyChart.innerHTML = `<p class="h-empty muted">No activity in this period yet.</p>`;
   } else {
@@ -4126,17 +4194,8 @@ function renderHistoryChart() {
     historyAnchorInput.value = toLocalDateInputValue(anchorDate);
     historyAnchorInput.max = toLocalDateInputValue(new Date(realNowMs()));
   }
-  const totals = rows.reduce(
-    (acc, row) => ({
-      newWords: acc.newWords + row.newWords,
-      reviewed: acc.reviewed + row.reviewed,
-      known: acc.known + row.known,
-      leveledUp: acc.leveledUp + row.leveledUp,
-      leveledDown: acc.leveledDown + row.leveledDown,
-    }),
-    { newWords: 0, reviewed: 0, known: 0, leveledUp: 0, leveledDown: 0 },
-  );
-  historyChartSummary.textContent = `${totals.newWords} new, ${totals.reviewed} reviewed, ${totals.known} known, ${totals.leveledUp} level-up, ${totals.leveledDown} level-down.`;
+  const totals = historyTotals(rows);
+  historyChartSummary.textContent = formatHistorySummary(totals);
   for (const button of historyGranularityButtons) {
     const selected = button.dataset.historyGranularity === historyView.granularity;
     button.setAttribute("aria-selected", String(selected));
@@ -10268,6 +10327,17 @@ window.WordLoverApp = {
   dateKeys: {
     localDateKey,
     isToday,
+  },
+  historyTesting: {
+    isPracticeEvent: isPracticeStudyEvent,
+    countActivity: countReviewActivity,
+    recordsForData: getHistoryRecordsForData,
+    summarizeBuckets: summarizeHistoryBucketsForData,
+    totals: historyTotals,
+    activityTotal: historyActivityTotal,
+    formatSummary: formatHistorySummary,
+    renderChartSvg: renderHistoryChartSvg,
+    series: () => HISTORY_SERIES.map((entry) => ({ ...entry })),
   },
   validateSnapshot: validateUserDataSnapshot,
   applySnapshotForTest: (snapshot) => applyUserDataSnapshot(snapshot, { createPreRestoreCheckpoint: false }),

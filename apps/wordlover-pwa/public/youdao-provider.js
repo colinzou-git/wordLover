@@ -1,4 +1,4 @@
-import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260718-3";
+import { validateYoudaoEntry } from "./youdao-entry-schema.js?v=20260723-1";
 
 const YOUDAO_ENTRY_URL = "https://m.youdao.com/dict";
 const APOSTROPHE_VARIANTS_RE = /[\u2018\u2019\u02bc`\uff07]/g;
