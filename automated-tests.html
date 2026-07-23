@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#256d85" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css?v=20260723-1" />
+    <title>WordFan Automated Test Suite</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Automation</p>
+          <h1>WordFan test suite</h1>
+        </div>
+        <div id="suiteStatus" class="status-pill">Ready</div>
+      </section>
+
+      <section class="panel">
+        <div class="toolbar">
+          <button id="runSuite" type="button">Run automated tests</button>
+          <button id="downloadResults" type="button" disabled>Download results</button>
+          <button id="sendResults" type="button" disabled>Send results to Windows</button>
+        </div>
+        <p class="small">
+          Runs browser-automatable checks for dictionary persistence, lookup timing, offline shell cache readiness,
+          encrypted export/import, mock cloud sync, and device capability reporting.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Progress</h2>
+        <ol id="progressList" class="progress-list"></ol>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <div id="summary" class="metrics"></div>
+        <pre id="rawResults" class="raw-results">{}</pre>
+      </section>
+    </main>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "ts-fsrs": "/vendor/ts-fsrs/index.mjs"
+        }
+      }
+    </script>
+    <script src="/vendor/sql-wasm.js"></script>
+    <script type="module" src="/automated-tests.js?v=20260723-1"></script>
+  </body>
+</html>

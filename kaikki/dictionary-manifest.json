@@ -1,0 +1,25 @@
+{
+  "app": "wordlover",
+  "dictionaryDataVersion": "2026.07.04.kaikki.slim",
+  "variant": "kaikki-slim",
+  "generatedAt": "2026-07-04T16:11:54Z",
+  "rowCount": 55642,
+  "sqlite": {
+    "path": "dictionary.sqlite",
+    "bytes": 39915520,
+    "sha256": "00b75eb812b31a67be3fc949080e0c597c6c634aa644b0b5bb5622013b85be9c"
+  },
+  "zstd": {
+    "path": "dictionary.sqlite.zst",
+    "bytes": 18004433,
+    "sha256": "56b3d5e80f889514efb3d4422a2ac37be3c6da486ac46d13f097fa07a27ba398",
+    "level": 3
+  },
+  "sources": [
+    "Kaikki/Wiktextract",
+    "current WordFan tag/translation overlay",
+    "WordFan K-12/AP STEM"
+  ],
+  "dictionaryId": "kaikki",
+  "dictionaryLabel": "Kaikki / Wiktextract"
+}

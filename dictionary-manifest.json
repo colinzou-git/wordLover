@@ -1,0 +1,23 @@
+{
+  "app": "wordlover",
+  "dictionaryDataVersion": "2026.06.10.slim",
+  "variant": "slim",
+  "generatedAt": "2026-06-10T18:28:30Z",
+  "rowCount": 100000,
+  "sqlite": {
+    "path": "dictionary.sqlite",
+    "bytes": 32473088,
+    "sha256": "9ebf312a999ffc5c0c251ac48406e9dd3e6380d0b8425b8739ca678e9ee51bdd"
+  },
+  "zstd": {
+    "path": "dictionary.sqlite.zst",
+    "bytes": 14840345,
+    "sha256": "46003dc85f9154bc5a02e8d8553bc5dc2e1607fd9e40a793a2303bf6cf067c56",
+    "level": 3
+  },
+  "sources": [
+    "ECDICT",
+    "WordNet 3.0",
+    "OPTED/Webster 1913"
+  ]
+}
