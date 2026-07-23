@@ -17,4 +17,4 @@ window.WORDLOVER_CONFIG = {
 
 // The fallback waits for WordFan's local and full dictionary lookups to finish,
 // then reuses the existing Gemini settings dialog and native Add-to-dictionary flow.
-void import("/online-dictionary-bridge.js?v=20260718-3");
+void import("/online-dictionary-bridge.js?v=20260723-1");

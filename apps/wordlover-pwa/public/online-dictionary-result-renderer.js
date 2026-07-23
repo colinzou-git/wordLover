@@ -1,4 +1,4 @@
-import { buildYoudaoLookupUrl } from "./youdao-provider.js?v=20260718-3";
+import { buildYoudaoLookupUrl } from "./youdao-provider.js?v=20260723-1";
 
 function escapeHtml(value) { return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 const list = (items, render) => items?.length ? `<ul>${items.map(render).join("")}</ul>` : "";

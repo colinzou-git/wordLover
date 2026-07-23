@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=20260718-3" />
+    <link rel="stylesheet" href="/styles.css?v=20260723-1" />
     <title>WordFan</title>
   </head>
   <body>
@@ -319,7 +319,7 @@
         <div class="stats-grid">
           <div><span>New</span><strong id="statNewSaved">0</strong></div>
           <div><span>Reviewed</span><strong id="statReviewed">0</strong></div>
-          <div title="Practiced = extra review or practice attempts beyond the unique reviewed words."><span>Practiced</span><strong id="statPracticed">0</strong></div>
+          <div title="Practiced = distinct words studied through practice mode. A failed practice that changes the review schedule also counts as reviewed."><span>Practiced</span><strong id="statPracticed">0</strong></div>
           <div><span>Mastered</span><strong id="statMastered">0</strong></div>
           <div title="Known = correctly recognized on first try from Study One More. Mastered = learned through repeated review."><span>Known</span><strong id="statKnown">0</strong></div>
         </div>
@@ -356,6 +356,7 @@
         <div class="history-legend" aria-hidden="true">
           <span><i class="dot dot-new"></i>New</span>
           <span><i class="dot dot-reviewed"></i>Reviewed</span>
+          <span><i class="dot dot-practiced"></i>Practiced</span>
           <span><i class="dot dot-known"></i>Known</span>
           <span><i class="dot dot-up"></i>Level up</span>
           <span><i class="dot dot-down"></i>Level down</span>
@@ -426,7 +427,7 @@
       }
     </script>
     <script src="/vendor/sql-wasm.js"></script>
-    <script src="/wordlover-config.js?v=20260718-3"></script>
-    <script type="module" src="/app.js?v=20260718-3"></script>
+    <script src="/wordlover-config.js?v=20260723-1"></script>
+    <script type="module" src="/app.js?v=20260723-1"></script>
   </body>
 </html>

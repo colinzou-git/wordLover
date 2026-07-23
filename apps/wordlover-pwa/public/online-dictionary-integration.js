@@ -1,7 +1,7 @@
-import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260718-3";
-import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260718-3";
-import { youdaoProvider } from "./youdao-provider.js?v=20260718-3";
-import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260718-3";
+import { createOnlineDictionaryLookupController } from "./online-dictionary-lookup-controller.js?v=20260723-1";
+import { updateYoudaoSection } from "./online-dictionary-result-renderer.js?v=20260723-1";
+import { youdaoProvider } from "./youdao-provider.js?v=20260723-1";
+import { normalizeSupplementTerm } from "./dictionary-supplements.js?v=20260723-1";
 
 const controllers = new WeakMap();
 const mountedElements = new Set();
